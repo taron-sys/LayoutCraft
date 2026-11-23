@@ -758,8 +758,10 @@ fn theme_xml() -> String {
 
 fn write_entries(entries: BTreeMap<String, Vec<u8>>) -> Result<Vec<u8>> {
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+    // the zip "made by" host defaults to the build OS; pin it so the same model gives the same bytes everywhere
     let options = zip::write::SimpleFileOptions::default()
-        .compression_method(zip::CompressionMethod::Deflated);
+        .compression_method(zip::CompressionMethod::Deflated)
+        .system(zip::System::Dos);
     let order = [
         "[Content_Types].xml",
         "_rels/.rels",

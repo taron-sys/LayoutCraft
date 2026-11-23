@@ -814,7 +814,8 @@ pub fn write_package_edit(package: &Package, extras: BTreeMap<String, Vec<u8>>, 
 fn entry_options(name: &str) -> zip::write::SimpleFileOptions {
     let lower = name.to_ascii_lowercase();
     let packed = [".png", ".jpg", ".jpeg", ".gif"].iter().any(|ext| lower.ends_with(ext));
-    zip::write::SimpleFileOptions::default().compression_method(if packed { zip::CompressionMethod::Stored } else { zip::CompressionMethod::Deflated })
+    // the zip "made by" host defaults to the build OS; pin it so the same model gives the same bytes everywhere
+    zip::write::SimpleFileOptions::default().compression_method(if packed { zip::CompressionMethod::Stored } else { zip::CompressionMethod::Deflated }).system(zip::System::Dos)
 }
 
 /// The package with the given parts replaced or added (`write_package` for other modules of the crate).

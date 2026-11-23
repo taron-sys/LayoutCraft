@@ -56,7 +56,11 @@ jobs:
           CARGO_TOOLCHAIN: '' # the script pins a toolchain for the maintainers' machine; on the runner the default one is used
         run: sh tools/build-web-wasm.sh public
       - name: Third-party notices are current
-        run: node tools/gen-third-party.mjs --check
+        env:
+          CARGO_TOOLCHAIN: '' # use the runner's default toolchain, as for the wasm build
+        run: |
+          cargo fetch --manifest-path rust/Cargo.toml --target x86_64-pc-windows-gnu
+          node tools/gen-third-party.mjs --check
 
   deny:
     name: licences and advisories (cargo-deny)

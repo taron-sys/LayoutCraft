@@ -10,7 +10,9 @@ import path from 'node:path';
 const ROOT = path.resolve(import.meta.dirname, '..');
 const RUST = path.join(ROOT, 'rust');
 const TARGET = process.env.LC_TARGET || 'x86_64-pc-windows-gnu';
-const meta = JSON.parse(execFileSync('cargo', ['+stable-x86_64-pc-windows-gnu', 'metadata', '--format-version', '1', '--offline', '--filter-platform', TARGET], { cwd: RUST, maxBuffer: 1 << 28 }).toString());
+// the maintainers' Windows machine pins a toolchain; elsewhere set CARGO_TOOLCHAIN= (empty) to use the default one
+const TC = process.env.CARGO_TOOLCHAIN ?? '+stable-x86_64-pc-windows-gnu';
+const meta = JSON.parse(execFileSync('cargo', [...(TC ? [TC] : []), 'metadata', '--format-version', '1', '--offline', '--filter-platform', TARGET], { cwd: RUST, maxBuffer: 1 << 28 }).toString());
 const byId = new Map(meta.packages.map((p) => [p.id, p]));
 const nodes = new Map(meta.resolve.nodes.map((n) => [n.id, n]));
 const roots = ['layoutcraft-app', 'layoutcraft-mcp'].map((n) => meta.packages.find((p) => p.name === n).id);

@@ -123,7 +123,8 @@ pub fn builtin_stencil() -> Result<Vec<u8>> {
     types.push_str("</Types>");
     let document = format!("<?xml version='1.0' encoding='utf-8' ?><VisioDocument {NS} xml:space='preserve'><DocumentSettings TopPage='0' DefaultTextStyle='3' DefaultLineStyle='3' DefaultFillStyle='3' DefaultGuideStyle='4'/>{}</VisioDocument>", crate::themegen::style_sheets_xml());
     let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
-    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+    // the zip "made by" host defaults to the build OS; pin it so the same model gives the same bytes everywhere
+    let options = zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated).system(zip::System::Dos);
     let mut put = |name: &str, text: &str| -> Result<()> {
         writer.start_file(name, options)?;
         writer.write_all(text.as_bytes())?;
