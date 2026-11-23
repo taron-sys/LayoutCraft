@@ -1,0 +1,612 @@
+{
+ "tabs": [
+  {
+   "name": "File",
+   "note": null,
+   "groups": [
+    {
+     "name": "New and open",
+     "items": [
+      {
+       "id": "newBtn"
+      },
+      {
+       "id": "file"
+      }
+     ]
+    },
+    {
+     "name": "Export",
+     "items": [
+      {
+       "id": "exportBtn"
+      },
+      {
+       "id": "copyImgBtn"
+      }
+     ]
+    },
+    {
+     "name": "Info",
+     "items": [
+      {
+       "id": "docPropsBtn"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Home",
+   "note": null,
+   "groups": [
+    {
+     "name": "Clipboard",
+     "items": [
+      {
+       "id": "paste"
+      },
+      {
+       "id": "cut"
+      },
+      {
+       "id": "copy"
+      },
+      {
+       "id": "painter"
+      }
+     ]
+    },
+    {
+     "name": "Font",
+     "items": [
+      {
+       "menu": "Font",
+       "ids": [
+        "p:fontFamily",
+        "p:fontSize",
+        "p:bold",
+        "p:strike"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Paragraph",
+     "items": [
+      {
+       "menu": "Paragraph",
+       "ids": [
+        "p:alignL",
+        "p:indLeft",
+        "p:lineSp"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Tools",
+     "items": [
+      {
+       "menu": "Shapes",
+       "ids": [
+        "drawTools"
+       ]
+      },
+      {
+       "id": "connectTool"
+      },
+      {
+       "id": "connPointTool"
+      },
+      {
+       "id": "editPointsBtn"
+      },
+      {
+       "id": "fitCurveBtn"
+      },
+      {
+       "id": "handTool"
+      }
+     ]
+    },
+    {
+     "name": "Shape Styles",
+     "items": [
+      {
+       "menu": "Styles",
+       "ids": [
+        "p:fillColor",
+        "p:lineColor",
+        "p:shadow"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Arrange",
+     "items": [
+      {
+       "id": "arrange"
+      },
+      {
+       "menu": "Size",
+       "ids": [
+        "sameW",
+        "sameH",
+        "sameWH"
+       ]
+      },
+      {
+       "menu": "Order",
+       "ids": [
+        "zFront",
+        "zFwd",
+        "zBwd",
+        "zBack"
+       ]
+      },
+      {
+       "id": "grp"
+      },
+      {
+       "id": "ungrp"
+      },
+      {
+       "menu": "Rotate",
+       "ids": [
+        "rotL",
+        "rotR",
+        "flipH",
+        "flipV",
+        "reverseEnds"
+       ]
+      },
+      {
+       "id": "lockShape"
+      },
+      {
+       "menu": "Operations",
+       "ids": [
+        "opUnion",
+        "opCombine",
+        "opFragment",
+        "opIntersect",
+        "opSubtract",
+        "opJoin",
+        "opTrim"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Editing",
+     "items": [
+      {
+       "id": "stylesBtn"
+      },
+      {
+       "id": "changeShapeBtn"
+      },
+      {
+       "id": "findBtn"
+      },
+      {
+       "id": "layersBtn"
+      },
+      {
+       "id": "dup"
+      },
+      {
+       "id": "del"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Insert",
+   "note": null,
+   "groups": [
+    {
+     "name": "Pages",
+     "items": [
+      {
+       "id": "pageTools"
+      }
+     ]
+    },
+    {
+     "name": "Illustrations",
+     "items": [
+      {
+       "id": "insertPicture"
+      },
+      {
+       "id": "pictureFile"
+      }
+     ]
+    },
+    {
+     "name": "Links",
+     "items": [
+      {
+       "id": "insertHyperlink"
+      }
+     ]
+    },
+    {
+     "name": "Text",
+     "items": [
+      {
+       "id": "insertTextBox"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Draw",
+   "note": "Ink and touch drawing (pens, stroke eraser, lasso, ink to text) is not built. The shape tools are on Home > Tools.",
+   "groups": []
+  },
+  {
+   "name": "Design",
+   "note": null,
+   "groups": [
+    {
+     "name": "Page Setup",
+     "items": [
+      {
+       "id": "pageSetup"
+      },
+      {
+       "id": "designOrientation"
+      },
+      {
+       "id": "designSize"
+      }
+     ]
+    },
+    {
+     "name": "Themes",
+     "items": [
+      {
+       "menu": "Themes",
+       "ids": [
+        "themeGallery"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Variants",
+     "items": [
+      {
+       "menu": "Variants",
+       "ids": [
+        "variantGallery"
+       ]
+      }
+     ]
+    },
+    {
+     "name": "Borders & Titles",
+     "items": [
+      {
+       "id": "borderStyle"
+      },
+      {
+       "id": "borderTitle"
+      },
+      {
+       "id": "borderApply"
+      },
+      {
+       "id": "borderRemove"
+      }
+     ]
+    },
+    {
+     "name": "Backgrounds",
+     "items": [
+      {
+       "id": "paperColor"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Data",
+   "note": null,
+   "groups": [
+    {
+     "name": "Show/Hide",
+     "items": [
+      {
+       "id": "dataBtn"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Process",
+   "note": "Sub-process links and the SharePoint workflow commands are not built.",
+   "groups": [
+    {
+     "name": "Verify",
+     "items": [
+      {
+       "id": "checkDiagram"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Review",
+   "note": "Spelling is the browser's own check inside the text editor; reports are LayoutCraft's own simple Inventory report.",
+   "groups": [
+    {
+     "name": "Comments",
+     "items": [
+      {
+       "id": "newComment"
+      },
+      {
+       "id": "showComments"
+      }
+     ]
+    },
+    {
+     "name": "Compare",
+     "items": [
+      {
+       "id": "compareBtn"
+      },
+      {
+       "id": "compareFile"
+      }
+     ]
+    },
+    {
+     "name": "Reports",
+     "items": [
+      {
+       "id": "reportBtn"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "View",
+   "note": null,
+   "groups": [
+    {
+     "name": "Views",
+     "items": [
+      {
+       "id": "fullScreen"
+      },
+      {
+       "id": "print"
+      },
+      {
+       "id": "fixedPage"
+      }
+     ]
+    },
+    {
+     "name": "Show",
+     "items": [
+      {
+       "id": "showRulers"
+      },
+      {
+       "id": "showGrid"
+      },
+      {
+       "id": "showGuides"
+      },
+      {
+       "id": "showBreaks"
+      },
+      {
+       "id": "paneShapes"
+      },
+      {
+       "id": "paneSizePos"
+      },
+      {
+       "id": "paneSheet"
+      },
+      {
+       "id": "panePanZoom"
+      }
+     ]
+    },
+    {
+     "name": "Zoom",
+     "items": [
+      {
+       "id": "zout"
+      },
+      {
+       "id": "zl"
+      },
+      {
+       "id": "zin"
+      },
+      {
+       "id": "fit"
+      },
+      {
+       "id": "zoomWidth"
+      },
+      {
+       "id": "zoom100"
+      },
+      {
+       "id": "wheelZoom"
+      }
+     ]
+    },
+    {
+     "name": "Visual Aids",
+     "items": [
+      {
+       "id": "snapGrid"
+      },
+      {
+       "id": "gridStep"
+      },
+      {
+       "id": "snapShapes"
+      },
+      {
+       "id": "snapGuides"
+      },
+      {
+       "id": "autoConnectToggle"
+      },
+      {
+       "id": "refit"
+      }
+     ]
+    },
+    {
+     "name": "Palette",
+     "items": [
+      {
+       "id": "paletteSel"
+      },
+      {
+       "id": "tipDelay"
+      }
+     ]
+    },
+    {
+     "name": "Window",
+     "items": [
+      {
+       "id": "newWindow"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Help",
+   "note": null,
+   "groups": [
+    {
+     "name": "Help",
+     "items": [
+      {
+       "id": "helpShortcuts"
+      },
+      {
+       "id": "helpAbout"
+      }
+     ]
+    },
+    {
+     "name": "AI assistant",
+     "items": [
+      {
+       "id": "mcpInfo"
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "icons": {
+  "save": "save",
+  "undo": "undo",
+  "redo": "redo",
+  "printBtn": "print",
+  "newBtn": "new",
+  "exportBtn": "export",
+  "copyImgBtn": "copy-image",
+  "docPropsBtn": "properties",
+  "paste": "paste",
+  "cut": "cut",
+  "copy": "copy",
+  "painter": "format-painter",
+  "alignL": "align-left",
+  "alignC": "align-center",
+  "alignR": "align-right",
+  "alignJ": "align-justify",
+  "bullet": "bullets",
+  "connectTool": "connector",
+  "connPointTool": "connection-point",
+  "editPointsBtn": "edit-points",
+  "fitCurveBtn": "fit-curve",
+  "handTool": "pan",
+  "stylesBtn": "styles",
+  "arrL": "align-objects-left",
+  "arrCx": "align-objects-center",
+  "arrRt": "align-objects-right",
+  "arrT": "align-objects-top",
+  "arrM": "align-objects-middle",
+  "arrB": "align-objects-bottom",
+  "arrDistH": "distribute-horizontal",
+  "arrDistV": "distribute-vertical",
+  "sameW": "same-width",
+  "sameH": "same-height",
+  "sameWH": "same-size",
+  "zFront": "bring-to-front",
+  "zFwd": "bring-forward",
+  "zBwd": "send-backward",
+  "zBack": "send-to-back",
+  "grp": "group",
+  "ungrp": "ungroup",
+  "rotL": "rotate-left",
+  "rotR": "rotate-right",
+  "flipH": "flip-horizontal",
+  "flipV": "flip-vertical",
+  "reverseEnds": "reverse-ends",
+  "lockShape": "lock",
+  "opUnion": "op-union",
+  "opCombine": "op-combine",
+  "opFragment": "op-fragment",
+  "opIntersect": "op-intersect",
+  "opSubtract": "op-subtract",
+  "opJoin": "op-join",
+  "opTrim": "op-trim",
+  "changeShapeBtn": "change-shape",
+  "findBtn": "find",
+  "layersBtn": "layers",
+  "dup": "duplicate",
+  "del": "delete",
+  "pageAdd": "page-add",
+  "pageDup": "page-copy",
+  "pageRename": "page-rename",
+  "pageDel": "page-delete",
+  "pageLeft": "page-previous",
+  "pageRight": "page-next",
+  "insertHyperlink": "hyperlink",
+  "insertPicture": "picture",
+  "checkDiagram": "check",
+  "compareBtn": "compare",
+  "insertTextBox": "text-box",
+  "pageSetup": "page-setup",
+  "dataBtn": "shape-data",
+  "newComment": "new-comment",
+  "reportBtn": "report",
+  "fullScreen": "full-screen",
+  "zout": "zoom-out",
+  "zin": "zoom-in",
+  "fit": "zoom-fit",
+  "zoomWidth": "zoom-width",
+  "zoom100": "zoom-100",
+  "newWindow": "new-window",
+  "helpShortcuts": "keyboard",
+  "helpAbout": "about",
+  "mcpInfo": "mcp"
+ }
+}

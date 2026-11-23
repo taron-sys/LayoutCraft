@@ -1,0 +1,15 @@
+[package]
+name = "layoutcraft-engine"
+version = "0.1.0"
+edition = "2021"
+description = "The LayoutCraft editing engine: the open drawing, undo / redo, clipboard and stencils behind a safe Rust API (shared by the wasm build and the native app)"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+layoutcraft-model = { path = "../layoutcraft-model" }
+layoutcraft-vsdx = { path = "../layoutcraft-vsdx" }
+layoutcraft-render = { path = "../layoutcraft-render" }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+roxmltree = "0.21"
+flate2 = { version = "1", default-features = false, features = ["zlib-rs"] }

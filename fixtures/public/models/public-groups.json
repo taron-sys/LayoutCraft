@@ -1,0 +1,339 @@
+{
+  "pageIndex": 0,
+  "pages": [
+    {
+      "connectors": [],
+      "groups": [
+        {
+          "bounds": {
+            "h": 115.19999999999999,
+            "w": 768.0,
+            "x": 96.0,
+            "y": 220.79999999999998
+          },
+          "depth": 1,
+          "frame": {
+            "h": 115.19999999999999,
+            "rot": -0.0,
+            "w": 768.0,
+            "x": 96.0,
+            "y": 220.8
+          },
+          "kind": "group",
+          "members": [
+            "1",
+            "2",
+            "3"
+          ],
+          "name": "Group.4",
+          "parentId": null,
+          "rootId": "4",
+          "visioId": "4"
+        }
+      ],
+      "id": "0",
+      "name": "Groups",
+      "shapes": [
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "#ffffff",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "group": {
+            "depth": 1,
+            "id": "4",
+            "kind": "group",
+            "parentId": "4",
+            "rootId": "4",
+            "rotated": false
+          },
+          "h": 115.19999999999999,
+          "italic": false,
+          "label": "One",
+          "parts": [
+            {
+              "d": "M0 115.2L192 115.2L192 0L0 0L0 115.2Z",
+              "fill": "#ffffff",
+              "fillOpacity": 1.0,
+              "stroke": "#000000",
+              "strokeWidth": 1.0
+            }
+          ],
+          "rich": {
+            "paragraphs": [
+              {
+                "align": "center",
+                "bullet": false,
+                "bulletStr": "•",
+                "indent": 0.0,
+                "pp": "0",
+                "runs": [
+                  {
+                    "cp": "0",
+                    "style": {
+                      "bold": false,
+                      "fontFamily": "Cambria",
+                      "fontSize": 13.33,
+                      "italic": false,
+                      "textColor": "#000000",
+                      "underline": false
+                    },
+                    "text": "One"
+                  }
+                ],
+                "style": {
+                  "align": "center",
+                  "bullet": false,
+                  "bulletStr": "•",
+                  "indent": 0.0
+                }
+              }
+            ]
+          },
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 1.0,
+          "textBox": {
+            "h": 104.53333333333333,
+            "w": 181.33333333333331,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "1",
+          "w": 192.0,
+          "x": 96.0,
+          "y": 220.8,
+          "z": 0.0
+        },
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "#ffffff",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "group": {
+            "depth": 1,
+            "id": "4",
+            "kind": "group",
+            "parentId": "4",
+            "rootId": "4",
+            "rotated": false
+          },
+          "h": 115.19999999999999,
+          "italic": false,
+          "label": "Two",
+          "parts": [
+            {
+              "d": "M0 57.6A96 57.6 0 1 0 192 57.6A96 57.6 0 1 0 0 57.6Z",
+              "fill": "#ffffff",
+              "fillOpacity": 1.0,
+              "stroke": "#000000",
+              "strokeWidth": 1.0
+            }
+          ],
+          "rich": {
+            "paragraphs": [
+              {
+                "align": "center",
+                "bullet": false,
+                "bulletStr": "•",
+                "indent": 0.0,
+                "pp": "0",
+                "runs": [
+                  {
+                    "cp": "0",
+                    "style": {
+                      "bold": false,
+                      "fontFamily": "Cambria",
+                      "fontSize": 13.33,
+                      "italic": false,
+                      "textColor": "#000000",
+                      "underline": false
+                    },
+                    "text": "Two"
+                  }
+                ],
+                "style": {
+                  "align": "center",
+                  "bullet": false,
+                  "bulletStr": "•",
+                  "indent": 0.0
+                }
+              }
+            ]
+          },
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 1.0,
+          "textBox": {
+            "h": 104.53333333333333,
+            "w": 181.33333333333331,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "2",
+          "w": 192.0,
+          "x": 384.0,
+          "y": 220.8,
+          "z": 1.0
+        },
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "#ffffff",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "group": {
+            "depth": 1,
+            "id": "4",
+            "kind": "group",
+            "parentId": "4",
+            "rootId": "4",
+            "rotated": false
+          },
+          "h": 115.19999999999999,
+          "italic": false,
+          "label": "Three",
+          "parts": [
+            {
+              "d": "M0 115.2L192 115.2L96 0L0 115.2Z",
+              "fill": "#ffffff",
+              "fillOpacity": 1.0,
+              "stroke": "#000000",
+              "strokeWidth": 1.0
+            }
+          ],
+          "rich": {
+            "paragraphs": [
+              {
+                "align": "center",
+                "bullet": false,
+                "bulletStr": "•",
+                "indent": 0.0,
+                "pp": "0",
+                "runs": [
+                  {
+                    "cp": "0",
+                    "style": {
+                      "bold": false,
+                      "fontFamily": "Cambria",
+                      "fontSize": 13.33,
+                      "italic": false,
+                      "textColor": "#000000",
+                      "underline": false
+                    },
+                    "text": "Three"
+                  }
+                ],
+                "style": {
+                  "align": "center",
+                  "bullet": false,
+                  "bulletStr": "•",
+                  "indent": 0.0
+                }
+              }
+            ]
+          },
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 1.0,
+          "textBox": {
+            "h": 104.53333333333333,
+            "w": 181.33333333333331,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "3",
+          "w": 192.0,
+          "x": 672.0,
+          "y": 220.8,
+          "z": 2.0
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 1,
+  "theme": {
+    "activeVariation": 0,
+    "name": "Office",
+    "schemeEnum": null,
+    "slots": {
+      "accent1": "#4472c4",
+      "accent2": "#ed7d31",
+      "accent3": "#a5a5a5",
+      "accent4": "#ffc000",
+      "accent5": "#5b9bd5",
+      "accent6": "#70ad47",
+      "bkgnd": "#ffffff",
+      "dk1": "#000000",
+      "dk2": "#44546a",
+      "folhlink": "#954f72",
+      "hlink": "#0563c1",
+      "lt1": "#ffffff",
+      "lt2": "#e7e6e6",
+      "variant1": "#4472c4",
+      "variant2": "#ed7d31",
+      "variant3": "#a5a5a5",
+      "variant4": "#ffc000",
+      "variant5": "#5b9bd5",
+      "variant6": "#70ad47"
+    },
+    "variations": [
+      {
+        "variant1": "#4472c4",
+        "variant2": "#ed7d31",
+        "variant3": "#a5a5a5",
+        "variant4": "#ffc000",
+        "variant5": "#5b9bd5",
+        "variant6": "#70ad47"
+      },
+      {
+        "variant1": "#ed7d31",
+        "variant2": "#a5a5a5",
+        "variant3": "#ffc000",
+        "variant4": "#5b9bd5",
+        "variant5": "#70ad47",
+        "variant6": "#4472c4"
+      },
+      {
+        "variant1": "#a5a5a5",
+        "variant2": "#ffc000",
+        "variant3": "#5b9bd5",
+        "variant4": "#70ad47",
+        "variant5": "#4472c4",
+        "variant6": "#ed7d31"
+      },
+      {
+        "variant1": "#ffc000",
+        "variant2": "#5b9bd5",
+        "variant3": "#70ad47",
+        "variant4": "#4472c4",
+        "variant5": "#ed7d31",
+        "variant6": "#a5a5a5"
+      }
+    ]
+  },
+  "version": 1
+}

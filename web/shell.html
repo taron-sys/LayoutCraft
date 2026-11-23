@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LayoutCraft – Rust/WASM shell</title><script src="product.js"></script><script src="palette.js"></script>
+<style>
+ /* palettes (step 275): every shell colour comes from these variables; the drawing itself (the page, shapes, handles on the page) keeps the file's own colours in every palette */
+ :root,.theme-light{color-scheme:light;--hdr-bg:#2b3a55;--hdr-fg:#fff;--hdr-hover:#3d5075;--panel-bg:#f3f4f6;--fg:#1f2933;--muted:#52606d;--muted-2:#6b7280;--line:#c5cad3;--line-strong:#9aa5b1;--line-soft:#d9dde3;--bar-bg:#e4e7ec;--stage-bg:#d8dce3;--surface:#fff;--accent:#1971c2;--hover-bg:#eef4fb;--hover-strong:#d0e1fb;--sel-soft:#e7f1ff;--note-bg:#fffbe6;--mixed-bg:#a5d8ff;--danger:#c92a2a}
+ .theme-dark{color-scheme:dark;--hdr-bg:#10141b;--hdr-fg:#e6e9ee;--hdr-hover:#242c3a;--panel-bg:#1e232b;--fg:#e6e9ee;--muted:#a7b1bd;--muted-2:#8a95a3;--line:#394250;--line-strong:#556070;--line-soft:#2f3743;--bar-bg:#181c23;--stage-bg:#12151a;--surface:#232932;--accent:#4dabf7;--hover-bg:#2a3340;--hover-strong:#31507a;--sel-soft:#263a55;--note-bg:#3a3520;--mixed-bg:#1c4a6e;--danger:#ff8787}
+ .theme-black{color-scheme:dark;--hdr-bg:#000;--hdr-fg:#fff;--hdr-hover:#262626;--panel-bg:#0a0a0a;--fg:#fff;--muted:#cfcfcf;--muted-2:#b0b0b0;--line:#6b6b6b;--line-strong:#8c8c8c;--line-soft:#4a4a4a;--bar-bg:#050505;--stage-bg:#000;--surface:#000;--accent:#5cc0ff;--hover-bg:#1a1a1a;--hover-strong:#1f4d70;--sel-soft:#12304a;--note-bg:#2e2a10;--mixed-bg:#12507a;--danger:#ff9a9a}
+ .theme-ocean{color-scheme:light;--hdr-bg:#0b4f6c;--hdr-fg:#fff;--hdr-hover:#146a8f;--panel-bg:#e6f4f8;--fg:#12303b;--muted:#3d6676;--muted-2:#587886;--line:#b2d4de;--line-strong:#7fb0c0;--line-soft:#cfe6ed;--bar-bg:#d4ebf1;--stage-bg:#c3dde5;--surface:#fbfeff;--accent:#0b7ba8;--hover-bg:#dff1f6;--hover-strong:#bfe3ee;--sel-soft:#d3eef6;--note-bg:#fff8e1;--mixed-bg:#9ad7ec;--danger:#c92a2a}
+ .theme-sunset{color-scheme:dark;--hdr-bg:#3a1c2e;--hdr-fg:#fbeee6;--hdr-hover:#55294a;--panel-bg:#2a1822;--fg:#fbeee6;--muted:#d6b3bf;--muted-2:#b58e9c;--line:#5a3447;--line-strong:#7a4b60;--line-soft:#46283a;--bar-bg:#21121a;--stage-bg:#170d13;--surface:#301c28;--accent:#ff8f5a;--hover-bg:#3d2433;--hover-strong:#6b3a3f;--sel-soft:#4a2a3a;--note-bg:#4a3320;--mixed-bg:#8a4a3a;--danger:#ff8787}
+ body{background:var(--surface);color:var(--fg)} dialog{background:var(--surface)} .cmtag,#ribbonTabs [data-tip]{color:#1f2933}
+
+ #printSheet{display:none}
+ @media print{body>*{display:none!important}body>#printSheet{display:block!important}#printSheet svg{width:100%;height:auto;display:block;overflow:hidden!important}}
+ body{margin:0;font:14px system-ui,sans-serif;display:flex;flex-direction:column;height:100vh}
+ header{padding:8px 12px;background:var(--hdr-bg);color:var(--hdr-fg);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+ header.ribbon{display:block;padding:0}
+ #ctxmenu{position:fixed;z-index:60;min-width:210px;padding:4px 0;background:var(--surface);color:var(--fg);border:1px solid var(--line-strong);border-radius:4px;box-shadow:0 4px 14px #0003;font:13px system-ui,sans-serif}
+ #ctxmenu button{display:block;width:100%;text-align:left;border:0;background:transparent;padding:5px 24px 5px 26px;font:inherit;color:inherit;cursor:pointer;position:relative}
+ #ctxmenu button:hover:not(:disabled),#ctxmenu button:focus-visible{background:var(--hover-strong);outline:none}
+ #ctxmenu button:disabled{color:var(--line-strong);cursor:default}
+ #ctxmenu [role=menuitemcheckbox][aria-checked=true]::before{content:"✓";position:absolute;left:8px}
+ #ctxmenu [role=separator]{height:1px;margin:4px 0;background:var(--line-soft)}
+ #backstage{position:fixed;inset:0;z-index:45;display:flex;background:var(--surface);color:var(--fg)}
+ #backstage[hidden]{display:none}
+ #bsNav{width:220px;background:var(--hdr-bg);color:var(--hdr-fg);padding:12px 0;display:flex;flex-direction:column;gap:6px}
+ #bsNav button{display:block;width:100%;text-align:left;border:0;background:transparent;color:var(--hdr-fg);padding:9px 20px;font:inherit;cursor:pointer;border-radius:0}
+ #bsNav button:hover,#bsNav [aria-selected=true]{background:var(--hdr-hover)}
+ #bsNav button:focus-visible{outline:2px solid #ffd43b;outline-offset:-2px}
+ #bsTabs{display:flex;flex-direction:column;margin-top:10px}
+ #bsBody{flex:1;padding:24px 40px;overflow:auto}
+ #bsBody h2{margin:0 0 16px;font-weight:600}
+ #bsBody label{display:block;margin:8px 0}
+ .bsnote{color:var(--muted);font-size:12px}
+ .bsinfo{border-collapse:collapse}.bsinfo th{text-align:left;padding:4px 24px 4px 0;color:var(--muted);font-weight:600}.bsinfo td{padding:4px 0}
+ .bskeys{border-collapse:collapse;margin-bottom:8px}.bskeys th{text-align:left;padding:3px 18px 3px 0;white-space:nowrap}.bskeys td{padding:3px 0}
+ dialog h2{margin:0 0 8px;font-size:18px}dialog h3{margin:12px 0 4px;font-size:14px;color:var(--muted)}
+ #ribbonTabs [role=tab]{position:relative}
+ #ribbonTabs [data-tip]::after{content:attr(data-tip);position:absolute;left:50%;bottom:-2px;transform:translateX(-50%);background:#ffd43b;color:#1f2933;border-radius:3px;padding:0 5px;font-size:11px;font-weight:700;line-height:16px;z-index:5}
+ header.ribbon.collapsed #ribbonPanels{display:none}
+ .ricon{display:inline-block;width:16px;height:16px;margin-right:4px;vertical-align:-3px;background:currentColor;-webkit-mask:var(--icon) center/contain no-repeat;mask:var(--icon) center/contain no-repeat}
+ .ricononly .ricon{width:18px;height:18px;margin-right:0;vertical-align:-4px}
+ .checklist{max-height:50vh;overflow:auto;margin:8px 0;padding:0;list-style:none;min-width:360px} .checklist button{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--line-soft,#ddd);background:transparent;padding:6px 8px;font:inherit;color:inherit;cursor:pointer} .checklist button:hover,.checklist button:focus-visible{background:var(--hover-strong,#e6e9ee)} .checklist .kind{display:inline-block;min-width:110px;font-weight:600} .checklist li{display:flex;align-items:stretch} .checklist li > button:first-child{flex:1} .checklist .fix{flex:none;width:auto;border-left:1px solid var(--line-soft,#ddd);white-space:nowrap;font-weight:600}
+ #lcTip{position:fixed;z-index:9999;max-width:320px;padding:4px 8px;border-radius:4px;background:var(--hdr-bg);color:var(--hdr-fg);font:12px/1.3 system-ui,sans-serif;pointer-events:none;box-shadow:0 2px 8px rgba(0,0,0,.35)} #lcTip[hidden]{display:none}
+ #ribbonPanels .ricononly{padding:4px 6px;min-width:0}
+ /* compact mode: below 1750 px the buttons that have an icon and a text show only the icon (the text stays as the tooltip and for screen readers), so the Home tab fits on one row */
+ @media (max-width:1750px){#ribbonPanels .rtext{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap} #ribbonPanels button:has(> .rtext){padding:4px 6px;min-width:0} #ribbonPanels button:has(> .rtext) .ricon{margin-right:0;width:18px;height:18px;vertical-align:-4px} #ribbonPanels .rgroup{padding:0 6px} #ribbonPanels .rgitems{gap:4px 6px} .ribbonpanel{padding-left:6px;padding-right:6px}}
+ .rhide{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+ #ribbonRow{display:flex;align-items:flex-end} #ribbonRow #ribbonTabs{flex:1;min-width:0}
+ #ribbonToggle{border:0;background:transparent;color:var(--hdr-fg);padding:4px 8px;margin:0 10px 2px 0;cursor:pointer;border-radius:4px;line-height:0} #ribbonToggle:hover{background:#ffffff22} #ribbonToggle:focus-visible{outline:2px solid #ffd43b;outline-offset:-2px} #ribbonToggle .ricon{margin:0;width:18px;height:18px;vertical-align:0}
+ header.ribbon.collapsed.peek{position:relative}
+ header.ribbon.collapsed.peek #ribbonPanels{display:block;position:absolute;left:0;right:0;top:100%;z-index:30;box-shadow:0 6px 14px #0003}
+ @media (pointer:coarse){#ribbonTabs [role=tab],header button,header select,#pageBar button{min-height:44px}}
+ .lkrow{display:flex;gap:8px;align-items:flex-start;margin:6px 0}.lkrow select{flex:1;min-width:260px}.lkbtns{display:flex;flex-direction:column;gap:4px}
+ #lkMsg{min-height:1.2em;color:var(--danger)}
+ #ov .linkbadge{position:absolute;pointer-events:auto;border:1px solid var(--accent);background:var(--surface);color:var(--accent);border-radius:3px;font-size:11px;line-height:14px;padding:0 4px;cursor:pointer}
+ #cmList{list-style:none;margin:0;padding:0}#cmList li{border:1px solid var(--line-soft);border-radius:4px;margin:6px 0;padding:6px;background:var(--note-bg)}
+ #cmList li.on{border-color:var(--accent);background:var(--sel-soft)}#cmList .cmgo{display:block;width:100%;text-align:left;border:0;background:transparent;padding:0;font:inherit;cursor:pointer;white-space:pre-wrap}
+ #cmList .cmmeta{font-size:11px;color:var(--muted)}#cmList .cmbtns{margin-top:4px;display:flex;gap:6px}
+ #ov .cmtag{position:absolute;pointer-events:auto;border:1px solid #e67700;background:#ffd43b;color:#1f2933;border-radius:3px;font-size:11px;line-height:14px;padding:0 4px;cursor:pointer}
+ #shBody details{margin:4px 0}#shBody summary{cursor:pointer;font-weight:600;font-size:12px}#shBody table{border-collapse:collapse;font-size:11px;width:100%}
+ #shBody th,#shBody td{border:1px solid var(--line-soft);padding:1px 4px;text-align:left;vertical-align:top;word-break:break-all}#shBody th{background:var(--panel-bg);font-weight:600}
+ #shBody .shrow{margin:4px 0 0;font-size:11px;color:var(--muted)}
+ #qat{display:flex;gap:6px;align-items:center;padding:4px 12px}
+ #qat .appname{margin-right:12px;letter-spacing:.5px}
+ #ribbonTabs{display:flex;gap:2px;padding:0 12px}
+ #ribbonTabs [role=tab]{border:0;border-radius:4px 4px 0 0;background:transparent;color:var(--hdr-fg);padding:5px 14px;font:inherit;cursor:pointer}
+ #ribbonTabs [role=tab][aria-selected=true]{background:var(--panel-bg);color:var(--fg)}
+ #ribbonTabs [role=tab]:focus-visible{outline:2px solid #ffd43b;outline-offset:-2px}
+ #ribbonPanels{background:var(--panel-bg);color:var(--fg);border-bottom:1px solid var(--line)}
+ .ribbonpanel{display:flex;flex-wrap:wrap;gap:4px 0;padding:6px 12px 2px;min-height:92px;box-sizing:border-box;align-items:stretch}
+ .ribbonpanel[hidden]{display:none}
+ .rgroup{display:flex;flex-direction:column;justify-content:space-between;padding:0 10px;border-right:1px solid var(--line)}
+ .rgroup:last-child{border-right:0}
+ .rgitems{display:grid;grid-auto-flow:column;grid-template-rows:repeat(2,auto);align-items:center;justify-items:start;gap:4px 10px;padding-bottom:2px}
+ .rgitems > p{margin:0;display:flex;gap:4px;align-items:center;white-space:nowrap;font-size:12px}
+ .rgitems > p.rowoff{opacity:.45}
+ .rgitems input[type=number]{width:3.6em}
+ .rgitems > span{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center}
+ .rglabel{font-size:11px;color:var(--muted);text-align:center;padding-top:2px}
+ .rnote{margin:8px 0;color:var(--muted)}
+ #pageBar{display:flex;gap:4px;align-items:center;padding:3px 12px;background:var(--bar-bg);border-top:1px solid var(--line);min-height:28px}
+ #pageBar #tabs{display:inline-flex;gap:4px;flex-wrap:wrap}
+ #statusbar{display:flex;gap:18px;align-items:center;padding:3px 12px;background:var(--hdr-bg);color:var(--hdr-fg);font-size:12px}
+ #statusbar .sbfill{flex:1}
+ #sbSel{max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ button{padding:3px 10px}
+ main{flex:1;display:flex;min-height:0}
+ #stage{flex:1;overflow:auto;background:var(--stage-bg);padding:12px;position:relative}
+ #format input[type=number]{width:60px} #format input[type=color]{width:34px;height:24px;padding:0;vertical-align:middle}
+ #textedit{position:absolute;box-sizing:border-box;resize:none;border:2px solid var(--accent);background:#fff;color:#000;font:14px system-ui,sans-serif;text-align:center;padding:6px;z-index:5}
+ /* a shape that paints nothing (a group whose body did not render) is still clickable by its box */
+ #stage svg g[data-vid]:has(> rect[fill=none][stroke=none]:only-child) > rect{pointer-events:all}
+ #ov,#guides,#acLayer{position:absolute;left:0;top:0;pointer-events:none}
+ #acLayer .acarrow{position:absolute;width:0;height:0;pointer-events:auto;cursor:pointer;margin:0;border-style:solid;border-color:transparent;transform:translate(-50%,-50%);filter:drop-shadow(0 0 1px #fff)}
+ #acLayer .acarrow.right{border-width:8px 0 8px 12px;border-left-color:var(--accent)} #acLayer .acarrow.left{border-width:8px 12px 8px 0;border-right-color:var(--accent)} #acLayer .acarrow.up{border-width:0 8px 12px 8px;border-bottom-color:var(--accent)} #acLayer .acarrow.down{border-width:12px 8px 0 8px;border-top-color:var(--accent)} #acLayer .acarrow:hover{filter:drop-shadow(0 0 3px var(--accent))}
+ #masters li.armed{outline:2px solid var(--accent);outline-offset:-2px;background:var(--sel-soft)}
+ #sizePos .sp input[type=number]{width:5.5em} #sizePos .sp label{display:inline-block;margin:2px 4px 2px 0}
+ #masters .fav{margin-left:auto;border:0;background:none;cursor:pointer;font-size:14px;line-height:1;padding:0 2px;color:var(--muted-2)} #masters .fav::after{content:"\2606"} #masters .fav.on::after{content:"\2605"} #masters .fav.on{color:#f08c00} #masters span[data-src]::after{content:attr(data-src);display:block;font-size:10px;color:var(--muted-2)}
+ #cprev{position:absolute;left:0;top:0;width:1px;height:1px;overflow:visible;pointer-events:none}
+ #cprev .cpreview{fill:none;stroke:var(--accent);stroke-width:1.5;stroke-dasharray:5 3}
+ #guides .guide{position:absolute;background:#e8590c}
+ #guides .pbreak{position:absolute;border:0 dashed #6b7280;pointer-events:none} #guides .pbreak.v{border-left-width:2px} #guides .pbreak.h{border-top-width:2px} #guides .vguide{position:absolute;background:#2f9e44;opacity:.85} #guides .vguide.on{background:#e8590c;opacity:1}
+ #ov .box{position:absolute;border:1px solid var(--accent);box-sizing:border-box}
+ #reportDialog .reportScroll{max-height:40vh;overflow:auto;margin:6px 0}#reportTable{border-collapse:collapse}#reportTable th,#reportTable td{border:1px solid var(--line-strong);padding:2px 8px;text-align:left}#reportColumns{margin:6px 0}#reportColumns label{margin-right:10px;white-space:nowrap}#reportNote{max-width:44em;margin:4px 0}
+ #ov .cseg{position:absolute;height:0;border-top:3px solid color-mix(in srgb,var(--accent) 55%,transparent);transform-origin:0 50%;margin-top:-1px}
+ #ov .ch{position:absolute;width:10px;height:10px;margin:-5px 0 0 -5px;background:#2f9e44;border:1px solid #fff;pointer-events:auto;cursor:crosshair;box-sizing:border-box}
+ #ov .ch.glued{background:#e03131}
+ #ov .rot{position:absolute;width:11px;height:11px;margin:-6px 0 0 -6px;background:#fff;border:1px solid var(--accent);border-radius:50%;pointer-events:auto;cursor:grab;box-sizing:border-box}
+ #ov .stem{position:absolute;width:0;border-left:1px solid var(--accent);transform-origin:0 0}
+ #ov .h{position:absolute;width:9px;height:9px;margin:-5px 0 0 -5px;background:#fff;border:1px solid var(--accent);pointer-events:auto;box-sizing:border-box}
+ .sel{outline:none!important}
+ #previewPane{flex:1;min-width:220px;display:flex;flex-direction:column;border-left:3px solid var(--accent);background:var(--stage-bg)} #previewPane[hidden]{display:none}
+ #previewPane header{display:flex;gap:6px;align-items:center;padding:4px 8px;background:var(--hover-bg);border-bottom:1px solid var(--line-strong);flex:none}
+ #pvStage{flex:1;overflow:auto;padding:12px;position:relative} #pvStage svg{background:#fff;box-shadow:0 1px 6px #0006;max-width:none;pointer-events:none}
+ #stage{--panx:0px;--pany:0px}
+ /* free panning: the page has a margin of about the window size on every side, so it can be dragged anywhere at every zoom */
+ #stage > svg:first-child{margin:var(--pany) var(--panx)}
+ #stage svg{background:#fff;box-shadow:0 1px 6px #0006;max-width:none}
+ #stage [data-vid]{cursor:pointer}
+ .variantgal{grid-template-columns:repeat(4,minmax(4.5em,1fr))!important;min-width:20em}.themeBtn:disabled{opacity:.45}
+ .themeAll{grid-column:1/-1;font-size:.9em;padding:2px 4px}
+ .themegal{display:grid;grid-template-columns:repeat(2,minmax(9em,1fr));gap:4px;min-width:20em}.themeBtn{display:flex;flex-direction:column;align-items:flex-start;gap:3px;padding:4px 6px}.themeBtn .sw{display:flex}.themeBtn .sw i{display:inline-block;width:16px;height:12px}.themeBtn.on{outline:2px solid var(--accent)}
+ .rdd{position:relative;display:inline-block}.rddmenu{position:absolute;z-index:60;top:100%;left:0;display:flex;flex-direction:column;gap:2px;background:var(--surface);border:1px solid var(--line-strong);border-radius:4px;padding:4px;box-shadow:0 4px 12px rgba(0,0,0,.2);min-width:9em}.rddmenu[hidden]{display:none}.rddmenu button{text-align:left}
+ #connectTool.active,#connPointTool.active,#changeShapeBtn.active,#editPointsBtn.active{background:var(--accent);color:#fff}
+ #bold.active,#italic.active,#underline.active,#strike.active,#bullet.active,#alignL.active,#alignC.active,#alignR.active,#alignJ.active{background:var(--accent);color:#fff}
+ #bold.mixed,#italic.mixed,#underline.mixed,#strike.mixed,#bullet.mixed{background:var(--mixed-bg)}
+ #guides .dot{position:absolute;width:9px;height:9px;margin:-5px 0 0 -5px;border-radius:50%;background:#2f9e44;border:1px solid #fff;box-sizing:border-box}
+ #guides .dot.on{background:#e8590c;width:13px;height:13px;margin:-7px 0 0 -7px}
+ #guides .dot.arc{border-radius:2px;background:var(--accent);transform:rotate(45deg)} #guides .dot.arc.on{background:#e8590c} #guides .dot.ctl{border-radius:0;background:#fff;border:1px solid var(--accent)} #guides .dot.ctl.on{background:#e8590c;border-color:#e8590c}
+ #guides .rubber{position:absolute;height:0;border-top:2px solid var(--accent);transform-origin:0 0}
+ #guides .target{position:absolute;border:2px solid #2f9e44;box-sizing:border-box}
+ #marquee{position:absolute;border:1px dashed var(--accent);background:#1971c222;pointer-events:none}
+ aside{width:250px;padding:12px;border-left:1px solid var(--line-strong);overflow:auto}
+ #stencil{width:190px;border-left:0;border-right:1px solid var(--line-strong);padding:8px}
+ #stencil input{width:100%;box-sizing:border-box;margin:6px 0}
+ #stage{touch-action:none}
+ #drawTools button.active{background:var(--accent);color:#fff} #guides .drawprev{position:absolute;border:2px dashed var(--accent);box-sizing:border-box;background:color-mix(in srgb,var(--accent) 8%,transparent)} #guides .drawline{position:absolute;height:0;border-top:2px dashed var(--accent);transform-origin:0 0}
+ #masters{list-style:none;margin:0;padding:0}
+ #masters li{display:flex;align-items:center;gap:6px;padding:4px 6px;border:1px solid var(--line-soft);margin-bottom:3px;border-radius:3px;cursor:grab;user-select:none;touch-action:none}
+ #masters .thumb{flex:none;width:48px;height:36px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#fff;border:1px solid var(--line-soft)}
+ #masters .thumb img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;pointer-events:none}
+ #masters li:hover{background:var(--hover-bg);border-color:var(--accent)}
+ #stencilHint{color:var(--muted);font-size:12px}
+ #dragghost{position:fixed;pointer-events:none;z-index:20;padding:4px 8px;background:var(--surface);border:1px solid var(--accent);border-radius:3px;opacity:.9;font-size:12px}
+ aside input[type=number]{width:70px} .sel{outline:2px solid #e8590c}
+ #msg{color:#fbb}
+ dialog{border:1px solid var(--line-strong);border-radius:6px;padding:14px 18px;color:var(--fg)} dialog label{display:block;margin:6px 0} dialog menu{display:flex;gap:8px;justify-content:flex-end;padding:0;margin:12px 0 0}
+ #gradStops .gradstop{margin:2px 0;font-size:12px} #gradStops input[type=color]{width:2.2em;height:1.6em;padding:0}
+</style></head><body>
+<header>
+ <button id="newBtn" title="Create a new, empty drawing (Ctrl+Alt+N)">New</button> <input type="file" id="file" accept=".vsdx,.vssx,.vstx,.excalidraw,.drawio" aria-label="Open a Visio, Excalidraw or draw.io file">
+ <span id="tabs"></span><span id="pageTools"><button id="pageAdd" title="Add a page after this one">+ Page</button><button id="pageDup" title="Duplicate this page">Copy page</button><button id="pageRename" title="Rename this page">Rename</button><button id="pageSetup" title="Page size and orientation of this page">Page setup...</button><button id="docPropsBtn" title="Title, author, keywords and other properties of the drawing">Properties...</button><button id="layersBtn" title="Layers of this page: visibility, printing, lock, add, rename, assign the selection">Layers...</button><button id="pageDel" title="Delete this page">Delete page</button><button id="pageLeft" title="Move this page left" aria-label="Move page left">&#9664;</button><button id="pageRight" title="Move this page right" aria-label="Move page right">&#9654;</button></span>
+ <label><input type="checkbox" id="print"> Print preview</label>
+ <label title="Show the whole page rectangle instead of fitting the view to the shapes"><input type="checkbox" id="fixedPage"> Fixed page</label>
+ <label><input type="checkbox" id="refit"> Grow groups</label>
+ <label title="Snap dragged shapes to grid lines"><input type="checkbox" id="snapGrid"> Snap to grid</label>
+ <select id="gridStep" title="Grid spacing"><option value="0.125">1/8 in</option><option value="0.25" selected>1/4 in</option><option value="0.5">1/2 in</option><option value="1">1 in</option></select>
+ <label title="Show grid lines on the page"><input type="checkbox" id="showGrid"> Grid</label>
+ <label title="Show rulers along the page edges"><input type="checkbox" id="showRulers"> Rulers</label>
+ <label title="Colour palette of the application (the drawing keeps its own colours); System follows the operating system">Palette <select id="paletteSel" aria-label="Colour palette of the application"></select></label>
+ <label title="How long the pointer rests on a button before its name appears">Tooltips <select id="tipDelay" aria-label="Tooltip delay"><option value="400">Quick</option><option value="900">Normal</option><option value="1800">Slow</option><option value="3000">Very slow</option></select></label>
+ <label title="Page background colour (only the view; the drawing is not changed)">Paper <input type="color" id="paperColor" value="#ffffff"></label>
+ <label title="Snap dragged shapes to other shapes' edges and centres"><input type="checkbox" id="snapShapes"> Snap to shapes</label>
+ <label title="Snap dragged shapes to the ruler guides"><input type="checkbox" id="snapGuides" checked> Snap to guides</label><label title="AutoConnect: point at a shape to see four blue arrows; a click on an arrow places the shape picked in the Shapes panel (or a copy of this one) next to it and connects them"><input type="checkbox" id="autoConnectToggle" checked> AutoConnect</label>
+ <label title="Plain mouse wheel zooms around the pointer (Ctrl+wheel always does)"><input type="checkbox" id="wheelZoom"> Wheel zooms</label>
+ <span id="drawTools" role="group" aria-label="Draw a shape"><button data-kind="0" title="Draw a rectangle (drag on the page)">Rect</button><button data-kind="1" title="Draw a rounded rectangle">Rounded</button><button data-kind="2" title="Draw an ellipse">Ellipse</button><button data-kind="3" title="Draw a diamond">Diamond</button><button data-kind="4" title="Draw a triangle">Triangle</button><button data-kind="6" title="Draw a line">Line</button><button data-kind="8" title="Freeform: drag to draw a smooth curve through your stroke (Visio spline); Edit Points moves its control points">Freeform</button><button data-kind="9" title="Arc: drag from one end of the arc to the other (a click makes a default arc); Edit Points bends it further">Arc</button><button data-kind="7" title="Pencil: click each corner of a polyline, double-click or press Enter to finish, click the first corner to close it into a polygon (Esc cancels)">Pencil</button><button data-kind="5" title="Draw a text box">Text</button></span>
+ <button id="connectTool" title="Connector tool: drag from one shape to another; the ends glue to connection points (Esc leaves the tool)" aria-pressed="false">Connector</button><button id="editPointsBtn" disabled aria-pressed="false" title="Edit Points: select a freeform shape, press this, then drag a vertex to move it, click a segment to add a vertex, click a vertex and press Delete to remove it (Esc leaves)">Edit Points</button><button id="fitCurveBtn" disabled title="Fit Curve: turns the selected open polyline (4 or more corners) into a smooth curve through its corners">Fit Curve</button><button id="connPointTool" title="Connection Point tool: click a shape to add a connection point where you click; connectors can glue to it (Esc leaves the tool)" aria-pressed="false">Connection Point</button><button id="handTool" title="Hand tool: drag the page to pan it (Space + drag and the middle button do the same; Esc leaves the tool)" aria-pressed="false">Hand</button>
+ <button id="zout" aria-label="Zoom out">−</button><span id="zl">100%</span><button id="zin" aria-label="Zoom in">+</button><button id="fit">Fit</button>
+ <button id="stylesBtn" title="Define Styles: apply a named style to the selection, create or change a custom style">Styles...</button><button id="changeShapeBtn" disabled aria-pressed="false" title="Change Shape: select one or more shapes, press this, then click a shape of the Shapes panel; each selected shape becomes that shape and keeps its place, size, text, formats and connectors (Esc cancels)">Change Shape</button><button id="findBtn" title="Find and replace text (Ctrl+F)">Find</button><button id="reportBtn" title="Inventory report: a table of the shapes with their Shape Data, exported as CSV (not Visio's report format)">Inventory report</button><button id="cut" disabled title="Cut (Ctrl+X)">Cut</button><button id="copy" disabled title="Copy (Ctrl+C)">Copy</button><button id="paste" disabled title="Paste (Ctrl+V)">Paste</button><button id="painter" disabled title="Format painter: copy the look of the selected shape, then click another shape" aria-label="Format painter">&#128397;</button><button id="dup" disabled title="Duplicate (Ctrl+D)">Duplicate</button><button id="rotL" disabled title="Rotate left 90 degrees ([)">Rotate left</button><button id="rotR" disabled title="Rotate right 90 degrees (])">Rotate right</button><button id="flipH" disabled title="Flip horizontal (H)">Flip H</button><button id="flipV" disabled title="Flip vertical (V)">Flip V</button><button id="grp" disabled title="Group the selected shapes (Ctrl+G)">Group</button><button id="ungrp" disabled title="Ungroup the selected group (Ctrl+Shift+G)">Ungroup</button><button id="zFront" disabled title="Bring to front (Ctrl+Shift+F)">To front</button><button id="zFwd" disabled title="Bring forward one place">Forward</button><button id="zBwd" disabled title="Send backward one place">Backward</button><button id="zBack" disabled title="Send to back (Ctrl+Shift+B)">To back</button><button id="dataBtn" disabled title="Shape data of the selected shape: view, edit, add and remove rows">Shape data...</button><span id="arrange" role="group" aria-label="Align and distribute"><button id="arrL" class="arr" disabled title="Align left edges to the first selected shape" aria-label="Align left edges">&#8676;</button><button id="arrCx" class="arr" disabled title="Align centres to the first selected shape" aria-label="Align centres">&#8596;</button><button id="arrRt" class="arr" disabled title="Align right edges to the first selected shape" aria-label="Align right edges">&#8677;</button><button id="arrT" class="arr" disabled title="Align tops to the first selected shape" aria-label="Align tops">&#8613;</button><button id="arrM" class="arr" disabled title="Align middles to the first selected shape" aria-label="Align middles">&#8597;</button><button id="arrB" class="arr" disabled title="Align bottoms to the first selected shape" aria-label="Align bottoms">&#8615;</button><button id="arrDistH" class="arr" disabled title="Distribute horizontally (three or more shapes)" aria-label="Distribute horizontally">&#8943;</button><button id="arrDistV" class="arr" disabled title="Distribute vertically (three or more shapes)" aria-label="Distribute vertically">&#8942;</button><button id="sameW" class="arr" disabled title="Make the same width as the first shape selected" aria-label="Same width">W=</button><button id="sameH" class="arr" disabled title="Make the same height as the first shape selected" aria-label="Same height">H=</button><button id="sameWH" class="arr" disabled title="Make the same size as the first shape selected" aria-label="Same size">WH=</button><button id="reverseEnds" class="arr" disabled title="Reverse ends: the begin and the end of the selected connector trade places (arrowheads stay with their end)" aria-label="Reverse ends">&#8646;</button><button id="lockShape" class="arr" disabled title="Lock the selected shapes against moving, resizing, turning and deleting (toggle)" aria-label="Lock shape">&#128274;</button><button id="opUnion" class="arr" disabled title="Union: one shape with the outline of all the selected shapes (the first selected gives the look)" aria-label="Union">&#8746;</button><button id="opCombine" class="arr" disabled title="Combine: one shape of all the outlines; where they overlap a hole is left" aria-label="Combine">&#8853;</button><button id="opFragment" class="arr" disabled title="Fragment: cut the selected shapes into separate pieces where they overlap" aria-label="Fragment">&#9638;</button><button id="opIntersect" class="arr" disabled title="Intersect: keep only the part the selected shapes have in common" aria-label="Intersect">&#8745;</button><button id="opSubtract" class="arr" disabled title="Subtract: cut the other selected shapes out of the first one selected" aria-label="Subtract">&#8726;</button><button id="opJoin" class="arr" disabled title="Join: lines and open paths whose ends touch become one shape (a closed chain becomes a polygon); the first selected gives the look" aria-label="Join">&#8767;</button><button id="opTrim" class="arr" disabled title="Trim: cut the selected lines and outlines into separate pieces where they cross or touch one another" aria-label="Trim">&#9986;</button></span><button id="del" disabled>Delete</button><button id="undo" disabled title="Undo (Ctrl+Z)">Undo</button><button id="redo" disabled title="Redo (Ctrl+Y or Ctrl+Shift+Z)">Redo</button><button id="save" disabled>Download VSDX</button><button id="copyImgBtn" title="Copy the selection (or the page when nothing is selected) to the clipboard as a PNG picture">Copy as image</button><button id="exportBtn" title="Export the page or the selection as SVG or PNG">Export...</button><button id="printBtn" title="Print the page, or save it as PDF, at the page size of the page setup">Print / PDF...</button>
+ <label title="Show where the printed page is cut into sheets (View > Page Breaks): lines at the sheet borders when the drawing is bigger than the paper"><input type="checkbox" id="showBreaks"> Page Breaks</label> <label title="Show the ruler guides of the page (View > Guides)"><input type="checkbox" id="showGuides" checked> Guides</label>
+ <label title="Show the Shapes pane with the stencils (View > Task panes)"><input type="checkbox" id="paneShapes" checked> Shapes pane</label>
+ <label title="Show the ShapeSheet of the selected shape: its cells, formulas and sections (read only)"><input type="checkbox" id="paneSheet"> Shape Sheet pane</label>
+ <label title="Show the whole page as a thumbnail with the part you see; drag the frame to pan, turn the wheel to zoom (View > Task panes > Pan &amp; Zoom)"><input type="checkbox" id="panePanZoom"> Pan &amp; Zoom pane</label>
+ <label title="Show the Size &amp; Position pane when a shape is selected (View > Task panes)"><input type="checkbox" id="paneSizePos" checked> Size &amp; Position pane</label>
+ <button id="zoom100" title="Zoom to 100 % (View > Zoom > 100%)">100%</button><button id="zoomWidth" title="Zoom so the page is as wide as the window (View > Zoom > Page Width)">Page width</button>
+ <button id="newWindow" aria-pressed="false" title="New Window: a second window beside the drawing that shows the same document with its own page and zoom (read only, it follows every edit); click again to close it">New window</button><button id="fullScreen" title="Show the drawing page full screen (View > Full Screen); Esc leaves it">Full screen</button>
+ <label title="Portrait or landscape for this page">Orientation <select id="designOrientation" aria-label="Page orientation"><option value="portrait">Portrait</option><option value="landscape">Landscape</option></select></label>
+ <label title="Paper size of this page">Size <select id="designSize" aria-label="Page size"><option value="">Custom</option><option value="8.5x11">Letter</option><option value="8.5x14">Legal</option><option value="11x17">Tabloid</option><option value="5.8268x8.2677">A5</option><option value="8.2677x11.6929">A4</option><option value="11.6929x16.5354">A3</option></select></label>
+ <button id="helpShortcuts" title="List of the keyboard shortcuts">Keyboard shortcuts</button><button id="helpAbout" title="About this application">About</button><button id="mcpInfo" title="Connect an AI assistant: the configuration for the LayoutCraft MCP server">AI assistant (MCP)</button>
+ <button id="newComment" title="Add a comment to the selected shape, or to the page when no shape is selected">New comment</button>
+ <label title="Show the list of comments in the side column"><input type="checkbox" id="showComments"> Comments pane</label>
+ <button id="insertPicture" title="Insert a picture (PNG, JPEG, GIF or BMP) in the middle of the page">Picture...</button><input type="file" id="pictureFile" accept="image/png,image/jpeg,image/gif,image/bmp" hidden aria-label="Choose a picture">
+ <button id="insertHyperlink" disabled title="Add, change or remove the hyperlinks of the selected shape (Ctrl+K); Ctrl+click on a shape follows its link">Hyperlink...</button>
+ <button id="insertTextBox" title="Draw a text box: drag on the page (same as the Text tool of Home)">Text box</button>
+ <span id="msg" role="status" aria-live="polite"></span>
+</header>
+<main><aside id="stencil"><b>Shapes</b>
+ <p id="stencilBar"><select id="stencilSource" aria-label="Shape source"><option value="doc">This drawing</option><option value="fav">Favourites</option></select> <button id="addStencil" title="Open a .vssx / .vstx stencil file">Add stencil...</button> <button id="closeStencil" title="Close the shown stencil file (it is also forgotten after a reload)">Close stencil</button><input type="file" id="stencilFile" accept=".vssx,.vstx,.vsdx" hidden></p>
+ <input id="stencilFilter" placeholder="Search shapes" aria-label="Search shapes"> <label title="Search the drawing and every opened stencil, not only the shown source"><input type="checkbox" id="stencilAll" checked> in all stencils</label>
+ <ul id="masters"></ul><p id="stencilHint"></p></aside>
+<div id="stage" tabindex="0" role="group" aria-label="Drawing page. Tab and Shift+Tab select the next or previous shape; arrow keys move it; Tab on a selected shape reaches its handles, where arrow keys resize or rotate.">Open a Visio file. Click a shape to select it; drag a grouped shape to move it.</div>
+<section id="previewPane" hidden aria-label="Second window of the drawing"><header><b>Window 2</b> <select id="pvPage" aria-label="Page shown in the second window"></select> <button id="pvOut" title="Zoom out the second window" aria-label="Zoom out the second window">&minus;</button><span id="pvZoomLbl" aria-live="off">100%</span><button id="pvIn" title="Zoom in the second window" aria-label="Zoom in the second window">+</button><button id="pvFit" title="Fit the page in the second window">Fit</button> <span style="flex:1"></span><button id="pvClose" title="Close the second window" aria-label="Close the second window">&times;</button></header><div id="pvStage" tabindex="0" role="img" aria-label="The drawing in a second window (read only)"></div></section>
+<aside><b id="sel">Nothing selected</b>
+ <div id="panel" hidden>
+  <p>Group size (inches, group axes)<br>
+   W <input type="number" id="w" step="0.1" min="0.05"> H <input type="number" id="h" step="0.1" min="0.05"></p>
+  <p>Anchor <select id="anchor"><option value="0.5,0.5">centre</option><option value="0,0">bottom-left</option>
+   <option value="0,1">top-left</option><option value="1,0">bottom-right</option><option value="1,1">top-right</option></select></p>
+  <button id="apply">Apply resize</button>
+ </div>
+ <div id="panZoomPane" hidden>
+  <hr><b>Pan &amp; Zoom</b>
+  <div id="pzBox" role="img" aria-label="The page with the part you see framed. Drag the frame to pan, turn the mouse wheel to zoom." style="position:relative;width:100%;max-width:240px;margin:4px 0;border:1px solid #888;background:#fff;touch-action:none;cursor:grab;user-select:none">
+   <img id="pzImg" alt="" draggable="false" style="display:block;width:100%;pointer-events:none">
+   <div id="pzView" style="position:absolute;border:2px solid #d33;background:rgba(220,50,50,.12);box-sizing:border-box;pointer-events:none"></div>
+  </div>
+ </div>
+ <div id="sheetPane" hidden>
+  <hr><b id="shHeading">Shape Sheet</b>
+  <div id="shBody"></div>
+ </div>
+ <div id="commentsPane" hidden>
+  <hr><b id="cmHeading">Comments</b>
+  <div id="cmTools"><label>Reviewer <select id="cmReviewer" aria-label="Show the comments of one reviewer"></select></label> <button id="cmPrev" type="button" title="Go to the previous comment (of the chosen reviewer)">Previous</button><button id="cmNext" type="button" title="Go to the next comment (of the chosen reviewer)">Next</button></div>
+  <ol id="cmList" aria-labelledby="cmHeading"></ol>
+ </div>
+ <div id="sizePos" hidden>
+  <hr><b>Size &amp; Position</b>
+  <p class="sp">
+   <label>X <input type="number" id="spX" step="any" aria-label="X position"></label>
+   <label>Y <input type="number" id="spY" step="any" aria-label="Y position"></label> <span class="spUnit">in</span><br>
+   <label>Width <input type="number" id="spW" step="any" min="0" aria-label="Width"></label>
+   <label>Height <input type="number" id="spH" step="any" min="0" aria-label="Height"></label> <span class="spUnit">in</span><br>
+   <label>Angle <input type="number" id="spA" step="any" aria-label="Angle in degrees"></label> deg<br>
+   <label>Pin position <select id="spPin" aria-label="Which point of the shape X and Y mean">
+    <option value="0,1">Top left</option><option value="0.5,1">Top centre</option><option value="1,1">Top right</option>
+    <option value="0,0.5">Middle left</option><option value="0.5,0.5" selected>Centre</option><option value="1,0.5">Middle right</option>
+    <option value="0,0">Bottom left</option><option value="0.5,0">Bottom centre</option><option value="1,0">Bottom right</option></select></label>
+  </p>
+ </div>
+ <div id="format" hidden>
+  <hr><b>Format</b>
+  <p>Fill <input type="color" id="fillColor" value="#ffffff" aria-label="Fill colour"> <label><input type="checkbox" id="fillNone"> none</label></p>
+  <p>Line <input type="color" id="lineColor" value="#000000" aria-label="Line colour"> weight <input type="number" id="lineWeight" min="0" step="0.25" aria-label="Line weight in points"> pt</p>
+  <p>Pattern <select id="linePattern" aria-label="Line pattern"><option value="0">0 None</option><option value="1">1 Solid</option><option value="2">2 Dash</option><option value="3">3 Dot</option><option value="4">4 Dash-dot</option><option value="5">5 Dash-dot-dot</option><option value="6">6 Pattern 6</option><option value="7">7 Pattern 7</option><option value="8">8 Pattern 8</option><option value="9">9 Pattern 9</option><option value="10">10 Pattern 10</option><option value="11">11 Pattern 11</option><option value="12">12 Pattern 12</option><option value="13">13 Pattern 13</option><option value="14">14 Pattern 14</option><option value="15">15 Pattern 15</option><option value="16">16 Pattern 16</option><option value="17">17 Pattern 17</option><option value="18">18 Pattern 18</option><option value="19">19 Pattern 19</option><option value="20">20 Pattern 20</option><option value="21">21 Pattern 21</option><option value="22">22 Pattern 22</option><option value="23">23 Pattern 23</option></select></p>
+  <p>Transparency fill <input type="range" id="fillTrans" min="0" max="100" step="5" value="0" aria-label="Fill transparency in percent"> <output id="fillTransOut">0%</output></p>
+  <p>Transparency line <input type="range" id="lineTrans" min="0" max="100" step="5" value="0" aria-label="Line transparency in percent"> <output id="lineTransOut">0%</output></p>
+  <p>Fill pattern <select id="fillPattern" aria-label="Fill pattern"><option value="0">0 None</option><option value="1" selected>1 Solid</option><option value="2">2 Pattern</option><option value="3">3 Pattern</option><option value="4">4 Pattern</option><option value="5">5 Pattern</option><option value="6">6 Pattern</option><option value="7">7 Pattern</option><option value="8">8 Pattern</option><option value="9">9 Pattern</option><option value="10">10 Pattern</option><option value="11">11 Pattern</option><option value="12">12 Pattern</option><option value="13">13 Pattern</option><option value="14">14 Pattern</option><option value="15">15 Pattern</option><option value="16">16 Pattern</option><option value="17">17 Pattern</option><option value="18">18 Pattern</option><option value="19">19 Pattern</option><option value="20">20 Pattern</option><option value="21">21 Pattern</option><option value="22">22 Pattern</option><option value="23">23 Pattern</option><option value="24">24 Pattern</option><option value="25">25 Gradient</option><option value="26">26 Gradient</option><option value="27">27 Gradient</option><option value="28">28 Gradient</option><option value="29">29 Gradient</option><option value="30">30 Gradient</option><option value="31">31 Gradient</option><option value="32">32 Gradient</option><option value="33">33 Gradient</option><option value="34">34 Gradient</option><option value="35">35 Gradient</option><option value="36">36 Gradient</option><option value="37">37 Gradient</option><option value="38">38 Gradient</option><option value="39">39 Gradient</option><option value="40">40 Gradient</option></select> second colour <input type="color" id="fillBack" value="#ffffff" aria-label="Second fill colour"></p>
+  <p id="gradEditor">Gradient stops <button id="gradAdd" title="Add a stop between the last two">+ stop</button> angle <input type="number" id="gradAngle" value="0" step="5" style="width:4em" aria-label="Gradient angle in degrees"> deg <select id="gradType" aria-label="Gradient type"><option value="0">Linear</option><option value="1">Radial from the bottom right</option><option value="2">Radial from the bottom left</option><option value="3">Radial from the centre</option><option value="4">Radial from the top</option><option value="5">Radial from the bottom</option><option value="6">Radial from the top right</option><option value="7">Radial from the top left</option><option value="8">Rectangular from the bottom right</option><option value="9">Rectangular from the bottom left</option><option value="10">Rectangular from the centre</option><option value="11">Rectangular from the top right</option><option value="12">Rectangular from the top left</option><option value="13">Rectangular, centre (13)</option></select> <button id="gradApply" title="Use these stops as the fill gradient of the selected shapes">Apply gradient</button><button id="gradOff" title="Back to the plain fill colour">No gradient</button></p>
+  <div id="gradStops"></div>
+  <p id="effects">Effects glow <input type="number" id="glowPx" min="0" max="200" step="1" style="width:3.6em" aria-label="Glow radius in pixels"> px <input type="color" id="glowColor" value="#ffc000" aria-label="Glow colour"> soft edges <input type="number" id="softEdges" min="0" max="200" step="1" style="width:3.6em" aria-label="Soft edge radius in pixels"> px <label><input type="checkbox" id="reflection"> reflection</label> bevel <select id="bevelType" aria-label="Bevel type"><option value="0">None</option><option value="1">Circle</option><option value="2">Relaxed inset</option><option value="3">Cross</option><option value="4">Cool slant</option><option value="5">Angle</option><option value="6">Soft round</option><option value="7">Convex</option><option value="8">Slope</option><option value="9">Divot</option><option value="10">Riblet</option><option value="11">Hard edge</option><option value="12">Art deco</option></select></p>
+  <p>Cap <select id="lineCap" aria-label="Line cap"><option value="0">Round</option><option value="1">Flat</option><option value="2">Square</option></select> corner radius <input type="number" id="rounding" min="0" step="1" aria-label="Corner radius in pixels"> px</p>
+  <p><label><input type="checkbox" id="shadow"> Shadow</label></p>
+  <p>Shadow <input type="color" id="shadowColor" value="#000000" aria-label="Shadow colour"> x <input type="number" id="shadowDx" value="4" step="1" aria-label="Shadow offset x in pixels"> y <input type="number" id="shadowDy" value="4" step="1" aria-label="Shadow offset y in pixels"> blur <input type="number" id="shadowBlur" value="4" min="0" step="1" aria-label="Shadow blur in pixels"></p>
+  <p>Shadow type <select id="shadowType" aria-label="Shadow type"><option value="1">Simple</option><option value="2">Oblique</option><option value="3">Inner</option></select> scale <input type="number" id="shadowScale" value="100" min="1" max="500" step="5" aria-label="Shadow scale in percent" style="width:4.5em">% angle <input type="number" id="shadowAngle" value="0" min="-90" max="90" step="5" aria-label="Shadow angle in degrees" style="width:4em">&deg;</p>
+  <p>Line start <select id="beginArrow" aria-label="Line start arrow"><option value="0">None</option><option value="1">Open V</option><option value="4">Filled triangle</option><option value="10">Filled circle</option><option value="11">Filled square</option><option value="14">Hollow triangle</option><option value="20">Hollow circle</option><option value="22">Hollow diamond</option><option value="27">Crow's foot</option></select> <select id="beginArrowSize" aria-label="Line start arrow size"><option value="0">Very small</option><option value="1">Small</option><option value="2">Medium</option><option value="3">Large</option><option value="4">Extra large</option><option value="5">Jumbo</option><option value="6">Colossal</option></select></p>
+  <p>Line end <select id="endArrow" aria-label="Line end arrow"><option value="0">None</option><option value="1">Open V</option><option value="4">Filled triangle</option><option value="10">Filled circle</option><option value="11">Filled square</option><option value="14">Hollow triangle</option><option value="20">Hollow circle</option><option value="22">Hollow diamond</option><option value="27">Crow's foot</option></select> <select id="endArrowSize" aria-label="Line end arrow size"><option value="0">Very small</option><option value="1">Small</option><option value="2">Medium</option><option value="3">Large</option><option value="4">Extra large</option><option value="5">Jumbo</option><option value="6">Colossal</option></select></p>
+  <p>Font size <input type="number" id="fontSize" min="1" step="1" aria-label="Font size in points"> pt</p>
+  <p>Font <input id="fontFamily" list="fontList" autocomplete="off" aria-label="Font family"><datalist id="fontList"><option value="Arial"><option value="Calibri"><option value="Cambria"><option value="Candara"><option value="Century Gothic"><option value="Comic Sans MS"><option value="Consolas"><option value="Courier New"><option value="Georgia"><option value="Impact"><option value="Segoe UI"><option value="Tahoma"><option value="Times New Roman"><option value="Trebuchet MS"><option value="Verdana"></datalist></p>
+  <p>Text <button id="bold" aria-pressed="false" title="Bold (Ctrl+B)" aria-label="Bold"><b>B</b></button><button id="italic" aria-pressed="false" title="Italic (Ctrl+I)" aria-label="Italic"><i>I</i></button><button id="underline" aria-pressed="false" title="Underline (Ctrl+U)" aria-label="Underline"><u>U</u></button> colour <input type="color" id="textColor" value="#000000" aria-label="Text colour"></p>
+  <p>More <button id="strike" aria-pressed="false" title="Strikethrough of the selected text (or the whole text)" aria-label="Strikethrough of the selected text"><s>S</s></button><button id="caseBtn" title="Change case: normal, UPPER, Title Case" aria-label="Change case: normal, UPPER, Title Case">Aa</button> spacing <select id="spacing" aria-label="Letter spacing"><option value="0">0</option><option value="1">1 pt</option><option value="2">2 pt</option><option value="4">4 pt</option><option value="-1">-1 pt</option></select></p>
+  <p>Paragraph <button id="alignL" title="Align left" aria-label="Align left">&#9776;L</button><button id="alignC" title="Centre" aria-label="Centre">&#9776;C</button><button id="alignR" title="Align right" aria-label="Align right">&#9776;R</button><button id="alignJ" title="Justify" aria-label="Justify">&#9776;J</button><button id="bullet" aria-pressed="false" title="Bullets on or off" aria-label="Bullets on or off">&bull;</button> <select id="bulletChar" aria-label="Bullet character"><option value="&#8226;">&#8226;</option><option value="&#9702;">&#9702;</option><option value="&#9642;">&#9642;</option><option value="&#8211;">&#8211;</option><option value="&#10003;">&#10003;</option></select></p>
+  <p>Indent <input type="number" id="indLeft" step="0.1" min="0" style="width:4em" aria-label="Left indent in inches"> in first <input type="number" id="indFirst" step="0.1" style="width:4em" aria-label="First-line indent in inches"> in</p>
+  <p>Line <select id="lineSp" aria-label="Line spacing"><option value="1">1</option><option value="1.15">1.15</option><option value="1.5">1.5</option><option value="2">2</option></select> before <input type="number" id="spBefore" step="1" min="0" style="width:3.5em" aria-label="Space before in points"> after <input type="number" id="spAfter" step="1" min="0" style="width:3.5em" aria-label="Space after in points"> pt</p>
+ </div></aside></main>
+<dialog id="mcpDialog" aria-label="AI assistant (MCP)">
+ <form method="dialog" id="mcpForm">
+  <b>AI assistant (MCP)</b>
+  <p>An AI assistant can draw with LayoutCraft through its <b>Model Context Protocol (MCP) server</b>. The server is a separate program: the assistant (the MCP client) starts it and talks to it over standard input and output, nothing is sent over the network. It can read and write files only below the drawings folder you give it.</p>
+  <p id="mcpDesktop" hidden>This build includes the server; the program path is filled in.</p>
+  <label>Server file (<code>mcp/server.mjs</code> in the LayoutCraft folder; needs Node.js 20 or newer) <input id="mcpServer" type="text" size="60" placeholder="C:/path/to/LayoutCraft/mcp/server.mjs" autocomplete="off"></label>
+  <label>Drawings folder <input id="mcpRoot" type="text" size="60" placeholder="C:/path/to/your/drawings" autocomplete="off"></label>
+  <h3>Claude Desktop and other clients that read a JSON configuration</h3>
+  <textarea id="mcpJson" readonly rows="10" cols="70" aria-label="MCP server configuration (JSON)"></textarea>
+  <p><button type="button" id="mcpCopyJson">Copy configuration</button> In Claude Desktop: Settings &gt; Developer &gt; Edit Config, add the <code>layoutcraft</code> entry to <code>mcpServers</code>, then restart it.</p>
+  <h3>Claude Code</h3>
+  <input id="mcpCmd" type="text" readonly size="70" aria-label="Claude Code command">
+  <p><button type="button" id="mcpCopyCmd">Copy command</button> Run it once in a terminal; <code>claude mcp list</code> shows the server.</p>
+  <p id="mcpMsg" role="status"></p>
+  <p>The tools and an example are listed in <code>docs/32-mcp.md</code>. An assistant that is connected can change the files below the drawings folder, so give it a folder you are happy to share.</p>
+  <menu><button value="close" id="mcpClose" formnovalidate>Close</button></menu>
+ </form>
+</dialog>
+<dialog id="compareDialog" aria-label="Compare Documents">
+ <form method="dialog" id="compareForm">
+  <b>Compare Documents</b>
+  <p id="compareSummary" role="status"></p>
+  <ul id="compareList" class="checklist" aria-label="Differences"></ul>
+  <menu><button type="button" id="compareSave" title="Save the list of differences as a CSV file (opens in a spreadsheet)">Save list (CSV)</button><button value="close" id="compareClose" formnovalidate>Close</button></menu>
+ </form>
+</dialog>
+<button id="compareBtn" title="Compare the open drawing with a .vsdx, .drawio or .excalidraw file: shapes added, removed or changed, page by page">Compare with file...</button><input type="file" id="compareFile" accept=".vsdx,.vsd,.vssx,.drawio,.excalidraw" hidden aria-label="Choose a drawing to compare with">
+<dialog id="checkDialog" aria-label="Check Diagram">
+ <form method="dialog" id="checkForm">
+  <b>Check Diagram</b>
+  <p id="checkSummary" role="status"></p>
+  <label><input type="checkbox" id="checkAlt"> Also list shapes without alt text</label> <label><input type="checkbox" id="checkAll"> All pages</label>
+  <ul id="checkList" class="checklist" aria-label="Problems found"></ul>
+  <menu><button type="button" id="checkSave" title="Save the list of problems as a CSV file (opens in a spreadsheet)">Save list (CSV)</button><button value="close" id="checkClose" formnovalidate>Close</button></menu>
+ </form>
+</dialog>
+<button id="checkDiagram" title="Look for loose connector ends, shapes that nothing connects to, overlapping shapes and shapes outside the page">Check Diagram</button>
+<dialog id="fitDialog" aria-label="Shape larger than the page">
+ <form method="dialog" id="fitForm">
+  <b>This shape is larger than the page</b>
+  <p id="fitText"></p>
+  <menu><button value="keep" id="fitKeep" formnovalidate>Keep its size</button><button value="fit" id="fitShrink" aria-label="Shrink the shape to fit the page">Shrink to fit</button></menu>
+ </form>
+</dialog>
+<dialog id="pageNameDialog" aria-label="Page name">
+ <form method="dialog" id="pageNameForm">
+  <b id="pageNameTitle">Page name</b>
+  <label>Name <input id="pageNameInput" maxlength="31" autocomplete="off"></label>
+  <menu><button value="cancel" id="pageNameCancel" formnovalidate>Cancel</button><button value="ok" id="pageNameOk" aria-label="Apply the page name">OK</button></menu>
+ </form>
+</dialog>
+<dialog id="exportDialog" aria-label="Export">
+ <b>Export</b>
+ <label>Format <select id="exFormat" aria-label="Export format"><option value="svg">SVG</option><option value="png">PNG</option><option value="pdf">PDF (all pages)</option><option value="dxf">DXF (outlines of the page or selection, inches)</option><option value="html-all">Web page, all pages in one HTML file</option><option value="excalidraw">Excalidraw scene (this page)</option><option value="drawio">draw.io file (all pages)</option><option value="svg-all">SVG, one file per page (ZIP)</option><option value="png-all">PNG, one file per page (ZIP)</option></select></label>
+ <label>Of <select id="exScope" aria-label="What to export"><option value="page">The whole page</option><option value="selection">The selection</option></select></label>
+ <label>PNG / PDF scale <select id="exScale" aria-label="PNG and PDF scale"><option value="1">1x (96 dpi)</option><option value="2" selected>2x</option><option value="4">4x</option></select></label>
+ <menu><button id="exClose">Cancel</button><button id="exGo">Export</button></menu>
+</dialog>
+<div id="printSheet" aria-hidden="true"></div>
+<dialog id="findDialog" aria-label="Find and replace">
+ <form method="dialog">
+  <label>Find <input id="findText" type="text" autocomplete="off"></label>
+  <label>Replace with <input id="replaceText" type="text" autocomplete="off"></label>
+  <label><input id="findCase" type="checkbox"> Match case</label>
+  <button type="button" id="findNext">Find next</button>
+  <button type="button" id="replaceOne">Replace</button>
+  <button type="button" id="replaceAll">Replace all</button>
+  <button id="findClose">Close</button>
+  <output id="findStatus" role="status"></output>
+ </form>
+</dialog>
+<dialog id="dataDialog" aria-label="Shape data">
+ <b>Shape data</b> <span id="dataShape"></span>
+ <p id="dataNameRow"><label>Name <input id="dataName" maxlength="255" size="32" placeholder="Shape name" aria-label="Name of the shape"></label></p>
+ <p id="dataAltRow"><label>Alt text <input id="dataAlt" maxlength="4096" size="48" placeholder="What the shape shows, for screen readers" aria-label="Alt text of the shape"></label></p>
+ <table id="dataTable" aria-label="Shape data rows"></table>
+ <div id="dataNew"><label>Label <input id="dataNewLabel" aria-label="Label of the new data row"></label>
+  <label>Type <select id="dataNewType" aria-label="Type of the new data row"><option value="0">Text</option><option value="2">Number</option><option value="3">Yes / no</option><option value="1">List</option><option value="5">Date</option><option value="6">Duration</option><option value="7">Currency</option></select></label>
+  <label>List items <input id="dataNewFormat" aria-label="List items separated by semicolons" placeholder="A;B;C"></label> <button id="dataAdd">Add row</button></div>
+ <div id="dataSets"><label>Data set <select id="dataSetSel" aria-label="Saved data sets"></select></label> <button id="dataSetApply" title="Add the rows of the set to every selected shape (rows a shape has already are left alone)">Apply to selection</button> <button id="dataSetDelete">Delete set</button>
+  <label>Save rows of the shape as <input id="dataSetName" maxlength="40" placeholder="Set name" aria-label="Name of the new data set"></label> <button id="dataSetSave" title="Select one shape: its rows become a set you can apply to other shapes">Save set</button></div>
+ <menu><button id="dataClose">Close</button></menu>
+</dialog>
+<dialog id="reportDialog" aria-label="Inventory report">
+ <b>Inventory report</b>
+ <p id="reportNote">A simple table of the shapes on this page with the Shape Data columns you choose. It is LayoutCraft's own report, not Visio's report format (no report definitions, no Excel or XML export).</p>
+ <fieldset id="reportColumns"><legend>Columns</legend></fieldset>
+ <label><input type="checkbox" id="reportAllPages"> All pages</label>
+ <div class="reportScroll"><table id="reportTable" aria-label="Inventory of the shapes"></table></div>
+ <span id="reportCount"></span>
+ <menu><button id="reportCsv">Export CSV</button><button id="reportClose">Close</button></menu>
+</dialog>
+<dialog id="layersDialog" aria-label="Layers">
+ <b>Layers</b> <span id="layersSel"></span>
+ <table id="layersTable" aria-label="Layers of this page"></table>
+ <label>New layer <input id="layerNew" aria-label="Name of the new layer"></label> <button id="layerAdd">Add layer</button>
+ <menu><button id="layersClose">Close</button></menu>
+</dialog>
+<dialog id="commentDialog" aria-label="Comment">
+ <form method="dialog" id="commentForm">
+  <b id="cmTitle">New comment</b>
+  <p id="cmTarget" class="bsnote"></p>
+  <label>Your name <input id="cmAuthor" maxlength="255" autocomplete="name"></label>
+  <label>Comment <textarea id="cmText" rows="5" maxlength="32000"></textarea></label>
+  <p id="cmMsg" role="alert" class="bsnote"></p>
+  <menu><button value="cancel" id="cmCancel" formnovalidate>Cancel</button><button value="ok" id="cmOk">Apply</button></menu>
+ </form>
+</dialog>
+<dialog id="linkDialog" aria-label="Hyperlinks">
+ <form method="dialog" id="linkForm">
+  <b>Hyperlinks of <span id="lkShape"></span></b>
+  <div class="lkrow"><select id="lkList" size="4" aria-label="Hyperlinks of the shape"></select><span class="lkbtns"><button type="button" id="lkAdd">New</button><button type="button" id="lkRemove">Remove</button></span></div>
+  <label>Address <input id="lkAddress" maxlength="2048" autocomplete="off" placeholder="https://..."></label>
+  <label>Sub-address <input id="lkSub" list="lkPages" maxlength="2048" autocomplete="off" placeholder="a page of this drawing"></label><datalist id="lkPages"></datalist>
+  <label>Description <input id="lkDesc" maxlength="2048" autocomplete="off"></label>
+  <label><input type="checkbox" id="lkNewWin"> Open in a new window</label>
+  <label><input type="checkbox" id="lkDefault"> Default link (Ctrl+click follows it)</label>
+  <label><input type="checkbox" id="lkHidden"> Hidden (not listed in the shape menu)</label>
+  <p id="lkMsg" role="alert" class="bsnote"></p>
+  <menu><button value="cancel" id="lkCancel" formnovalidate>Cancel</button><button value="ok" id="lkOk">Apply</button></menu>
+ </form>
+</dialog>
+<dialog id="stylesDialog" aria-label="Define styles">
+ <form method="dialog" id="stylesForm">
+  <b>Define Styles</b>
+  <label>Style <select id="stStyle"></select></label>
+  <label>Based on <select id="stBased"></select></label>
+  <label>Line colour <input id="stLineColor" type="color" value="#000000"></label>
+  <label>Line weight (pt) <input id="stLineWeight" type="number" min="0" max="144" step="0.25" value="0.75"></label>
+  <label>Fill colour <input id="stFillColor" type="color" value="#ffffff"></label>
+  <label>Text colour <input id="stTextColor" type="color" value="#000000"></label>
+  <label>Font size (pt) <input id="stFontSize" type="number" min="1" max="999" step="0.5" value="12"></label>
+  <label><input id="stBold" type="checkbox"> Bold</label> <label><input id="stItalic" type="checkbox"> Italic</label>
+  <label>Paragraph alignment <select id="stAlign"><option value="">(not set)</option><option value="0">Left</option><option value="1">Centre</option><option value="2">Right</option><option value="3">Justified</option></select></label>
+  <label>Left indent (in) <input id="stIndLeft" type="number" min="-100" max="100" step="0.05"></label> <label>Line spacing (lines) <input id="stLineSp" type="number" min="0" max="100" step="0.1"></label>
+  <label>New or changed style name <input id="stName" maxlength="64"></label>
+  <label>Apply to the selection <select id="stScope"><option value="all">Line, fill and text</option><option value="line">Line only</option><option value="fill">Fill only</option><option value="text">Text only</option></select></label>
+  <div class="row"><button id="stApply" type="button">Apply</button> <button id="stSave" type="button">Create / change style</button> <button id="stDelete" type="button">Delete style</button> <button id="stClose" type="button">Close</button></div>
+ </form>
+</dialog>
+<dialog id="docPropsDialog" aria-label="Document properties">
+ <form method="dialog" id="docPropsForm">
+  <b>Document properties</b>
+  <label>Title <input id="dpTitle" maxlength="4096"></label>
+  <label>Subject <input id="dpSubject" maxlength="4096"></label>
+  <label>Author <input id="dpCreator" maxlength="4096"></label>
+  <label>Manager <input id="dpManager" maxlength="4096"></label>
+  <label>Company <input id="dpCompany" maxlength="4096"></label>
+  <label>Category <input id="dpCategory" maxlength="4096"></label>
+  <label>Keywords <input id="dpKeywords" maxlength="4096"></label>
+  <label>Comments <textarea id="dpDescription" rows="3" maxlength="4096"></textarea></label>
+  <menu><button value="cancel" id="dpCancel" formnovalidate>Cancel</button><button value="ok" id="dpOk">Apply</button></menu>
+ </form>
+</dialog>
+<dialog id="pageSetupDialog" aria-label="Page setup">
+ <form method="dialog" id="pageSetupForm">
+  <b>Page setup</b> <span id="psCurrent"></span>
+  <label>Page size <select id="psSize">
+   <option value="8.5x11">Letter (8.5 x 11 in)</option><option value="8.2677x11.6929">A4 (210 x 297 mm)</option>
+   <option value="11.6929x16.5354">A3 (297 x 420 mm)</option><option value="11x17">Tabloid (11 x 17 in)</option><option value="custom" selected>Custom...</option></select></label>
+  <label id="psCustom">Width <input type="number" id="psW" step="any" value="10"> Height <input type="number" id="psH" step="any" value="7"> <span id="psUnit">in</span></label>
+  <label>Orientation <select id="psOrientation"><option value="portrait">Portrait</option><option value="landscape" selected>Landscape</option></select></label>
+  <label>Drawing scale <select id="psScale">
+   <option value="none">No scale (1:1)</option>
+   <option value="0.125|in|1|ft">Architectural 1/8 in = 1 ft</option><option value="0.25|in|1|ft">Architectural 1/4 in = 1 ft</option><option value="0.5|in|1|ft">Architectural 1/2 in = 1 ft</option><option value="1|in|1|ft">Architectural 1 in = 1 ft</option>
+   <option value="1|mm|10|mm">Metric 1:10</option><option value="1|mm|20|mm">Metric 1:20</option><option value="1|mm|50|mm">Metric 1:50</option><option value="1|mm|100|mm">Metric 1:100</option><option value="1|mm|200|mm">Metric 1:200</option><option value="1|mm|500|mm">Metric 1:500</option>
+   <option value="custom">Custom...</option></select></label>
+  <label id="psScaleCustom">on paper <input type="number" id="psScalePaper" step="any" min="0" value="1" aria-label="Length on paper"> <select id="psScalePaperUnit" aria-label="Unit on paper"><option value="in">in</option><option value="ft">ft</option><option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option></select> = in the drawing <input type="number" id="psScaleDrawing" step="any" min="0" value="1" aria-label="Length in the drawing"> <select id="psScaleDrawingUnit" aria-label="Unit in the drawing"><option value="in">in</option><option value="ft">ft</option><option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option></select></label>
+  <fieldset id="psPrint"><legend>Print setup</legend>
+   <label>Margins (in) left <input type="number" id="psmL" step="any" min="0" max="20" aria-label="Left margin"> right <input type="number" id="psmR" step="any" min="0" max="20" aria-label="Right margin"> top <input type="number" id="psmT" step="any" min="0" max="20" aria-label="Top margin"> bottom <input type="number" id="psmB" step="any" min="0" max="20" aria-label="Bottom margin"></label>
+   <label><input type="radio" name="psZoom" id="psZoomPct" checked> Adjust to <input type="number" id="psPct" step="1" min="1" max="10000" value="100" aria-label="Print zoom in percent"> % of normal size</label>
+   <label><input type="radio" name="psZoom" id="psZoomFit"> Fit to <input type="number" id="psFitX" min="1" max="99" value="1" aria-label="Sheets across"> sheets across by <input type="number" id="psFitY" min="1" max="99" value="1" aria-label="Sheets down"> sheets down</label>
+   <label><input type="checkbox" id="psCenterH"> Centre horizontally</label> <label><input type="checkbox" id="psCenterV"> Centre vertically</label>
+   <label><input type="checkbox" id="psGrid"> Print grid lines</label>
+  </fieldset>
+  <label>Background page <select id="psBack"><option value="">(none)</option></select></label>
+  <div><button type="button" id="psMakeBack" title="This page leaves the page tabs and can be shown beneath other pages">Use this page as a background</button></div>
+  <label id="psBackListRow" hidden>Background pages <select id="psBackList"></select> <button type="button" id="psMakeFore" title="Show the selected background page as an ordinary page again, so it can be edited">Edit as a normal page</button></label>
+  <menu><button value="cancel" id="psCancel" formnovalidate>Cancel</button><button value="ok" id="psOk">Apply</button></menu>
+ </form>
+</dialog>
+<dialog id="newDialog" aria-label="New drawing">
+ <form method="dialog" id="newForm">
+  <b>New drawing</b>
+  <label>Page size <select id="newSize">
+   <option value="8.5x11">Letter (8.5 x 11 in)</option><option value="8.2677x11.6929" selected>A4 (210 x 297 mm)</option>
+   <option value="11.6929x16.5354">A3 (297 x 420 mm)</option><option value="11x17">Tabloid (11 x 17 in)</option><option value="custom">Custom...</option></select></label>
+  <label id="newCustom" hidden>Width <input type="number" id="newW" step="any" value="10"> Height <input type="number" id="newH" step="any" value="7"> in the unit below</label>
+  <label>Orientation <select id="newOrientation"><option value="portrait">Portrait</option><option value="landscape" selected>Landscape</option></select></label>
+  <label>Unit <select id="newUnit"><option value="in">Inches</option><option value="mm">Millimetres</option></select></label>
+  <label>Page name <input id="newName" value="Page-1" maxlength="31"></label>
+  <menu><button value="cancel" id="newCancel" formnovalidate>Cancel</button><button value="ok" id="newOk">Create</button></menu>
+ </form>
+</dialog>
+<div id="themeGallery" class="themegal" role="group" aria-label="Themes"></div><div id="variantGallery" class="themegal variantgal" role="group" aria-label="Variants"></div>
+<label title="The style of the border: a background page of plain shapes that the page shows beneath its own">Border <select id="borderStyle" aria-label="Border style"></select></label>
+<label title="The text of the title (styles with a title block or a title bar)">Title <input type="text" id="borderTitle" maxlength="80" placeholder="Title" aria-label="Border title"></label>
+<button id="borderApply" title="Add the border to this page (a background page is made and shown beneath it)">Add border</button><button id="borderRemove" title="Take the border off this page (the background page stays in the drawing)">Remove border</button><script type="module" src="ribbon.js"></script><script type="module" src="tooltips.js"></script><script type="module" src="qat.js"></script><script type="module" src="shell.js"></script><script type="module" src="contextmenu.js"></script><script type="module" src="backstage.js"></script><script type="module" src="keyboard.js"></script></body></html>

@@ -1,0 +1,231 @@
+{
+  "pageIndex": 0,
+  "pages": [
+    {
+      "connectors": [],
+      "id": "0",
+      "name": "Freeform",
+      "shapes": [
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "none",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "h": 170.583851232,
+          "italic": false,
+          "label": "",
+          "parts": [
+            {
+              "d": "M0 170.58L10.55 115.75L21.2 72.9L31.95 40.98L42.8 18.93L53.76 5.71L64.83 0.27L76.02 1.56L87.32 8.53L98.76 20.13L110.32 35.32L122.01 53.03L133.84 72.23L145.81 91.86L157.93 110.87L170.19 128.22L182.61 142.85L195.19 153.71L207.93 159.76L220.83 159.95L233.91 153.22L247.16 138.53L260.59 114.83L274.2 81.06L288 36.18",
+              "fill": "none",
+              "stroke": "#000000",
+              "strokeWidth": 1.0
+            }
+          ],
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 1.0,
+          "textBox": {
+            "h": 159.91718456533332,
+            "w": 277.33333333333337,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "1",
+          "w": 288.0,
+          "x": 96.0,
+          "y": 549.4161487680001,
+          "z": 0.0
+        },
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "none",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "h": 76.80000000000001,
+          "italic": false,
+          "label": "",
+          "parts": [
+            {
+              "d": "M0 0L6.18 8.63L12.88 16.87L20.07 24.68L27.73 32.04L35.82 38.92L44.32 45.28L53.19 51.12L62.4 56.4L71.92 61.11L81.71 65.22L91.73 68.73L101.94 71.62L112.32 73.88L122.81 75.5L133.39 76.47L144 76.8L154.61 76.47L165.19 75.5L175.68 73.88L186.06 71.62L196.27 68.73L206.29 65.22L216.08 61.11L225.6 56.4L234.81 51.12L243.68 45.28L252.18 38.92L260.27 32.04L267.93 24.68L275.12 16.87L281.82 8.63L288 0",
+              "fill": "none",
+              "stroke": "#000000",
+              "strokeWidth": 1.0
+            }
+          ],
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 1.0,
+          "textBox": {
+            "h": 66.13333333333333,
+            "w": 277.33333333333337,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "2",
+          "w": 288.0,
+          "x": 96.0,
+          "y": 355.2,
+          "z": 1.0
+        },
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "none",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "h": 153.60000000000002,
+          "italic": false,
+          "label": "",
+          "parts": [
+            {
+              "d": "M0 153.6L96 19.2L192 134.4L288 0",
+              "fill": "none",
+              "stroke": "#000000",
+              "strokeWidth": 1.0
+            }
+          ],
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 1.0,
+          "textBox": {
+            "h": 142.93333333333334,
+            "w": 277.33333333333337,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "3",
+          "w": 288.0,
+          "x": 576.0,
+          "y": 566.4000000000001,
+          "z": 2.0
+        },
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "#ffffff",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "h": 115.19999999999999,
+          "italic": false,
+          "label": "",
+          "parts": [
+            {
+              "d": "M0 115.2L76.8 0L153.6 115.2L230.4 0L0 115.2Z",
+              "fill": "#ffffff",
+              "fillOpacity": 1.0,
+              "stroke": "#000000",
+              "strokeWidth": 1.0
+            }
+          ],
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 1.0,
+          "textBox": {
+            "h": 104.53333333333333,
+            "w": 219.73333333333335,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "4",
+          "w": 230.39999999999998,
+          "x": 576.0,
+          "y": 316.8,
+          "z": 3.0
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 1,
+  "theme": {
+    "activeVariation": 0,
+    "name": "Office",
+    "schemeEnum": null,
+    "slots": {
+      "accent1": "#4472c4",
+      "accent2": "#ed7d31",
+      "accent3": "#a5a5a5",
+      "accent4": "#ffc000",
+      "accent5": "#5b9bd5",
+      "accent6": "#70ad47",
+      "bkgnd": "#ffffff",
+      "dk1": "#000000",
+      "dk2": "#44546a",
+      "folhlink": "#954f72",
+      "hlink": "#0563c1",
+      "lt1": "#ffffff",
+      "lt2": "#e7e6e6",
+      "variant1": "#4472c4",
+      "variant2": "#ed7d31",
+      "variant3": "#a5a5a5",
+      "variant4": "#ffc000",
+      "variant5": "#5b9bd5",
+      "variant6": "#70ad47"
+    },
+    "variations": [
+      {
+        "variant1": "#4472c4",
+        "variant2": "#ed7d31",
+        "variant3": "#a5a5a5",
+        "variant4": "#ffc000",
+        "variant5": "#5b9bd5",
+        "variant6": "#70ad47"
+      },
+      {
+        "variant1": "#ed7d31",
+        "variant2": "#a5a5a5",
+        "variant3": "#ffc000",
+        "variant4": "#5b9bd5",
+        "variant5": "#70ad47",
+        "variant6": "#4472c4"
+      },
+      {
+        "variant1": "#a5a5a5",
+        "variant2": "#ffc000",
+        "variant3": "#5b9bd5",
+        "variant4": "#70ad47",
+        "variant5": "#4472c4",
+        "variant6": "#ed7d31"
+      },
+      {
+        "variant1": "#ffc000",
+        "variant2": "#5b9bd5",
+        "variant3": "#70ad47",
+        "variant4": "#4472c4",
+        "variant5": "#ed7d31",
+        "variant6": "#a5a5a5"
+      }
+    ]
+  },
+  "version": 1
+}

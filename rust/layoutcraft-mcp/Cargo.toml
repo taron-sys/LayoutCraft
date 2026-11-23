@@ -1,0 +1,20 @@
+[package]
+name = "layoutcraft-mcp"
+version = "0.1.0"
+edition = "2021"
+description = "The LayoutCraft MCP server (Model Context Protocol over stdio) on the native engine: same tools as mcp/server.mjs"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "layoutcraft_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "layoutcraft-mcp"
+path = "src/main.rs"
+
+[dependencies]
+layoutcraft-engine = { path = "../layoutcraft-engine" }
+serde_json = { version = "1", features = ["float_roundtrip", "preserve_order"] }
+serde = "1"

@@ -1,0 +1,14 @@
+[package]
+name = "layoutcraft-conformance"
+version = "0.1.0"
+edition = "2021"
+description = "Browser-free conformance runner for LayoutCraft golden fixtures"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+sha2 = "0.11"
+zip = { version = "9.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+image = { version = "0.25", default-features = false, features = ["png"] }

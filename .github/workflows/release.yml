@@ -1,0 +1,101 @@
+# DRAFT - never run. Release builds of the native programs on a tag "v*" (docs/36-packaging.md).
+# Every action is pinned to a commit SHA (the tag is in the comment). Signing and notarisation are COMMENTED placeholders: they need a
+# Windows code-signing certificate and an Apple Developer ID (docs/36-packaging.md); until then the files are unsigned.
+# Secret names: WINDOWS_CERT_PFX_BASE64, WINDOWS_CERT_PASSWORD, APPLE_DEVELOPER_ID_CERT_BASE64, APPLE_CERT_PASSWORD, APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD.
+# Secrets are never echoed: they are only used as environment values of the one step that needs them.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    env:
+      LAYOUTCRAFT_PUBLIC_BUILD: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, installs the current stable Rust
+      - name: Portable zip (builds both exes)
+        shell: pwsh
+        env:
+          LC_TOOLCHAIN: '+stable'
+        run: |
+          # LC_TOOLCHAIN makes the script use the runner's default (msvc) toolchain instead of the gnu one of the maintainers' machine
+          pwsh tools/package-portable.ps1
+      # - name: Sign the exes (Authenticode)
+      #   shell: pwsh
+      #   env:
+      #     WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+      #     WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+      #   run: |
+      #     [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+      #     signtool sign /f "$env:RUNNER_TEMP\cert.pfx" /p $env:WINDOWS_CERT_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 rust\target\release\layoutcraft-app.exe rust\target\release\layoutcraft-mcp.exe
+      #     Remove-Item "$env:RUNNER_TEMP\cert.pfx"
+      # - name: MSI (needs the WiX Toolset v4)
+      #   shell: pwsh
+      #   run: |
+      #     dotnet tool install --global wix
+      #     pwsh tools/installer/build-msi.ps1 -NoBuild
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows
+          path: dist/*
+
+  unix:
+    env:
+      LAYOUTCRAFT_PUBLIC_BUILD: '1'
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-latest, name: linux-x86_64 }
+          - { os: macos-latest, name: macos-arm64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, installs the current stable Rust
+      - name: System libraries of eframe (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libegl1-mesa-dev libgtk-3-dev
+      - name: Build
+        working-directory: rust
+        run: cargo build --release -p layoutcraft-app -p layoutcraft-mcp
+      - name: Archive
+        run: |
+          mkdir -p out/LayoutCraft-${{ matrix.name }}
+          cp rust/target/release/layoutcraft-app rust/target/release/layoutcraft-mcp THIRD-PARTY-NOTICES.txt LICENSE-MIT LICENSE-APACHE out/LayoutCraft-${{ matrix.name }}/
+          tar -C out -czf out/LayoutCraft-${{ matrix.name }}.tar.gz LayoutCraft-${{ matrix.name }}
+          (cd out && shasum -a 256 LayoutCraft-${{ matrix.name }}.tar.gz > SHA256SUMS-${{ matrix.name }}.txt)
+      # - name: Sign and notarise (macOS; needs an Apple Developer ID)
+      #   if: runner.os == 'macOS'
+      #   env:
+      #     APPLE_DEVELOPER_ID_CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
+      #     APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+      #     APPLE_ID: ${{ secrets.APPLE_ID }}
+      #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      #     APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      #   run: |
+      #     # import the certificate into a temporary keychain, codesign --options runtime --timestamp both binaries,
+      #     # zip them, xcrun notarytool submit --wait, xcrun stapler staple (a bare binary cannot be stapled: ship a .app or .dmg then)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.name }}
+          path: out/*
+
+  publish:
+    needs: [windows, unix]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # only this job may create the release
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" --draft --title "${{ github.ref_name }}" --repo "${{ github.repository }}" $(find artifacts -type f)

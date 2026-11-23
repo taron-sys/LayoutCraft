@@ -1,0 +1,17 @@
+[workspace]
+members = [
+    "layoutcraft-app",
+    "layoutcraft-conformance",
+    "layoutcraft-engine",
+    "layoutcraft-fixtures",
+    "layoutcraft-mcp",
+    "layoutcraft-model",
+    "layoutcraft-render",
+    "layoutcraft-vsdx",
+    "layoutcraft-wasm",
+]
+resolver = "2"
+
+# The oracle tests run the engine over hundreds of drawings: optimise test builds (debug assertions and overflow checks stay on)
+[profile.test]
+opt-level = 2

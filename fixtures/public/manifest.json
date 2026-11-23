@@ -1,0 +1,261 @@
+{
+  "documentSchemaVersion": 1,
+  "fixtures": [
+    {
+      "counts": {
+        "connectors": 1,
+        "media": 0,
+        "pages": 1,
+        "shapes": 6
+      },
+      "documentSchemaVersion": 1,
+      "id": "public-basic-shapes",
+      "kind": "self-authored",
+      "model": "models/public-basic-shapes.json",
+      "modelFileSha256": "2b65cae9630ad000d71f6aec28618fb0dd9b5eb01a9ccd868bafb0ac3c4cda6c",
+      "modelSha256": "dceacfe069978b6715b5e04d40fb4d2adc9c4935b0195138fd453da6e3089706",
+      "source": "fixtures/public/sources/public-basic-shapes.vsdx",
+      "sourceBytes": 9309,
+      "sourceSha256": "b1aa46dc941187ba34cd8774d4700f0fb2d5296c2a3715b00813545eb2d1f3de",
+      "untouched": {
+        "entries": {
+          "[Content_Types].xml": "f138515cfc5f750cf5263497f70af9b90dc9572fd3a1d5021297d509859c1ffa",
+          "_rels/.rels": "b7257b7d6da7320cf0d7e80e42868ed33e3039240e207e5cb3433e0c5b7185ce",
+          "docProps/app.xml": "1de088a9d36c6927b07fef1a043c8ec9a594e5edb9f49c3fe667d69c4503b8fd",
+          "docProps/core.xml": "747144a6602225a9a15726f9002a2fb269d84da0221521ea3af98aa4cee50f0a",
+          "visio/_rels/document.xml.rels": "512d19d190a3d15c2e79b4865d264e4f63a9984e1183ceef4eeb6d4399527262",
+          "visio/document.xml": "79228d2ff67999efff146a44216b03578cb4f25ecbb4071b150e695db41be452",
+          "visio/masters/_rels/masters.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/masters/masters.xml": "cc10dcb819d19a5fc4fdb8fb7d487c006552fc8a20573c1f64b3ef69cbcf2bbb",
+          "visio/pages/_rels/page1.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/pages/_rels/pages.xml.rels": "400d5ee108402f8ab6eab48e217d67f85c0679957a0853f955294665ccaad0b2",
+          "visio/pages/page1.xml": "e9f96da00c19c1b4c0637878d67bd0cf5aa54797349cde27fda8157f204dc63f",
+          "visio/pages/pages.xml": "7adb144260cd49b3cbbb17c725e637374f2cd5ae7c423285312c178f322a9675",
+          "visio/windows.xml": "4300af8c7d157ca4f6e6c908bbe7941f5befbd404a755ed95764ac77857c45c3"
+        },
+        "entryCount": 13,
+        "savedName": "public-basic-shapes-edited.vsdx"
+      }
+    },
+    {
+      "counts": {
+        "connectors": 2,
+        "media": 0,
+        "pages": 1,
+        "shapes": 3
+      },
+      "documentSchemaVersion": 1,
+      "id": "public-connectors",
+      "kind": "self-authored",
+      "model": "models/public-connectors.json",
+      "modelFileSha256": "ebe08bd2bd8d76600bf3d80f5897e34b6773d1e56fcbe542bb58702ce89f2d89",
+      "modelSha256": "95d28041190c3c66f179748d260b26df16b6361c7e70489b7db34fce8ad1978e",
+      "source": "fixtures/public/sources/public-connectors.vsdx",
+      "sourceBytes": 9286,
+      "sourceSha256": "71f591421f2028b57be4d3690be1e6365e671e711d0597d5c856cbfa700139ed",
+      "untouched": {
+        "entries": {
+          "[Content_Types].xml": "f138515cfc5f750cf5263497f70af9b90dc9572fd3a1d5021297d509859c1ffa",
+          "_rels/.rels": "b7257b7d6da7320cf0d7e80e42868ed33e3039240e207e5cb3433e0c5b7185ce",
+          "docProps/app.xml": "1de088a9d36c6927b07fef1a043c8ec9a594e5edb9f49c3fe667d69c4503b8fd",
+          "docProps/core.xml": "747144a6602225a9a15726f9002a2fb269d84da0221521ea3af98aa4cee50f0a",
+          "visio/_rels/document.xml.rels": "512d19d190a3d15c2e79b4865d264e4f63a9984e1183ceef4eeb6d4399527262",
+          "visio/document.xml": "79228d2ff67999efff146a44216b03578cb4f25ecbb4071b150e695db41be452",
+          "visio/masters/_rels/masters.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/masters/masters.xml": "cc10dcb819d19a5fc4fdb8fb7d487c006552fc8a20573c1f64b3ef69cbcf2bbb",
+          "visio/pages/_rels/page1.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/pages/_rels/pages.xml.rels": "400d5ee108402f8ab6eab48e217d67f85c0679957a0853f955294665ccaad0b2",
+          "visio/pages/page1.xml": "6fa63edc922e8cb93eb0ec4b2067618f0ff5d88318320e466bad414dadb1651a",
+          "visio/pages/pages.xml": "6995f6aefccddbc69accc7ed3b7d23ef3de1124d98b5ab9cc479639eef682c04",
+          "visio/windows.xml": "4300af8c7d157ca4f6e6c908bbe7941f5befbd404a755ed95764ac77857c45c3"
+        },
+        "entryCount": 13,
+        "savedName": "public-connectors-edited.vsdx"
+      }
+    },
+    {
+      "counts": {
+        "connectors": 0,
+        "media": 0,
+        "pages": 1,
+        "shapes": 4
+      },
+      "documentSchemaVersion": 1,
+      "id": "public-freeform",
+      "kind": "self-authored",
+      "model": "models/public-freeform.json",
+      "modelFileSha256": "0642158ea4f9a92ee0459e8d4c7d7ad375e4d633aed661db37857321bd834324",
+      "modelSha256": "8cafc5d3eece55f002902f262f659a3ad6e98f6537d072c4c102f738e6e3ec9d",
+      "source": "fixtures/public/sources/public-freeform.vsdx",
+      "sourceBytes": 8962,
+      "sourceSha256": "978360c1007168977eb4f13f60f2ef0bfe7205bac3a0381e207d661f3f2a068c",
+      "untouched": {
+        "entries": {
+          "[Content_Types].xml": "f138515cfc5f750cf5263497f70af9b90dc9572fd3a1d5021297d509859c1ffa",
+          "_rels/.rels": "b7257b7d6da7320cf0d7e80e42868ed33e3039240e207e5cb3433e0c5b7185ce",
+          "docProps/app.xml": "1de088a9d36c6927b07fef1a043c8ec9a594e5edb9f49c3fe667d69c4503b8fd",
+          "docProps/core.xml": "747144a6602225a9a15726f9002a2fb269d84da0221521ea3af98aa4cee50f0a",
+          "visio/_rels/document.xml.rels": "512d19d190a3d15c2e79b4865d264e4f63a9984e1183ceef4eeb6d4399527262",
+          "visio/document.xml": "79228d2ff67999efff146a44216b03578cb4f25ecbb4071b150e695db41be452",
+          "visio/masters/_rels/masters.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/masters/masters.xml": "cc10dcb819d19a5fc4fdb8fb7d487c006552fc8a20573c1f64b3ef69cbcf2bbb",
+          "visio/pages/_rels/page1.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/pages/_rels/pages.xml.rels": "400d5ee108402f8ab6eab48e217d67f85c0679957a0853f955294665ccaad0b2",
+          "visio/pages/page1.xml": "92d78de0890047843d64ffdfe5dbe7d383bc076a831082b66de5798f02480f55",
+          "visio/pages/pages.xml": "a2388ff7373b9431d41517b6a345782a11eb76d096cc9ad3279ef0670f297a95",
+          "visio/windows.xml": "4300af8c7d157ca4f6e6c908bbe7941f5befbd404a755ed95764ac77857c45c3"
+        },
+        "entryCount": 13,
+        "savedName": "public-freeform-edited.vsdx"
+      }
+    },
+    {
+      "counts": {
+        "connectors": 0,
+        "media": 1,
+        "pages": 1,
+        "shapes": 1
+      },
+      "documentSchemaVersion": 1,
+      "id": "public-picture",
+      "kind": "self-authored",
+      "model": "models/public-picture.json",
+      "modelFileSha256": "4b264b5b894603707af578c3ed9eb34dec6da92128da10b73300ed0e349db830",
+      "modelSha256": "07245c89aff3124d960f5fccb82b35e5a26c1d5e99b2bf0a015197d762456c42",
+      "source": "fixtures/public/sources/public-picture.vsdx",
+      "sourceBytes": 9310,
+      "sourceSha256": "66824dee37f1217febc00b3c3647b638c5a82c97198283983e7c1b6cfb6ef04f",
+      "untouched": {
+        "entries": {
+          "[Content_Types].xml": "3cae1d676b27a82413bf8bf1b00636ca0680e12d38d0e792db9eea28a5cd47c8",
+          "_rels/.rels": "b7257b7d6da7320cf0d7e80e42868ed33e3039240e207e5cb3433e0c5b7185ce",
+          "docProps/app.xml": "1de088a9d36c6927b07fef1a043c8ec9a594e5edb9f49c3fe667d69c4503b8fd",
+          "docProps/core.xml": "747144a6602225a9a15726f9002a2fb269d84da0221521ea3af98aa4cee50f0a",
+          "visio/_rels/document.xml.rels": "512d19d190a3d15c2e79b4865d264e4f63a9984e1183ceef4eeb6d4399527262",
+          "visio/document.xml": "79228d2ff67999efff146a44216b03578cb4f25ecbb4071b150e695db41be452",
+          "visio/masters/_rels/masters.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/masters/masters.xml": "cc10dcb819d19a5fc4fdb8fb7d487c006552fc8a20573c1f64b3ef69cbcf2bbb",
+          "visio/media/layoutcraft1.png": "e4d51dadb5091a8b68c1bef88ed4e935ef881c8e1f19e663e60981833f9e8e25",
+          "visio/pages/_rels/page1.xml.rels": "1291355955dc7a49ebb0ee71cbbbf6c2cb8903b7336ca8200ff0e18b4eef481e",
+          "visio/pages/_rels/pages.xml.rels": "400d5ee108402f8ab6eab48e217d67f85c0679957a0853f955294665ccaad0b2",
+          "visio/pages/page1.xml": "b5e1fe6320a18da381fc16ce50ca9eab8e0a6bc900ac66e4ff43ded4e71e5c19",
+          "visio/pages/pages.xml": "996085b96246b7bd8b17402e954d7d285b4f81616172256f8b15fca4c90f0bf9",
+          "visio/windows.xml": "4300af8c7d157ca4f6e6c908bbe7941f5befbd404a755ed95764ac77857c45c3"
+        },
+        "entryCount": 14,
+        "savedName": "public-picture-edited.vsdx"
+      }
+    },
+    {
+      "counts": {
+        "connectors": 0,
+        "media": 0,
+        "pages": 2,
+        "shapes": 3
+      },
+      "documentSchemaVersion": 1,
+      "id": "public-pages",
+      "kind": "self-authored",
+      "model": "models/public-pages.json",
+      "modelFileSha256": "4f9d3f9c8b2625c71df432a87d41b1fa5c6cb5f585950f3bad07f55d667a2497",
+      "modelSha256": "294858af0eaf9c03bb0e6711fc11e4c9b27f788cf0e28270fd817377f34c8277",
+      "source": "fixtures/public/sources/public-pages.vsdx",
+      "sourceBytes": 9612,
+      "sourceSha256": "1b8a7379316bd9c5f28c118ce9faa5e19eb793ef7e88b9876f0c38986f6c2d74",
+      "untouched": {
+        "entries": {
+          "[Content_Types].xml": "3e6479fd9d525228ef5fe16c83dc689807b3b120287da0ab6723f00cb62fc43e",
+          "_rels/.rels": "b7257b7d6da7320cf0d7e80e42868ed33e3039240e207e5cb3433e0c5b7185ce",
+          "docProps/app.xml": "1de088a9d36c6927b07fef1a043c8ec9a594e5edb9f49c3fe667d69c4503b8fd",
+          "docProps/core.xml": "747144a6602225a9a15726f9002a2fb269d84da0221521ea3af98aa4cee50f0a",
+          "visio/_rels/document.xml.rels": "512d19d190a3d15c2e79b4865d264e4f63a9984e1183ceef4eeb6d4399527262",
+          "visio/document.xml": "79228d2ff67999efff146a44216b03578cb4f25ecbb4071b150e695db41be452",
+          "visio/masters/_rels/masters.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/masters/masters.xml": "cc10dcb819d19a5fc4fdb8fb7d487c006552fc8a20573c1f64b3ef69cbcf2bbb",
+          "visio/pages/_rels/page1.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/pages/_rels/pages.xml.rels": "12379da72d103608aa325adc2bcfb14bc26c629d092e91ee4122755e671fc4e1",
+          "visio/pages/page1.xml": "38e81168ac8ad2e58b5e4492e20f00d3edf4f58a78b97f29b14121a8de89f59a",
+          "visio/pages/page2.xml": "280b59227c8cc7d2230dfc17f3f5a61efd598ed2f43ffffc5fda3e800c6d0959",
+          "visio/pages/pages.xml": "35d6e1aa80bcb28439195d1bfe145128cae92204096da6f32f638c0d6d2bfa49",
+          "visio/windows.xml": "4300af8c7d157ca4f6e6c908bbe7941f5befbd404a755ed95764ac77857c45c3"
+        },
+        "entryCount": 14,
+        "savedName": "public-pages-edited.vsdx"
+      }
+    },
+    {
+      "counts": {
+        "connectors": 0,
+        "media": 0,
+        "pages": 1,
+        "shapes": 3
+      },
+      "documentSchemaVersion": 1,
+      "id": "public-groups",
+      "kind": "self-authored",
+      "model": "models/public-groups.json",
+      "modelFileSha256": "83338044ac5f0b6a2659f8d003abdc0489e7673d7c7c6239265fb40af9e46263",
+      "modelSha256": "0bcd71d3b044e01857eedd3f9816ef062efb0de758a7ba661db333c94e98a552",
+      "source": "fixtures/public/sources/public-groups.vsdx",
+      "sourceBytes": 8941,
+      "sourceSha256": "98b13bec2357cbcc8f209aeea9b2ac819ffbb1e68ea55505882ad1b4c81264f3",
+      "untouched": {
+        "entries": {
+          "[Content_Types].xml": "f138515cfc5f750cf5263497f70af9b90dc9572fd3a1d5021297d509859c1ffa",
+          "_rels/.rels": "b7257b7d6da7320cf0d7e80e42868ed33e3039240e207e5cb3433e0c5b7185ce",
+          "docProps/app.xml": "1de088a9d36c6927b07fef1a043c8ec9a594e5edb9f49c3fe667d69c4503b8fd",
+          "docProps/core.xml": "747144a6602225a9a15726f9002a2fb269d84da0221521ea3af98aa4cee50f0a",
+          "visio/_rels/document.xml.rels": "512d19d190a3d15c2e79b4865d264e4f63a9984e1183ceef4eeb6d4399527262",
+          "visio/document.xml": "79228d2ff67999efff146a44216b03578cb4f25ecbb4071b150e695db41be452",
+          "visio/masters/_rels/masters.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/masters/masters.xml": "cc10dcb819d19a5fc4fdb8fb7d487c006552fc8a20573c1f64b3ef69cbcf2bbb",
+          "visio/pages/_rels/page1.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/pages/_rels/pages.xml.rels": "400d5ee108402f8ab6eab48e217d67f85c0679957a0853f955294665ccaad0b2",
+          "visio/pages/page1.xml": "4585627caadf2c0b9093795439f87ed4f61c24ba43bfab03423d94aa0bed0877",
+          "visio/pages/pages.xml": "c8306db9d235b26819bc1f8194188c409896bc3507d68fb4c3bbc08dd5283492",
+          "visio/windows.xml": "4300af8c7d157ca4f6e6c908bbe7941f5befbd404a755ed95764ac77857c45c3"
+        },
+        "entryCount": 13,
+        "savedName": "public-groups-edited.vsdx"
+      }
+    },
+    {
+      "counts": {
+        "connectors": 0,
+        "media": 0,
+        "pages": 1,
+        "shapes": 1
+      },
+      "documentSchemaVersion": 1,
+      "id": "public-text-and-data",
+      "kind": "self-authored",
+      "model": "models/public-text-and-data.json",
+      "modelFileSha256": "f1b6dbcf0481ae0de27b6058ee4b6b394983a58589f75e56ea085b2a7de7a87e",
+      "modelSha256": "9031bde502ad647525c35d4e37293254e30af126778243be61a7c17df03455d5",
+      "source": "fixtures/public/sources/public-text-and-data.vsdx",
+      "sourceBytes": 8935,
+      "sourceSha256": "49aac3c22f2f14fc860280ec9b08c22670a3c845b00680cccd9a1ac6fac35e78",
+      "untouched": {
+        "entries": {
+          "[Content_Types].xml": "f138515cfc5f750cf5263497f70af9b90dc9572fd3a1d5021297d509859c1ffa",
+          "_rels/.rels": "b7257b7d6da7320cf0d7e80e42868ed33e3039240e207e5cb3433e0c5b7185ce",
+          "docProps/app.xml": "1de088a9d36c6927b07fef1a043c8ec9a594e5edb9f49c3fe667d69c4503b8fd",
+          "docProps/core.xml": "747144a6602225a9a15726f9002a2fb269d84da0221521ea3af98aa4cee50f0a",
+          "visio/_rels/document.xml.rels": "512d19d190a3d15c2e79b4865d264e4f63a9984e1183ceef4eeb6d4399527262",
+          "visio/document.xml": "79228d2ff67999efff146a44216b03578cb4f25ecbb4071b150e695db41be452",
+          "visio/masters/_rels/masters.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/masters/masters.xml": "cc10dcb819d19a5fc4fdb8fb7d487c006552fc8a20573c1f64b3ef69cbcf2bbb",
+          "visio/pages/_rels/page1.xml.rels": "2e779e20640f6474deb75e8d1f9a5343c128c91464e41f2851fabeee00f1786b",
+          "visio/pages/_rels/pages.xml.rels": "400d5ee108402f8ab6eab48e217d67f85c0679957a0853f955294665ccaad0b2",
+          "visio/pages/page1.xml": "4f578bcd2b1e1087e80e037f7c54cc7a641ade1a468cee48163d09dccf082e45",
+          "visio/pages/pages.xml": "f6037288623e2cc24c499089e5fb39bcec76ef27acaffaab23aa25e63b82c9ab",
+          "visio/windows.xml": "4300af8c7d157ca4f6e6c908bbe7941f5befbd404a755ed95764ac77857c45c3"
+        },
+        "entryCount": 13,
+        "savedName": "public-text-and-data-edited.vsdx"
+      }
+    }
+  ],
+  "generatedBy": "layoutcraft-fixtures make-public-fixtures (self-authored set, 2026-11-22)",
+  "manifestVersion": 1
+}

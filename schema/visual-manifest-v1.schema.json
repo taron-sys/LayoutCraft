@@ -1,0 +1,56 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://layoutcraft.local/schema/visual-manifest-v1.schema.json",
+  "title": "LayoutCraft Visio page-PNG visual golden manifest v1",
+  "type": "object",
+  "required": [
+    "manifestVersion", "documentSchemaVersion", "generatedBy", "renderer",
+    "dpi", "fontEnvironment", "note", "comparison", "pages"
+  ],
+  "properties": {
+    "manifestVersion": { "const": 1 },
+    "documentSchemaVersion": { "const": 1 },
+    "generatedBy": { "type": "string" },
+    "renderer": { "type": "string" },
+    "dpi": { "type": "integer", "minimum": 1 },
+    "fontEnvironment": { "type": "string" },
+    "note": { "type": "string" },
+    "comparison": {
+      "type": "object",
+      "required": ["width", "height", "pixelDelta", "maxMismatch", "maxMeanError"],
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 },
+        "pixelDelta": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "maxMismatch": { "type": "number", "minimum": 0, "maximum": 1 },
+        "maxMeanError": { "type": "number", "minimum": 0, "maximum": 1 }
+      },
+      "additionalProperties": false
+    },
+    "pages": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "fixture", "source", "sourceSha256", "page", "pageName",
+          "file", "sha256", "bytes", "width", "height"
+        ],
+        "properties": {
+          "fixture": { "type": "string" },
+          "source": { "type": "string" },
+          "sourceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "page": { "type": "integer", "minimum": 1 },
+          "pageName": { "type": "string" },
+          "file": { "type": "string" },
+          "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "bytes": { "type": "integer", "minimum": 1 },
+          "width": { "type": "integer", "minimum": 1 },
+          "height": { "type": "integer", "minimum": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

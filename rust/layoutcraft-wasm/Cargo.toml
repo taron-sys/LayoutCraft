@@ -1,0 +1,17 @@
+[package]
+name = "layoutcraft-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "Minimal WebAssembly build of the LayoutCraft importer and renderer (raw C ABI, no wasm-bindgen)"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+layoutcraft-engine = { path = "../layoutcraft-engine" }
+layoutcraft-model = { path = "../layoutcraft-model" }
+layoutcraft-vsdx = { path = "../layoutcraft-vsdx" }
+layoutcraft-render = { path = "../layoutcraft-render" }
+serde_json = { version = "1", features = ["float_roundtrip"] }

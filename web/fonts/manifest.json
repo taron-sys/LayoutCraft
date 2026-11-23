@@ -1,0 +1,14 @@
+{
+  "fonts": [
+    { "name": "LiberationSans", "aliases": ["arial", "helvetica", "helvetica neue", "liberation sans", "sans-serif"],
+      "files": { "regular": "LiberationSans-Regular.ttf", "bold": "LiberationSans-Bold.ttf", "italic": "LiberationSans-Italic.ttf", "boldItalic": "LiberationSans-BoldItalic.ttf" } },
+    { "name": "LiberationSerif", "aliases": ["times new roman", "times", "liberation serif", "georgia", "serif"],
+      "files": { "regular": "LiberationSerif-Regular.ttf", "bold": "LiberationSerif-Bold.ttf", "italic": "LiberationSerif-Italic.ttf", "boldItalic": "LiberationSerif-BoldItalic.ttf" } },
+    { "name": "LiberationMono", "aliases": ["courier new", "courier", "liberation mono", "consolas", "monospace"],
+      "files": { "regular": "LiberationMono-Regular.ttf", "bold": "LiberationMono-Bold.ttf", "italic": "LiberationMono-Italic.ttf", "boldItalic": "LiberationMono-BoldItalic.ttf" } },
+    { "name": "Carlito", "aliases": ["calibri", "carlito"],
+      "files": { "regular": "Carlito-Regular.ttf", "bold": "Carlito-Bold.ttf", "italic": "Carlito-Italic.ttf", "boldItalic": "Carlito-BoldItalic.ttf" } },
+    { "name": "Caladea", "aliases": ["cambria", "caladea"],
+      "files": { "regular": "Caladea-Regular.ttf", "bold": "Caladea-Bold.ttf", "italic": "Caladea-Italic.ttf", "boldItalic": "Caladea-BoldItalic.ttf" } }
+  ]
+}

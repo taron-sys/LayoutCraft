@@ -1,0 +1,352 @@
+{
+  "pageIndex": 0,
+  "pages": [
+    {
+      "connectors": [
+        {
+          "arrowEnd": "filled",
+          "arrowStart": "none",
+          "conFixedCode": 6,
+          "dynFeedback": 2,
+          "from": {
+            "local": {
+              "x": 1.0,
+              "y": 0.5
+            },
+            "shapeId": "shape:visio:1",
+            "side": "e"
+          },
+          "glueType": 2,
+          "label": "",
+          "route": "elbow",
+          "routeStyle": 1,
+          "stroke": "#000000",
+          "strokeStyle": "solid",
+          "strokeWidth": 1.33,
+          "to": {
+            "local": {
+              "x": 0.0,
+              "y": 0.5
+            },
+            "shapeId": "shape:visio:2",
+            "side": "w"
+          },
+          "visioId": "4",
+          "walkPreference": 0,
+          "z": 3.0
+        },
+        {
+          "arrowEnd": "filled",
+          "arrowStart": "none",
+          "conFixedCode": 6,
+          "dynFeedback": 2,
+          "from": {
+            "local": {
+              "x": 0.5,
+              "y": 1.0
+            },
+            "shapeId": "shape:visio:2",
+            "side": "s"
+          },
+          "glueType": 2,
+          "label": "",
+          "route": "elbow",
+          "routeStyle": 1,
+          "stroke": "#000000",
+          "strokeStyle": "solid",
+          "strokeWidth": 1.33,
+          "to": {
+            "local": {
+              "x": 0.5,
+              "y": -2.4671622769447924e-16
+            },
+            "shapeId": "shape:visio:3",
+            "side": "n"
+          },
+          "visioId": "5",
+          "walkPreference": 0,
+          "z": 4.0
+        }
+      ],
+      "id": "0",
+      "name": "Connectors",
+      "shapes": [
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "#ffffff",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "h": 96.0,
+          "italic": false,
+          "label": "Start",
+          "parts": [
+            {
+              "d": "M0 96L144 96L144 0L0 0L0 96Z",
+              "fill": "#ffffff",
+              "fillOpacity": 1.0,
+              "stroke": "#000000",
+              "strokeWidth": 1.0
+            }
+          ],
+          "rich": {
+            "paragraphs": [
+              {
+                "align": "center",
+                "bullet": false,
+                "bulletStr": "•",
+                "indent": 0.0,
+                "pp": "0",
+                "runs": [
+                  {
+                    "cp": "0",
+                    "style": {
+                      "bold": false,
+                      "fontFamily": "Cambria",
+                      "fontSize": 13.33,
+                      "italic": false,
+                      "textColor": "#000000",
+                      "underline": false
+                    },
+                    "text": "Start"
+                  }
+                ],
+                "style": {
+                  "align": "center",
+                  "bullet": false,
+                  "bulletStr": "•",
+                  "indent": 0.0
+                }
+              }
+            ]
+          },
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 1.0,
+          "textBox": {
+            "h": 85.33333333333333,
+            "w": 133.33333333333331,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "1",
+          "w": 144.0,
+          "x": 96.0,
+          "y": 182.40000000000003,
+          "z": 0.0
+        },
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "#ffffff",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "h": 96.0,
+          "italic": false,
+          "label": "Middle",
+          "parts": [
+            {
+              "d": "M0 96L144 96L144 0L0 0L0 96Z",
+              "fill": "#ffffff",
+              "fillOpacity": 1.0,
+              "stroke": "#000000",
+              "strokeWidth": 1.0
+            }
+          ],
+          "rich": {
+            "paragraphs": [
+              {
+                "align": "center",
+                "bullet": false,
+                "bulletStr": "•",
+                "indent": 0.0,
+                "pp": "0",
+                "runs": [
+                  {
+                    "cp": "0",
+                    "style": {
+                      "bold": false,
+                      "fontFamily": "Cambria",
+                      "fontSize": 13.33,
+                      "italic": false,
+                      "textColor": "#000000",
+                      "underline": false
+                    },
+                    "text": "Middle"
+                  }
+                ],
+                "style": {
+                  "align": "center",
+                  "bullet": false,
+                  "bulletStr": "•",
+                  "indent": 0.0
+                }
+              }
+            ]
+          },
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 1.0,
+          "textBox": {
+            "h": 85.33333333333333,
+            "w": 133.33333333333331,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "2",
+          "w": 144.0,
+          "x": 432.0,
+          "y": 182.40000000000003,
+          "z": 1.0
+        },
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "#ffffff",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "h": 115.19999999999999,
+          "italic": false,
+          "label": "End",
+          "parts": [
+            {
+              "d": "M0 57.6A72 57.6 0 1 0 144 57.6A72 57.6 0 1 0 0 57.6Z",
+              "fill": "#ffffff",
+              "fillOpacity": 1.0,
+              "stroke": "#000000",
+              "strokeWidth": 1.0
+            }
+          ],
+          "rich": {
+            "paragraphs": [
+              {
+                "align": "center",
+                "bullet": false,
+                "bulletStr": "•",
+                "indent": 0.0,
+                "pp": "0",
+                "runs": [
+                  {
+                    "cp": "0",
+                    "style": {
+                      "bold": false,
+                      "fontFamily": "Cambria",
+                      "fontSize": 13.33,
+                      "italic": false,
+                      "textColor": "#000000",
+                      "underline": false
+                    },
+                    "text": "End"
+                  }
+                ],
+                "style": {
+                  "align": "center",
+                  "bullet": false,
+                  "bulletStr": "•",
+                  "indent": 0.0
+                }
+              }
+            ]
+          },
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 1.0,
+          "textBox": {
+            "h": 104.53333333333333,
+            "w": 133.33333333333331,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "3",
+          "w": 144.0,
+          "x": 432.0,
+          "y": 547.2,
+          "z": 2.0
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 1,
+  "theme": {
+    "activeVariation": 0,
+    "name": "Office",
+    "schemeEnum": null,
+    "slots": {
+      "accent1": "#4472c4",
+      "accent2": "#ed7d31",
+      "accent3": "#a5a5a5",
+      "accent4": "#ffc000",
+      "accent5": "#5b9bd5",
+      "accent6": "#70ad47",
+      "bkgnd": "#ffffff",
+      "dk1": "#000000",
+      "dk2": "#44546a",
+      "folhlink": "#954f72",
+      "hlink": "#0563c1",
+      "lt1": "#ffffff",
+      "lt2": "#e7e6e6",
+      "variant1": "#4472c4",
+      "variant2": "#ed7d31",
+      "variant3": "#a5a5a5",
+      "variant4": "#ffc000",
+      "variant5": "#5b9bd5",
+      "variant6": "#70ad47"
+    },
+    "variations": [
+      {
+        "variant1": "#4472c4",
+        "variant2": "#ed7d31",
+        "variant3": "#a5a5a5",
+        "variant4": "#ffc000",
+        "variant5": "#5b9bd5",
+        "variant6": "#70ad47"
+      },
+      {
+        "variant1": "#ed7d31",
+        "variant2": "#a5a5a5",
+        "variant3": "#ffc000",
+        "variant4": "#5b9bd5",
+        "variant5": "#70ad47",
+        "variant6": "#4472c4"
+      },
+      {
+        "variant1": "#a5a5a5",
+        "variant2": "#ffc000",
+        "variant3": "#5b9bd5",
+        "variant4": "#70ad47",
+        "variant5": "#4472c4",
+        "variant6": "#ed7d31"
+      },
+      {
+        "variant1": "#ffc000",
+        "variant2": "#5b9bd5",
+        "variant3": "#70ad47",
+        "variant4": "#4472c4",
+        "variant5": "#ed7d31",
+        "variant6": "#a5a5a5"
+      }
+    ]
+  },
+  "version": 1
+}

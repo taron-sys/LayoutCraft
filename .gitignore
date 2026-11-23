@@ -1,0 +1,21 @@
+# private modules: never published (see private/README.md)
+/private/
+
+# test fixtures are never published (docs/38-private-fixtures.md): Visio-made files carry Microsoft / vendor shape artwork,
+# examples/ is a collection of third-party drawings and stencils. Tests that need them skip themselves when they are absent.
+/test/
+/examples/
+
+# build output and local data
+/rust/target/
+/web/layoutcraft.wasm
+/node_modules/
+/dist/
+
+# private working notes and oracle outputs (junctions into the private repository)
+/docs-private/
+/rust/layoutcraft-engine/tests/oracle/
+
+# agent tool folders (AGENTS.md rule 28): never part of the product or a release
+/.claude/
+/.cursor/

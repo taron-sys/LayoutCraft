@@ -1,0 +1,294 @@
+{
+  "pageIndex": 0,
+  "pages": [
+    {
+      "connectors": [],
+      "id": "0",
+      "name": "Overview",
+      "shapes": [
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "#ffffff",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "h": 153.60000000000002,
+          "italic": false,
+          "label": "Overview",
+          "parts": [
+            {
+              "d": "M0 153.6L576 153.6L576 0L0 0L0 153.6Z",
+              "fill": "#ffffff",
+              "fillOpacity": 1.0,
+              "stroke": "#000000",
+              "strokeWidth": 1.0
+            }
+          ],
+          "rich": {
+            "paragraphs": [
+              {
+                "align": "center",
+                "bullet": false,
+                "bulletStr": "•",
+                "indent": 0.0,
+                "pp": "0",
+                "runs": [
+                  {
+                    "cp": "0",
+                    "style": {
+                      "bold": false,
+                      "fontFamily": "Cambria",
+                      "fontSize": 13.33,
+                      "italic": false,
+                      "textColor": "#000000",
+                      "underline": false
+                    },
+                    "text": "Overview"
+                  }
+                ],
+                "style": {
+                  "align": "center",
+                  "bullet": false,
+                  "bulletStr": "•",
+                  "indent": 0.0
+                }
+              }
+            ]
+          },
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 1.0,
+          "textBox": {
+            "h": 142.93333333333334,
+            "w": 565.3333333333334,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "1",
+          "w": 576.0,
+          "x": 192.0,
+          "y": 278.40000000000003,
+          "z": 0.0
+        }
+      ]
+    },
+    {
+      "connectors": [],
+      "id": "1",
+      "name": "Details",
+      "shapes": [
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "#ffffff",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "h": 115.19999999999999,
+          "italic": false,
+          "label": "Details",
+          "parts": [
+            {
+              "d": "M0 115.2L288 115.2L288 0L0 0L0 115.2Z",
+              "fill": "#ffffff",
+              "fillOpacity": 1.0,
+              "stroke": "#000000",
+              "strokeWidth": 1.0
+            }
+          ],
+          "rich": {
+            "paragraphs": [
+              {
+                "align": "center",
+                "bullet": false,
+                "bulletStr": "•",
+                "indent": 0.0,
+                "pp": "0",
+                "runs": [
+                  {
+                    "cp": "0",
+                    "style": {
+                      "bold": false,
+                      "fontFamily": "Cambria",
+                      "fontSize": 13.33,
+                      "italic": false,
+                      "textColor": "#000000",
+                      "underline": false
+                    },
+                    "text": "Details"
+                  }
+                ],
+                "style": {
+                  "align": "center",
+                  "bullet": false,
+                  "bulletStr": "•",
+                  "indent": 0.0
+                }
+              }
+            ]
+          },
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 1.0,
+          "textBox": {
+            "h": 104.53333333333333,
+            "w": 277.33333333333337,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "1",
+          "w": 288.0,
+          "x": 192.0,
+          "y": 316.8,
+          "z": 0.0
+        },
+        {
+          "align": "center",
+          "bold": false,
+          "fill": "none",
+          "fillOpacity": 1.0,
+          "flipX": false,
+          "flipY": false,
+          "fontFamily": "Cambria",
+          "fontSize": 13.33,
+          "h": 115.19999999999999,
+          "italic": false,
+          "label": "A second page written by LayoutCraft",
+          "parts": [
+            {
+              "d": "M0 115.2L336 115.2L336 0L0 0L0 115.2",
+              "fill": "none",
+              "fillOpacity": 1.0,
+              "stroke": "#000000",
+              "strokeWidth": 0.0
+            }
+          ],
+          "rich": {
+            "paragraphs": [
+              {
+                "align": "center",
+                "bullet": false,
+                "bulletStr": "•",
+                "indent": 0.0,
+                "pp": "0",
+                "runs": [
+                  {
+                    "cp": "0",
+                    "style": {
+                      "bold": false,
+                      "fontFamily": "Cambria",
+                      "fontSize": 13.33,
+                      "italic": false,
+                      "textColor": "#000000",
+                      "underline": false
+                    },
+                    "text": "A second page written by LayoutCraft"
+                  }
+                ],
+                "style": {
+                  "align": "center",
+                  "bullet": false,
+                  "bulletStr": "•",
+                  "indent": 0.0
+                }
+              }
+            ]
+          },
+          "rot": -0.0,
+          "stroke": "#000000",
+          "strokeWidth": 0.0,
+          "textBox": {
+            "h": 104.53333333333333,
+            "w": 325.33333333333337,
+            "x": 5.333333333333333,
+            "y": 5.333333333333333
+          },
+          "textColor": "#000000",
+          "type": "custom",
+          "underline": false,
+          "vAlign": "middle",
+          "visioId": "2",
+          "w": 336.0,
+          "x": 528.0,
+          "y": 316.8,
+          "z": 1.0
+        }
+      ]
+    }
+  ],
+  "schemaVersion": 1,
+  "theme": {
+    "activeVariation": 0,
+    "name": "Office",
+    "schemeEnum": null,
+    "slots": {
+      "accent1": "#4472c4",
+      "accent2": "#ed7d31",
+      "accent3": "#a5a5a5",
+      "accent4": "#ffc000",
+      "accent5": "#5b9bd5",
+      "accent6": "#70ad47",
+      "bkgnd": "#ffffff",
+      "dk1": "#000000",
+      "dk2": "#44546a",
+      "folhlink": "#954f72",
+      "hlink": "#0563c1",
+      "lt1": "#ffffff",
+      "lt2": "#e7e6e6",
+      "variant1": "#4472c4",
+      "variant2": "#ed7d31",
+      "variant3": "#a5a5a5",
+      "variant4": "#ffc000",
+      "variant5": "#5b9bd5",
+      "variant6": "#70ad47"
+    },
+    "variations": [
+      {
+        "variant1": "#4472c4",
+        "variant2": "#ed7d31",
+        "variant3": "#a5a5a5",
+        "variant4": "#ffc000",
+        "variant5": "#5b9bd5",
+        "variant6": "#70ad47"
+      },
+      {
+        "variant1": "#ed7d31",
+        "variant2": "#a5a5a5",
+        "variant3": "#ffc000",
+        "variant4": "#5b9bd5",
+        "variant5": "#70ad47",
+        "variant6": "#4472c4"
+      },
+      {
+        "variant1": "#a5a5a5",
+        "variant2": "#ffc000",
+        "variant3": "#5b9bd5",
+        "variant4": "#70ad47",
+        "variant5": "#4472c4",
+        "variant6": "#ed7d31"
+      },
+      {
+        "variant1": "#ffc000",
+        "variant2": "#5b9bd5",
+        "variant3": "#70ad47",
+        "variant4": "#4472c4",
+        "variant5": "#ed7d31",
+        "variant6": "#a5a5a5"
+      }
+    ]
+  },
+  "version": 1
+}

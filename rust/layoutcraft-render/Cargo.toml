@@ -1,0 +1,19 @@
+[package]
+name = "layoutcraft-render"
+version = "0.1.0"
+edition = "2021"
+description = "Headless scene, SVG and raster renderer for LayoutCraft documents"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+layoutcraft-model = { path = "../layoutcraft-model" }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+resvg = "0.49"
+fontdb = "0.24"
+ttf-parser = "0.25"
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+layoutcraft-vsdx = { path = "../layoutcraft-vsdx" }

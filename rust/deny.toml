@@ -1,0 +1,39 @@
+# cargo-deny policy (docs/36-packaging.md): the project is MIT OR Apache-2.0, so every dependency must offer a permissive licence.
+# Run: cargo deny check        (CI runs it on pull requests that touch Cargo files and nightly)
+
+[graph]
+targets = [
+    "x86_64-pc-windows-gnu",
+    "x86_64-pc-windows-msvc",
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "wasm32-unknown-unknown",
+]
+
+[licenses]
+# a crate with `A OR B` passes when one side is allowed (self_cell: Apache-2.0 OR GPL-2.0-only passes through Apache-2.0)
+allow = [
+    "MIT", "Apache-2.0", "Apache-2.0 WITH LLVM-exception", "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "Unicode-3.0",
+    "0BSD", "CC0-1.0", "BSL-1.0", "Unlicense",
+    # fonts bundled by egui (epaint_default_fonts): listed in THIRD-PARTY-NOTICES.txt
+    "OFL-1.1", "Ubuntu-font-1.0",
+]
+confidence-threshold = 0.9
+
+[advisories]
+yanked = "deny"
+ignore = [
+    # ttf-parser is unmaintained (no known vulnerability). It is used directly (text measurement, font metrics export) and through resvg / fontdb.
+    { id = "RUSTSEC-2026-0192", reason = "unmaintained, no vulnerability; replace together with resvg/fontdb" },
+]
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true # the workspace crates depend on each other by path
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

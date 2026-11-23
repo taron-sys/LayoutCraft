@@ -1,0 +1,23 @@
+[package]
+name = "layoutcraft-fixtures"
+version = "0.1.0"
+edition = "2021"
+description = "Generates the self-authored public golden fixtures for LayoutCraft"
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+name = "layoutcraft_fixtures"
+path = "src/lib.rs"
+
+[[bin]]
+name = "make-public-fixtures"
+path = "src/main.rs"
+
+[dependencies]
+layoutcraft-conformance = { path = "../layoutcraft-conformance" }
+layoutcraft-engine = { path = "../layoutcraft-engine" }
+layoutcraft-model = { path = "../layoutcraft-model" }
+layoutcraft-vsdx = { path = "../layoutcraft-vsdx" }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
