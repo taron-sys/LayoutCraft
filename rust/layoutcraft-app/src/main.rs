@@ -1539,6 +1539,12 @@ impl LayoutCraftApp {
         )
     }
 
+    /// Whether a selected shape is big enough on screen for its eight resize handles: on a shape smaller than the handles in both directions
+    /// (the SFP modules of the HPE stencils are 0.05 in) they would cover all of it, so a press could only resize it and never move it.
+    fn handles_fit(rect: egui::Rect) -> bool {
+        rect.width() >= 2.5 * HANDLE_SIZE || rect.height() >= 2.5 * HANDLE_SIZE
+    }
+
     fn handle_rects(rect: egui::Rect) -> [(Handle, egui::Rect); 8] {
         let size = egui::vec2(HANDLE_SIZE, HANDLE_SIZE);
         let at = |handle: Handle| {
@@ -1808,7 +1814,7 @@ impl LayoutCraftApp {
                         egui::vec2(shape.w as f32, shape.h as f32),
                     );
                     let screen_rect = self.scene_rect_to_screen(rect, image_rect);
-                    for (handle, hit) in Self::handle_rects(screen_rect) {
+                    for (handle, hit) in Self::handle_rects(screen_rect).into_iter().filter(|_| Self::handles_fit(screen_rect)) {
                         if hit.expand(2.0).contains(pointer) {
                             self.drag = Some(DragState {
                                 visio_id: selected_id.clone(),
@@ -2128,7 +2134,8 @@ impl LayoutCraftApp {
         if self.engine.package.is_none() {
             return;
         }
-        if rect.width() < MIN_SHAPE_PX || rect.height() < MIN_SHAPE_PX {
+        // only a resize can make a shape too small; a move keeps its size (stencil parts like the 0.05 in SFP modules are tiny on purpose)
+        if resized && (rect.width() < MIN_SHAPE_PX || rect.height() < MIN_SHAPE_PX) {
             self.status = "Shape would be too small.".to_string();
             return;
         }
@@ -4071,7 +4078,7 @@ impl eframe::App for LayoutCraftApp {
                                 egui::StrokeKind::Outside,
                             );
                         }
-                        if resizable {
+                        if resizable && Self::handles_fit(screen_rect) {
                             for (handle, hit) in Self::handle_rects(screen_rect) {
                                 if let Some(pointer) = response.hover_pos() {
                                     if hit.expand(2.0).contains(pointer) {
