@@ -528,21 +528,34 @@ mod file_dialog {
 
 #[cfg(not(windows))]
 mod file_dialog {
+    //! Open and save dialogs through the desktop's file chooser (xdg-desktop-portal on Linux, the system panel on macOS).
+    use rfd::FileDialog;
     use std::path::PathBuf;
+
+    const DRAWINGS: &[&str] = &["vsdx", "vstx", "vsdm", "vstm", "excalidraw", "drawio"];
+
     pub fn open() -> Option<PathBuf> {
-        None
+        FileDialog::new()
+            .set_title("Open Visio drawing")
+            .add_filter("Visio, Excalidraw and draw.io files", DRAWINGS)
+            .add_filter("All files", &["*"])
+            .pick_file()
     }
-    pub fn save_as(_default_name: &str) -> Option<PathBuf> {
-        None
+    pub fn save_as(default_name: &str) -> Option<PathBuf> {
+        FileDialog::new()
+            .set_title("Save Visio drawing as")
+            .set_file_name(default_name)
+            .add_filter("Visio drawings", &["vsdx"])
+            .save_file()
     }
-    pub fn save_csv(_default_name: &str) -> Option<PathBuf> {
-        None
+    pub fn save_csv(default_name: &str) -> Option<PathBuf> {
+        FileDialog::new().set_title("Save list as").set_file_name(default_name).add_filter("CSV files", &["csv"]).save_file()
     }
-    pub fn save_ext(_default_name: &str, _label: &str, _ext: &str) -> Option<PathBuf> {
-        None
+    pub fn save_ext(default_name: &str, label: &str, ext: &str) -> Option<PathBuf> {
+        FileDialog::new().set_title("Export as").set_file_name(default_name).add_filter(label, &[ext]).save_file()
     }
     pub fn open_stencil() -> Option<PathBuf> {
-        None
+        FileDialog::new().set_title("Open stencil").add_filter("Visio stencils", &["vssx"]).pick_file()
     }
 }
 
@@ -1165,7 +1178,9 @@ impl LayoutCraftApp {
         // Likewise a page with shapes shows the WHOLE page (a shape that sticks out of it widens the view), not the bounding box of its
         // shapes: creating the first shape must not shrink the canvas to that shape.
         {
-            let (page_w, page_h) = ((page_width_in * DPI).max(1.0), (self.page_height_in * DPI).max(1.0));
+            // the sheet's PageWidth / PageHeight are in drawing units; the scene's shapes are already scaled to paper (page.scale, e.g. 1:50)
+            let paper = document.pages.get(self.page_index).map_or(1.0, |page| page.scale).max(1e-6);
+            let (page_w, page_h) = ((page_width_in * paper * DPI).max(1.0), (self.page_height_in * paper * DPI).max(1.0));
             let (min_x, min_y) = if scene.items.is_empty() { (0.0, 0.0) } else { (scene.min_x.min(0.0), scene.min_y.min(0.0)) };
             let (max_x, max_y) = if scene.items.is_empty() { (page_w, page_h) } else { ((scene.min_x + scene.width).max(page_w), (scene.min_y + scene.height).max(page_h)) };
             scene.min_x = min_x;

@@ -19,3 +19,6 @@ resvg = "0.49"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Controls_Dialogs"] }
+
+[target.'cfg(not(windows))'.dependencies]
+rfd = "0.17" # MIT OR Apache-2.0: native open/save dialogs (portal on Linux)

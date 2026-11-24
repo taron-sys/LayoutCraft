@@ -489,8 +489,9 @@ fn scale_text(text: &mut SceneText, scale: f64) {
     text.w *= scale;
     text.h *= scale;
     // Text is measured in paper units and does not shrink with an
-    // architectural drawing scale. Keep a minimum box large enough for the
-    // authored characters so labels do not wrap into one word per line.
+    // architectural drawing scale. Keep a minimum box wide enough for the longest
+    // word (not the whole line: a label in a box that is wide enough must still
+    // wrap inside it), so a word is never cut or drawn outside a tiny box.
     let content = text
         .paragraphs
         .iter()
@@ -500,7 +501,8 @@ fn scale_text(text: &mut SceneText, scale: f64) {
     let lines: Vec<&str> = content.split(['\n', '\r']).collect();
     let longest = lines
         .iter()
-        .map(|line| line.chars().count())
+        .flat_map(|line| line.split_whitespace())
+        .map(|word| word.chars().count())
         .max()
         .unwrap_or(0);
     let min_w = longest as f64 * text.font_size * 0.58;
