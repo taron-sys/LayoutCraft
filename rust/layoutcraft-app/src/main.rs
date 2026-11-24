@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use eframe::egui;
 use layoutcraft_engine::Engine;
 use layoutcraft_model::{Document, Shape};
-use layoutcraft_render::{render_png, scene_from_document_with_media, Scene, SceneItem, SceneShape};
+use layoutcraft_render::{first_font_name, font_substitution, installed_font_families, render_png, scene_font_substitutions, scene_from_document_with_media, FontSubstitution, Scene, SceneItem, SceneShape};
 use layoutcraft_vsdx::{
     patch_page_cells, ShapeCellPatch,
 };
@@ -888,6 +888,11 @@ struct LayoutCraftApp {
     ribbon_collapsed: bool,
     ribbon_peek: bool,
     ribbon_compact: bool,
+    /// Installed font families for the picker (listed on first use) and the picker's search text.
+    font_list: Option<Vec<String>>,
+    font_filter: String,
+    /// The fonts of the open page that are not installed here, with what is drawn instead.
+    font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
     page_setup_open: bool,
@@ -987,6 +992,9 @@ impl LayoutCraftApp {
             ribbon_collapsed: false,
             ribbon_peek: false,
             ribbon_compact: false,
+            font_list: None,
+            font_filter: String::new(),
+            font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
             page_setup_open: false,
@@ -1190,6 +1198,7 @@ impl LayoutCraftApp {
         }
         drop(scene_timer);
         let keep_view = !reset_view;
+        self.font_warnings = scene_font_substitutions(&scene);
         self.scene = Some(scene);
         if keep_view && self.texture.is_some() {
             // an edit: the old picture stays on screen until the new one is drawn on the raster thread
@@ -1492,6 +1501,14 @@ impl LayoutCraftApp {
             }
             _ => None,
         })
+    }
+
+    /// The font stack of the selected shape's text (as the drawing names it) and, when that font is not installed, what is drawn instead.
+    fn selected_font(&self) -> Option<(String, Option<FontSubstitution>)> {
+        let shape = self.scene_shape(self.selected.as_deref()?)?;
+        let stack = shape.text.as_ref().or(shape.texts.first())?.font_family.clone();
+        let replaced = font_substitution(&stack);
+        Some((first_font_name(&stack), replaced))
     }
 
     fn doc_shape(&self, visio_id: &str) -> Option<&Shape> {
@@ -2597,7 +2614,12 @@ impl LayoutCraftApp {
                                         }
                                         Cell::Command(id) => ui.horizontal(|ui| self.ribbon_button(ui, ctx, id, action)).inner,
                                         Cell::Menu(label, ids) => {
-                                            ui.menu_button(format!("{label} \u{25be}"), |ui| {
+                                            // the Font popup stays open while A- / A+ and B / I / U are clicked again and again; the others close after a click
+                                            let behavior = if label == "Font" { egui::PopupCloseBehavior::CloseOnClickOutside } else { egui::PopupCloseBehavior::CloseOnClick };
+                                            egui::containers::menu::MenuButton::new({
+                                                let title = egui::RichText::new(format!("{label} \u{25be}"));
+                                                if label == "Font" && self.selected_font().is_some_and(|(_, replaced)| replaced.is_some()) { title.color(egui::Color32::from_rgb(255, 90, 90)) } else { title }
+                                            }).config(egui::containers::menu::MenuConfig::new().close_behavior(behavior)).ui(ui, |ui| {
                                                 // the popup lists the commands with their names
                                                 let compact = std::mem::replace(&mut self.ribbon_compact, false);
                                                 for id in ids {
@@ -2693,7 +2715,7 @@ impl LayoutCraftApp {
             }
             return;
         }
-        if matches!(id, "p:bold" | "p:fontSize" | "p:fillColor" | "p:lineColor") {
+        if matches!(id, "p:bold" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor") {
             self.ribbon_format_controls(ui, id, action);
             return;
         }
@@ -2759,6 +2781,41 @@ impl LayoutCraftApp {
                         *action = Some(Action::StyleSelected(serde_json::json!({ key: !on }).to_string()));
                     }
                 }
+            }
+            "p:fontFamily" => {
+                let (name, replaced) = self.selected_font().unwrap_or_default();
+                let label = if name.is_empty() { "Font family".to_string() } else { name.clone() };
+                let mut title = egui::RichText::new(format!("{label} \u{25be}"));
+                if replaced.is_some() {
+                    title = title.color(egui::Color32::from_rgb(255, 90, 90));
+                }
+                let tip = match &replaced {
+                    Some(found) => format!("{} is not installed here: {} is drawn instead. The file keeps {}.", found.requested, found.used, found.requested),
+                    None => "Font family of the selected shapes".to_string(),
+                };
+                let families = self.font_list.get_or_insert_with(installed_font_families).clone();
+                let filter = &mut self.font_filter;
+                ui.add_enabled_ui(enabled, |ui| {
+                    ui.menu_button(title, |ui| {
+                        ui.add(egui::TextEdit::singleline(filter).hint_text("Search fonts").desired_width(200.0));
+                        let needle = filter.to_lowercase();
+                        let shown: Vec<&String> = families.iter().filter(|family| needle.is_empty() || family.to_lowercase().contains(&needle)).collect();
+                        egui::ScrollArea::vertical().max_height(280.0).show_rows(ui, 20.0, shown.len(), |ui, rows| {
+                            for family in &shown[rows] {
+                                let chosen = family.eq_ignore_ascii_case(&name);
+                                if ui.selectable_label(chosen, family.as_str()).clicked() {
+                                    *action = Some(Action::StyleSelected(serde_json::json!({ "fontFamily": family }).to_string()));
+                                    ui.close();
+                                }
+                            }
+                        });
+                        if shown.is_empty() {
+                            ui.label("No installed font matches.");
+                        }
+                    })
+                    .response
+                    .on_hover_text(tip);
+                });
             }
             "p:fontSize" => {
                 // the model keeps the size in px (96 per inch); the file and the engine speak points
@@ -3397,6 +3454,10 @@ impl eframe::App for LayoutCraftApp {
                             page.shapes.len(),
                             page.connectors.len()
                         ));
+                    }
+                    for found in &self.font_warnings {
+                        ui.colored_label(egui::Color32::from_rgb(255, 90, 90), format!("\u{26a0} Font {} is not installed: drawn with {}", found.requested, found.used))
+                            .on_hover_text("The file keeps the font it names; only this screen uses the replacement, so text may look and wrap a little differently.");
                     }
                 } else {
                     ui.label("Nothing loaded.");

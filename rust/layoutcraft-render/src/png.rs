@@ -5,30 +5,9 @@ use crate::svg::to_svg_scaled;
 /// The usvg options with the system fonts loaded. Scanning the fonts costs tens to hundreds of milliseconds, so it happens once per process and
 /// every render shares the font database (an `Arc`).
 fn shared_options() -> resvg::usvg::Options<'static> {
-    static FONTS: std::sync::OnceLock<std::sync::Arc<resvg::usvg::fontdb::Database>> = std::sync::OnceLock::new();
-    let fonts = FONTS.get_or_init(|| {
-        let mut database = resvg::usvg::fontdb::Database::new();
-        database.load_system_fonts();
-        // fontdb's generic families default to Arial, Times New Roman and Courier New; where those are not installed (Linux) nothing would
-        // match and no text would be drawn, so point each generic family at an installed face.
-        let installed = |name: &str| database.faces().any(|face| face.families.iter().any(|(family, _)| family.eq_ignore_ascii_case(name)));
-        let first = |names: &[&str]| names.iter().find(|name| installed(name)).map(|name| name.to_string());
-        let sans = first(&["Arial", "Liberation Sans", "Carlito", "Noto Sans", "DejaVu Sans", "Adwaita Sans", "Cantarell", "Helvetica"]);
-        let serif = first(&["Times New Roman", "Liberation Serif", "Caladea", "Noto Serif", "DejaVu Serif"]);
-        let mono = first(&["Courier New", "Liberation Mono", "Noto Sans Mono", "DejaVu Sans Mono"]);
-        if let Some(name) = sans {
-            database.set_sans_serif_family(name);
-        }
-        if let Some(name) = serif {
-            database.set_serif_family(name);
-        }
-        if let Some(name) = mono {
-            database.set_monospace_family(name);
-        }
-        std::sync::Arc::new(database)
-    });
+    let fonts = crate::fonts::database();
     let mut options = resvg::usvg::Options::default();
-    options.fontdb = fonts.clone();
+    options.fontdb = fonts;
     // Visio files name Windows fonts; try the open, metric-compatible faces after each of them, and fall back to sans-serif last.
     options.font_resolver.select_font = Box::new(|font, db| {
         use resvg::usvg::fontdb::{Family, Query, Stretch, Style, Weight};
@@ -41,14 +20,7 @@ fn shared_options() -> resvg::usvg::Options<'static> {
                 FontFamily::Named(name) => {
                     order.push(Some(names.len()));
                     names.push(name.clone());
-                    let alias: &[&str] = match name.to_ascii_lowercase().as_str() {
-                        "calibri" => &["Carlito"],
-                        "cambria" => &["Caladea"],
-                        "arial" | "helvetica" | "segoe ui" | "tahoma" | "verdana" => &["Liberation Sans"],
-                        "times new roman" | "times" => &["Liberation Serif"],
-                        "courier new" | "consolas" => &["Liberation Mono"],
-                        _ => &[],
-                    };
+                    let alias = crate::fonts::aliases(name);
                     for a in alias {
                         order.push(Some(names.len()));
                         names.push(a.to_string());

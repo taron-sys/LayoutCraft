@@ -9,7 +9,10 @@ pub mod scene;
 pub mod svg;
 mod bevel_table;
 mod text;
+mod fonts;
 
+
+pub use fonts::{first_font_name, font_substitution, scene_font_substitutions, installed_font_families, FontSubstitution};
 pub use png::{render_png, render_rgb};
 pub use scene::{
     scene_from_document, scene_from_document_with_media, scene_from_document_with_options, shape_painted_bounds, SceneOptions, Point, Scene, SceneConnector, SceneImage,
