@@ -1,0 +1,2 @@
+# Checked-in goldens and fixtures are hashed and compared byte for byte: never convert line endings.
+* -text

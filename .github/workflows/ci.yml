@@ -59,7 +59,7 @@ jobs:
         env:
           CARGO_TOOLCHAIN: '' # use the runner's default toolchain, as for the wasm build
         run: |
-          cargo fetch --manifest-path rust/Cargo.toml --target x86_64-pc-windows-gnu
+          cargo fetch --manifest-path rust/Cargo.toml
           node tools/gen-third-party.mjs --check
 
   deny:
