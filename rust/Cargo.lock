@@ -1849,7 +1849,7 @@ dependencies = [
 
 [[package]]
 name = "layoutcraft-app"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "eframe",
  "image",
@@ -1901,7 +1901,7 @@ dependencies = [
 
 [[package]]
 name = "layoutcraft-mcp"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "layoutcraft-engine",
  "serde",

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- MIME type of .vsdx files for the desktop's shared-mime-info database, so that file managers offer LayoutCraft for them.
+     The type name is the registered media type of these files; this file only describes it and does not make LayoutCraft the default application. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/vnd.ms-visio.drawing">
+    <comment>Drawing file (.vsdx)</comment>
+    <glob pattern="*.vsdx"/>
+    <sub-class-of type="application/zip"/>
+  </mime-type>
+</mime-info>
