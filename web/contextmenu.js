@@ -9,7 +9,7 @@ const SHAPE = [
   ['Group', 'grp'], ['Ungroup', 'ungrp'], '-',
   ['Bring to front', 'zFront'], ['Bring forward', 'zFwd'], ['Send backward', 'zBwd'], ['Send to back', 'zBack'], '-',
   ['Rotate left', 'rotL'], ['Rotate right', 'rotR'], ['Flip horizontal', 'flipH'], ['Flip vertical', 'flipV'], '-',
-  ['Reverse ends', 'reverseEnds'], ['Lock', 'lockShape'], ['Shape data...', 'dataBtn'], ['Hyperlink...', 'insertHyperlink'], ['New comment', 'newComment'],
+  ['Reverse ends', 'reverseEnds'], ['Lock', 'lockShape'], ['Shape fields...', 'dataBtn'], ['Hyperlink...', 'insertHyperlink'], ['New comment', 'newComment'],
 ];
 const PAGE = [
   ['Paste', 'paste'], '-',

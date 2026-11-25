@@ -358,7 +358,7 @@ export async function loadEngine(source) {
     autoConnect(page, id, dir, pick = null) {
       const f = this.groups(page).find((g) => g.id === id);
       const d = { right: [1, 0], left: [-1, 0], up: [0, 1], down: [0, -1] }[dir];
-      if (!f || !d) throw new Error(`cannot AutoConnect ${id} ${dir}`);
+      if (!f || !d) throw new Error(`cannot add and connect a shape next to ${id} (${dir})`);
       const [s, c] = [Math.sin(f.angle), Math.cos(f.angle)];
       const corners = [[0, 0], [f.size[0], 0], [f.size[0], f.size[1]], [0, f.size[1]]].map(([u, v]) => {
         let p = [u - f.loc[0], v - f.loc[1]];
