@@ -1,0 +1,30 @@
+# Runs only for changes to Markdown or licence files (the files ci.yml ignores): the public-wording guard, on Linux only. A change that also touches any
+# other file runs ci.yml, which has the same guard in its "wasm and notices" job.
+# Every action is pinned to a commit SHA (the tag is in the comment); keep them current with Dependabot (github-actions).
+name: docs-check
+
+on:
+  push:
+    branches: [main]
+    paths: ['**/*.md', 'LICENSE*']
+  pull_request:
+    paths: ['**/*.md', 'LICENSE*']
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels the older run of the same PR (runs on main always finish).
+concurrency:
+  group: docs-check-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  provenance:
+    name: provenance guard (docs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, installs the current stable Rust
+      - name: Provenance guard (public wording and private paths)
+        working-directory: rust
+        run: cargo xtask provenance

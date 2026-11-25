@@ -3,10 +3,14 @@
 # Every action is pinned to a commit SHA (the tag is in the comment); keep them current with Dependabot (github-actions).
 name: ci
 
+# A change that touches only Markdown files or the licence files does not build or test anything here; docs-check.yml runs the public-wording guard for it.
+# A change that also touches any other file runs everything.
 on:
   push:
     branches: [main]
+    paths-ignore: ['**/*.md', 'LICENSE*']
   pull_request:
+    paths-ignore: ['**/*.md', 'LICENSE*']
 
 permissions:
   contents: read
