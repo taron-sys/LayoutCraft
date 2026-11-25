@@ -18,7 +18,7 @@ jobs:
     env:
       LAYOUTCRAFT_PUBLIC_BUILD: '1'
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, installs the current stable Rust
       - name: Portable zip (builds both exes)
         shell: pwsh
@@ -41,7 +41,7 @@ jobs:
       #   run: |
       #     dotnet tool install --global wix
       #     pwsh tools/installer/build-msi.ps1 -NoBuild
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: windows
           path: dist/*
@@ -56,7 +56,7 @@ jobs:
           - { os: macos-latest, name: macos-arm64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, installs the current stable Rust
       - name: System libraries of eframe (Linux)
         if: runner.os == 'Linux'
@@ -81,7 +81,7 @@ jobs:
       #   run: |
       #     # import the certificate into a temporary keychain, codesign --options runtime --timestamp both binaries,
       #     # zip them, xcrun notarytool submit --wait, xcrun stapler staple (a bare binary cannot be stapled: ship a .app or .dmg then)
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.name }}
           path: out/*
@@ -92,7 +92,7 @@ jobs:
     permissions:
       contents: write # only this job may create the release
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           path: artifacts
       - name: Release
