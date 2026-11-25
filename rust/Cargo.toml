@@ -9,6 +9,7 @@ members = [
     "layoutcraft-render",
     "layoutcraft-vsdx",
     "layoutcraft-wasm",
+    "xtask",
 ]
 resolver = "2"
 

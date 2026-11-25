@@ -46,21 +46,20 @@ jobs:
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, installs the current stable Rust
         with:
           targets: wasm32-unknown-unknown
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
       - name: Provenance guard (public wording and private paths)
-        run: node tools/check-provenance.mjs
+        working-directory: rust
+        run: cargo xtask provenance
       - name: Build the wasm (public build)
         env:
           CARGO_TOOLCHAIN: '' # the script pins a toolchain for the maintainers' machine; on the runner the default one is used
         run: sh tools/build-web-wasm.sh public
       - name: Third-party notices are current
+        working-directory: rust
         env:
           CARGO_TOOLCHAIN: '' # use the runner's default toolchain, as for the wasm build
         run: |
-          cargo fetch --manifest-path rust/Cargo.toml
-          node tools/gen-third-party.mjs --check
+          cargo fetch
+          cargo xtask notices --check
 
   deny:
     name: licences and advisories (cargo-deny)

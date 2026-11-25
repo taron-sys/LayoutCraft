@@ -1,5 +1,5 @@
 {
- "generated": "by visio-test-harness/gen-third-party.mjs",
+ "generated": "by cargo xtask notices",
  "target": "x86_64-pc-windows-gnu",
  "crates": [
   {
