@@ -1,0 +1,13 @@
+[package]
+name = "layoutcraft-formula"
+version = "0.1.0"
+edition = "2021"
+description = "ShapeSheet-style cell formula engine: parser, units, references, dependency graph and recalculation"
+license = "MIT OR Apache-2.0"
+publish = false
+
+# No runtime dependencies: the engine is std-only so it builds offline and for WebAssembly.
+
+[dev-dependencies]
+# The differential test runs the repository's earlier evaluators (`formula.rs`, `colorexpr.rs`) next to this crate.
+layoutcraft-vsdx = { path = "../layoutcraft-vsdx" }

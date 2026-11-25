@@ -4,6 +4,7 @@ members = [
     "layoutcraft-conformance",
     "layoutcraft-engine",
     "layoutcraft-fixtures",
+    "layoutcraft-formula",
     "layoutcraft-mcp",
     "layoutcraft-model",
     "layoutcraft-render",
