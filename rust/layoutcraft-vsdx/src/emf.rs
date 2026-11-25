@@ -674,13 +674,7 @@ fn process(c: &mut Converter, kind: u32, rec: &[u8]) -> Option<()> {
         12 => c.dc.vp_org = (i32_at(rec, 8)? as f64, i32_at(rec, 12)? as f64),
         33 => c.stack.push(c.dc.clone()),
         34 => {
-            let relative = i32_at(rec, 8)?;
-            let pops = if relative < 0 { (-relative) as usize } else { 1 };
-            for _ in 0..pops {
-                if let Some(dc) = c.stack.pop() {
-                    c.dc = dc;
-                }
-            }
+            restore_dc(&mut c.stack, &mut c.dc, i32_at(rec, 8)?);
         }
         35 | 36 => {
             let xf = Xf {
@@ -1184,13 +1178,7 @@ fn wmf_record(c: &mut Converter, func: u16, rec: &[u8]) -> Option<()> {
         0x001E => c.stack.push(c.dc.clone()), // SAVEDC
         0x0127 => {
             // RESTOREDC: a negative index counts back from the top.
-            let relative = i16_at(rec, 6)?;
-            let pops = if relative < 0 { (-(relative as i32)) as usize } else { 1 };
-            for _ in 0..pops {
-                if let Some(dc) = c.stack.pop() {
-                    c.dc = dc;
-                }
-            }
+            restore_dc(&mut c.stack, &mut c.dc, i32::from(i16_at(rec, 6)?));
         }
         // Objects: a new object takes the lowest free slot.
         0x02FA => {
@@ -1705,6 +1693,17 @@ fn wmf_bitmap(c: &mut Converter, func: u16, rec: &[u8]) -> Option<()> {
     Some(())
 }
 
+/// RESTOREDC: a negative `relative` pops that many saved states (the last one popped becomes current), anything else pops one.
+/// The count comes from the file: it is capped at what is on the stack (a count of -2^31 used to loop 2^31 times, and negating
+/// it overflowed), and the states are removed in one step.
+fn restore_dc<T>(stack: &mut Vec<T>, dc: &mut T, relative: i32) {
+    let wanted = if relative < 0 { relative.unsigned_abs() as usize } else { 1 };
+    let keep = stack.len().saturating_sub(wanted);
+    if let Some(restored) = stack.drain(keep..).next() {
+        *dc = restored;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1780,6 +1779,45 @@ mod tests {
         data.extend(polygon16(&[(0, 0), (5, 0), (5, 5)]));
         let svg = emf_to_svg(&data).unwrap();
         assert!(svg.svg.contains("M0.00 0.00L50.00 0.00L50.00 50.00Z"), "{}", svg.svg);
+    }
+
+    #[test]
+    fn restore_dc_with_a_huge_negative_count_is_bounded() {
+        // SaveDC twice, then RestoreDC(-2^31): it used to overflow on negation and loop 2^31 times
+        let mut data = header(10, 10);
+        data.extend(rec(33, &[]));
+        data.extend(rec(33, &[]));
+        data.extend(rec(34, &i32::MIN.to_le_bytes()));
+        data.extend(polygon16(&[(0, 0), (5, 0), (5, 5)]));
+        let svg = emf_to_svg(&data).expect("svg");
+        assert!(svg.svg.contains("M0.00 0.00L5.00 0.00L5.00 5.00Z"), "{}", svg.svg);
+    }
+
+    #[test]
+    fn restore_dc_minus_one_brings_back_the_saved_mapping() {
+        let mut data = header(100, 100);
+        data.extend(rec(33, &[])); // save the unscaled state
+        data.extend(rec(17, &8u32.to_le_bytes())); // anisotropic
+        data.extend(rec(9, &[10, 0, 0, 0, 10, 0, 0, 0])); // window ext 10x10
+        data.extend(rec(11, &[100, 0, 0, 0, 100, 0, 0, 0])); // viewport ext 100x100: 10x scale
+        data.extend(rec(34, &(-1i32).to_le_bytes())); // back to the saved state
+        data.extend(polygon16(&[(0, 0), (5, 0), (5, 5)]));
+        let svg = emf_to_svg(&data).unwrap();
+        assert!(svg.svg.contains("M0.00 0.00L5.00 0.00L5.00 5.00Z"), "the scale was not undone: {}", svg.svg);
+    }
+
+    #[test]
+    fn restore_dc_pops_at_most_what_is_saved() {
+        let (mut stack, mut dc) = (vec![1, 2, 3], 9);
+        restore_dc(&mut stack, &mut dc, -2);
+        assert_eq!((stack.as_slice(), dc), (&[1][..], 2));
+        restore_dc(&mut stack, &mut dc, i32::MIN);
+        assert_eq!((stack.len(), dc), (0, 1));
+        restore_dc(&mut stack, &mut dc, -1);
+        assert_eq!(dc, 1, "an empty stack leaves the state as it is");
+        let (mut stack, mut dc) = (vec![7, 8], 0);
+        restore_dc(&mut stack, &mut dc, 5);
+        assert_eq!((stack.as_slice(), dc), (&[7][..], 8), "a positive count pops one");
     }
 
     #[test]
