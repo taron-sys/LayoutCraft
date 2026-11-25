@@ -18,6 +18,11 @@ concurrency:
 
 env:
   LAYOUTCRAFT_PUBLIC_BUILD: '1' # exactly what the public repository builds (no private modules)
+  # The Ubuntu runner ran out of disk while linking the test binaries (full debug info for the egui/wgpu tree in every one).
+  # CI needs neither debug info for tests nor incremental build state; panics still say which test and file failed.
+  CARGO_PROFILE_TEST_DEBUG: '0'
+  CARGO_PROFILE_DEV_DEBUG: '0'
+  CARGO_INCREMENTAL: '0'
 
 jobs:
   native:
