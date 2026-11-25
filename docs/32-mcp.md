@@ -1,23 +1,26 @@
 # 32. MCP server (Model Context Protocol)
 
-`mcp/server.mjs` lets an AI assistant (Claude Code, Claude Desktop, any MCP client) create and edit LayoutCraft drawings. It drives the same engine as the web shell
-(`web/engine.js` on `web/layoutcraft.wasm`), so every format the shell handles works here too. No dependencies, no network, no shell: stdio only, one JSON-RPC 2.0 message per line
-(protocol revisions 2025-06-18, 2025-03-26, 2024-11-05; spec: modelcontextprotocol.io).
+`layoutcraft-mcp` (crate `rust/layoutcraft-mcp`, see also [35](35-mcp-native.md)) lets an AI assistant (Claude Code, Claude Desktop, any MCP client) create and edit LayoutCraft drawings. It drives the same engine
+(`layoutcraft-engine`) as the desktop app and the browser shell, so every format they handle works here too. No network, no shell: stdio only, one JSON-RPC 2.0 message per line
+(protocol revisions 2025-06-18, 2025-03-26, 2024-11-05; spec: modelcontextprotocol.io). It serves the 49 tools below. Until the JavaScript editor was removed ([42](42-javascript-removal.md)) a Node server,
+`mcp/server.mjs`, served the same tool list; it is gone, and so is the need for Node or for a built `layoutcraft.wasm`.
 
 ## Start
 
 ```
-node mcp/server.mjs --root <folder>
+layoutcraft-mcp --root <folder>
 ```
 
+Build it with `cargo build --release -p layoutcraft-mcp` in `rust/` (the program is `rust/target/release/layoutcraft-mcp`, `.exe` on Windows); the portable zip of the app ships it next to `layoutcraft-app`.
 Files are read and written only below `<folder>` (default: the current directory); a path outside it is refused. The drawing lives in memory until `save`.
-Node 20 or newer. The wasm must be built (`visio-test-harness/build-web-wasm.sh`, or `... public` for the public build; both work).
 
 Client configuration (Claude Code `.mcp.json`, Claude Desktop `claude_desktop_config.json`):
 
 ```json
-{ "mcpServers": { "layoutcraft": { "command": "node", "args": ["C:/path/to/LayoutCraft/mcp/server.mjs", "--root", "C:/path/to/my/drawings"] } } }
+{ "mcpServers": { "layoutcraft": { "command": "C:/path/to/LayoutCraft/layoutcraft-mcp.exe", "args": ["--root", "C:/path/to/my/drawings"] } } }
 ```
+
+For Claude Code: `claude mcp add layoutcraft -- C:/path/to/LayoutCraft/layoutcraft-mcp.exe --root C:/path/to/my/drawings`.
 
 ## Units
 
@@ -60,14 +63,15 @@ Errors (bad input, a path outside the root, an unknown shape) come back as a too
 
 ## Test
 
-`node visio-test-harness/test-mcp.mjs` (also step 5 of the gate) starts the server as a child process and talks to it over stdio (84 checks: handshake, tool list, a drawing with a connector, styles, the exports, a
-save / open round trip for .vsdx and .drawio, themes, pages, undo / redo, resources, every refusal).
+`cargo test -p layoutcraft-mcp` (in `rust/`): the tool list is the checked-in `tests/oracle/tools-list.json` (edit it together with the tool it describes), every listed tool is implemented, drawing and listing work,
+and a path outside the root is refused. The maintainers' harness (private repository) also starts the built program as a child process and talks to it over stdio (107 checks: handshake, tool list, a drawing with a
+connector, styles, the exports, a save / open round trip for .vsdx and .drawio, themes, pages, undo / redo, resources, every refusal).
 
 ## Not yet
 
 Connector routing options, PNG / PDF export (they need a canvas) (they need a browser canvas), a long-lived multi-document mode.
 
-## Connecting a client from the application, and desktop builds
+## Connecting a client from the application
 
-* **Help > AI assistant (MCP)** (step 358) opens a dialog with the configuration for a client: type the path of `mcp/server.mjs` and the drawings folder, copy the JSON block (Claude Desktop: Settings > Developer > Edit Config, then restart it) or the `claude mcp add` command (Claude Code). The entries are remembered in the browser. The server itself is started by the client, never by the page.
-* The desktop builds (Windows, macOS, Linux) are the **native egui application** (docs/17, decision of 2026-11-19; nothing of the MCP part is built yet). It gets its own AI assistant window with the same configuration text. First the server runs as a sidecar program next to the application, later the application itself is the server (`layoutcraft --mcp --root <folder>`); `test-mcp.mjs` is the parity test. The plan, the shared engine, the build matrix and the milestones: **docs/34-desktop-build.md**.
+* **Help > AI assistant (MCP)** in the desktop app (the native egui application, docs/17 and docs/34) opens a window with the configuration for a client: it fills in the path of the `layoutcraft-mcp` that sits next to the application (or you type the path), and you type the drawings folder, then copy the JSON block (Claude Desktop: Settings > Developer > Edit Config, then restart it) or the `claude mcp add` command (Claude Code). The server is started by the client, never by the application.
+* The browser shell has the same dialog (`web/mcpinfo.js`); there you type the path of the program, and the entries are remembered in the browser. A web page cannot start the server.

@@ -1,5 +1,7 @@
 # Overview and current status
 
+> The JavaScript editor this overview describes was removed ([42](42-javascript-removal.md); its last commit is `c9aa852`). The product is the Rust core with a native app and a browser shell; the feature lists below record what the editor did.
+
 ## What LayoutCraft is
 
 LayoutCraft is a diagram editor that can come as a Webapp or independent Desktop app.
@@ -22,13 +24,13 @@ The application consists of:
 
 Run it locally:
 
-```powershell
-cd C:\path\to\LayoutCraft
-npm start
-# http://localhost:8137/
+```sh
+cd rust
+cargo run --release -p layoutcraft-app   # the desktop app
+cargo xtask serve                        # the browser shell: http://127.0.0.1:8137/web/shell.html
 ```
 
-No `npm install` is required.
+No Node.js is needed (the browser shell also needs `web/layoutcraft.wasm`, see the [docs index](README.md)).
 
 ## Phase status
 
@@ -69,7 +71,7 @@ icon sets and colour-by-value rules are imported, rendered, edited and saved.
 
 ## Saving status
 
-Save routing lives in `js/main.js` (`app.saveVSDX`):
+Save routing of the JavaScript editor (`app.saveVSDX` in its `main.js`); the Rust core keeps the two modes, `writer.rs` (patch) and `fresh.rs` (build), in `layoutcraft-vsdx`:
 
 1. If a matching original package is retained, **patch** it.
 2. If a cached package can be restored by the document's `visioKey`, use it.
@@ -164,7 +166,7 @@ because the app is built from ES modules.
 ## Repository status
 
 - No framework, bundler or runtime dependency.
-- `package.json` only contains `start`/`dev` scripts.
+- The JavaScript editor and its `package.json` were removed ([42](42-javascript-removal.md)).
 - `test/MS Example-edited.vsdx` is currently a generated output artifact, not a
   test suite.
 - The working directory was not a Git repository as of 2026-10-26. Initialise
