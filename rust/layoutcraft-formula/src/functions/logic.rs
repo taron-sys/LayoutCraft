@@ -150,7 +150,7 @@ pub(crate) fn guard(call: &mut Call<'_>) -> Outcome {
 /// threes, so any other count is `#VALUE!`. An omitted `value` (the page's own example leaves it
 /// out) counts as 0.
 pub(crate) fn bound(call: &mut Call<'_>) -> Outcome {
-    if call.len() < 5 || (call.len() - 2) % 3 != 0 {
+    if call.len() < 5 || !(call.len() - 2).is_multiple_of(3) {
         return Err(ErrorValue::Value);
     }
     Ok(call.get(0).cloned().unwrap_or_else(|| Value::number(0.0)))

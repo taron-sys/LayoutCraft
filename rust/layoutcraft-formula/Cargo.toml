@@ -8,3 +8,6 @@ publish = false
 
 # No runtime dependencies: the engine is std-only so it builds offline and for WebAssembly.
 
+[dev-dependencies]
+# The differential test runs the repository's earlier evaluators (`formula.rs`, `colorexpr.rs`) next to this crate.
+layoutcraft-vsdx = { path = "../layoutcraft-vsdx" }

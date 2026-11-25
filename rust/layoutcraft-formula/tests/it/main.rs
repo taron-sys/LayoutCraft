@@ -3,6 +3,7 @@
 mod arithmetic;
 mod cases;
 mod common;
+mod differential;
 mod engine;
 mod functions;
 mod host;

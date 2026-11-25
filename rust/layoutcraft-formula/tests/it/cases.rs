@@ -168,7 +168,7 @@ pub fn math_cases() -> Vec<Case> {
     b.e("SIGN", "SIGN(0.00000000001, 0)", N(1.0));
     b.e("SIGN", "SIGN(0.5, 1)", N(0.0));
     b.e("SIGN", "SIGN(1/0)", E(Err::DivZero));
-    b.n("SQRT", "SQRT(2)", Near(1.4142));
+    b.n("SQRT", "SQRT(2)", Near(std::f64::consts::SQRT_2));
     b.n("SQRT", "SQRT(16 in * 1 in)", L(4.0));
     b.e("SQRT", "SQRT(-1)", E(Err::Num));
     b.e("SQRT", "SQRT(0)", N(0.0));
@@ -247,11 +247,11 @@ pub fn math_cases() -> Vec<Case> {
     b.n("AVERAGE", "AVERAGE(2 in, 4 in)", L(3.0));
     b.e("AVERAGE", "AVERAGE(1 in, 1 deg)", E(Err::Dim));
     // Trigonometry pages: radians unless the argument carries a unit.
-    b.n("SIN", "SIN(45 deg)", Near(0.7071));
+    b.n("SIN", "SIN(45 deg)", Near(std::f64::consts::FRAC_1_SQRT_2));
     b.e("SIN", "SIN(0)", N(0.0));
     b.e("SIN", "SIN(PI() / 2)", N(1.0));
     b.e("SIN", "SIN(1 in)", E(Err::Dim));
-    b.n("COS", "COS(45 deg)", Near(0.7071));
+    b.n("COS", "COS(45 deg)", Near(std::f64::consts::FRAC_1_SQRT_2));
     b.e("COS", "COS(0)", N(1.0));
     b.n("TAN", "TAN(45 deg)", Near(1.0));
     b.e("TAN", "TAN(1 ed)", E(Err::Dim));
@@ -280,7 +280,7 @@ pub fn math_cases() -> Vec<Case> {
     b.n("DEG", "DEG(PI() / 4)", N(45.0));
     b.e("DEG", "DEG(90 deg)", N(90.0));
     b.e("DEG", "DEG(1 in)", E(Err::Dim));
-    b.n("RAD", "RAD(45)", Near(0.7854));
+    b.n("RAD", "RAD(45)", Near(std::f64::consts::FRAC_PI_4));
     b.e("RAD", "RAD(45 deg)", NearDeg(45.0));
     b.e("RAD", "RAD(1 in)", E(Err::Dim));
     b.n("ANG360", "ANG360(395 deg)", NearDeg(35.0));
