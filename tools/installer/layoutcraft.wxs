@@ -30,32 +30,32 @@
     </Feature>
 
     <!-- per-user components: the key path is a registry value of the user, not the file -->
-    <Component Id="AppExe" Directory="INSTALLFOLDER" Guid="*">
+    <Component Id="AppExe" Directory="INSTALLFOLDER" Guid="{DD6DC3A2-B3EB-44A0-86F8-FB8736074808}">
       <File Id="LayoutCraftApp" Source="$(var.Bin)\layoutcraft-app.exe" />
       <RegistryValue Root="HKCU" Key="Software\LayoutCraft\Install" Name="App" Type="integer" Value="1" KeyPath="yes" />
     </Component>
-    <Component Id="McpExe" Directory="INSTALLFOLDER" Guid="*">
+    <Component Id="McpExe" Directory="INSTALLFOLDER" Guid="{E07084C0-C69D-4536-A5D2-595F800B5A84}">
       <File Id="LayoutCraftMcp" Source="$(var.Bin)\layoutcraft-mcp.exe" />
       <RegistryValue Root="HKCU" Key="Software\LayoutCraft\Install" Name="Mcp" Type="integer" Value="1" KeyPath="yes" />
     </Component>
-    <Component Id="Notices" Directory="INSTALLFOLDER" Guid="*">
+    <Component Id="Notices" Directory="INSTALLFOLDER" Guid="{1C336A12-0C43-47D0-AEE7-EC01A5272054}">
       <File Id="ThirdPartyNotices" Source="$(var.Layout)\THIRD-PARTY-NOTICES.txt" />
       <RegistryValue Root="HKCU" Key="Software\LayoutCraft\Install" Name="Notices" Type="integer" Value="1" KeyPath="yes" />
     </Component>
-    <Component Id="Provenance" Directory="INSTALLFOLDER" Guid="*">
+    <Component Id="Provenance" Directory="INSTALLFOLDER" Guid="{8DFCAD44-B434-4147-AE8D-4E6987066F0D}">
       <File Id="ProvenanceStatement" Source="$(var.Layout)\PROVENANCE.md" />
       <RegistryValue Root="HKCU" Key="Software\LayoutCraft\Install" Name="Provenance" Type="integer" Value="1" KeyPath="yes" />
     </Component>
-    <Component Id="Licenses" Directory="INSTALLFOLDER" Guid="*">
+    <Component Id="Licenses" Directory="INSTALLFOLDER" Guid="{BB025F1E-36DC-4DFE-AC92-F450FBFDA3EA}">
       <File Id="LicenseMit" Source="$(var.Layout)\LICENSE-MIT" />
       <File Id="LicenseApache" Source="$(var.Layout)\LICENSE-APACHE" />
       <RegistryValue Root="HKCU" Key="Software\LayoutCraft\Install" Name="Licenses" Type="integer" Value="1" KeyPath="yes" />
     </Component>
-    <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="*">
+    <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="{7231857C-39E5-4CC6-A3AC-8FA519633281}">
       <Shortcut Id="LayoutCraftShortcut" Name="LayoutCraft" Target="[INSTALLFOLDER]layoutcraft-app.exe" WorkingDirectory="INSTALLFOLDER" Icon="LayoutCraftIcon" />
       <RegistryValue Root="HKCU" Key="Software\LayoutCraft\Install" Name="Shortcut" Type="integer" Value="1" KeyPath="yes" />
     </Component>
-    <Component Id="VsdxAssociation" Directory="INSTALLFOLDER" Guid="*">
+    <Component Id="VsdxAssociation" Directory="INSTALLFOLDER" Guid="{E8DC1BD2-3253-4715-89EB-0AD7135B52CC}">
       <RegistryValue Root="HKCU" Key="Software\Classes\LayoutCraft.vsdx" Type="string" Value="Visio drawing (LayoutCraft)" />
       <RegistryValue Root="HKCU" Key="Software\Classes\LayoutCraft.vsdx\DefaultIcon" Type="string" Value="[INSTALLFOLDER]layoutcraft-app.exe,0" />
       <RegistryValue Root="HKCU" Key="Software\Classes\LayoutCraft.vsdx\shell\open\command" Type="string" Value="&quot;[INSTALLFOLDER]layoutcraft-app.exe&quot; &quot;%1&quot;" />

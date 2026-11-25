@@ -26,7 +26,9 @@ rpm -qpi "$base.rpm" | grep -E '^(Name|Version|Architecture|License)'
 rpm -qp --requires "$base.rpm"
 
 lc_log ".tar.gz contents"
-tar -tzf "$base.tar.gz" | grep -q '/layoutcraft-mcp$' || lc_die "the tarball has no layoutcraft-mcp"
+# list first, then search: `tar | grep -q` fails under pipefail when grep exits early and tar gets SIGPIPE
+listing=$(tar -tzf "$base.tar.gz")
+grep -q '/layoutcraft-mcp$' <<<"$listing" || lc_die "the tarball has no layoutcraft-mcp"
 
 lc_log ".AppImage header"
 file "$base.AppImage"
