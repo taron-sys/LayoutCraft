@@ -10,7 +10,7 @@
 //! listed in the [`Report`], and cells that depend on it see that error like any other. Edges are
 //! taken from the syntax tree, so a reference in a branch that is never taken still counts.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::hash::Hash;
 
@@ -81,12 +81,12 @@ pub struct Engine<H: Host> {
     /// Slot ids are never reused; a removed cell leaves `None`.
     slots: Vec<Option<Slot<H::Key>>>,
     /// `dependents[i]`: the slots that read slot `i`.
-    dependents: Vec<Vec<usize>>,
+    dependents: Vec<HashSet<usize>>,
     /// Slots whose formula must be (re-)evaluated, with a flag per slot to avoid repeats.
     dirty: Vec<usize>,
     dirty_flag: Vec<bool>,
     /// Slots that have an unresolved reference (retried when a cell appears).
-    unresolved: Vec<usize>,
+    unresolved: HashSet<usize>,
     retry_unresolved: bool,
     /// Constants changed since the last recalculation.
     pending_changed: Vec<usize>,
@@ -101,7 +101,7 @@ impl<H: Host> Engine<H> {
             dependents: Vec::new(),
             dirty: Vec::new(),
             dirty_flag: Vec::new(),
-            unresolved: Vec::new(),
+            unresolved: HashSet::new(),
             retry_unresolved: false,
             pending_changed: Vec::new(),
         }
@@ -158,7 +158,13 @@ impl<H: Host> Engine<H> {
         let Some(&id) = self.index.get(key) else {
             return Vec::new();
         };
-        let mut ids = self.dependents.get(id).cloned().unwrap_or_default();
+        let mut ids: Vec<usize> = self
+            .dependents
+            .get(id)
+            .into_iter()
+            .flatten()
+            .copied()
+            .collect();
         ids.sort_unstable();
         ids.into_iter()
             .filter_map(|dep| self.slot(dep))
@@ -192,7 +198,7 @@ impl<H: Host> Engine<H> {
             value: Value::Error(ErrorValue::Na),
             deps: Vec::new(),
         }));
-        self.dependents.push(Vec::new());
+        self.dependents.push(HashSet::new());
         self.dirty_flag.push(false);
         self.index.insert(key.clone(), id);
         // Formulas that pointed at this key before it existed can resolve now; retried once per
@@ -220,9 +226,10 @@ impl<H: Host> Engine<H> {
         if slot.value != value {
             slot.value = value;
             self.pending_changed.push(id);
-        }
-        for dependent in self.dependents.get(id).cloned().unwrap_or_default() {
-            self.mark_dirty(dependent);
+            // Only a changed constant can change what its readers compute.
+            for dependent in self.dependents.get(id).cloned().unwrap_or_default() {
+                self.mark_dirty(dependent);
+            }
         }
     }
 
@@ -235,6 +242,7 @@ impl<H: Host> Engine<H> {
             return Ok(());
         };
         slot.source = Some(formula.to_string());
+        let mut newly_failed = false;
         let result = match parsed {
             Ok(ast) => {
                 slot.ast = Some(ast);
@@ -242,10 +250,16 @@ impl<H: Host> Engine<H> {
             }
             Err(error) => {
                 slot.ast = None;
-                slot.value = Value::Error(ErrorValue::Value);
+                if slot.value != Value::Error(ErrorValue::Value) {
+                    slot.value = Value::Error(ErrorValue::Value);
+                    newly_failed = true;
+                }
                 Err(error)
             }
         };
+        if newly_failed {
+            self.pending_changed.push(id);
+        }
         self.relink(id);
         self.mark_dirty(id);
         result
@@ -265,12 +279,13 @@ impl<H: Host> Engine<H> {
         if let Some(entry) = self.slots.get_mut(id) {
             *entry = None;
         }
-        self.dirty.retain(|&d| d != id);
+        // `dirty` and `pending_changed` may still name the slot: both are read through `slot()`,
+        // which is `None` for a removed cell, so nothing is scanned out here (a bulk removal
+        // stays linear).
         if let Some(flag) = self.dirty_flag.get_mut(id) {
             *flag = false;
         }
-        self.pending_changed.retain(|&d| d != id);
-        self.unresolved.retain(|&d| d != id);
+        self.unresolved.remove(&id);
         for reader in readers {
             self.relink(reader);
             self.mark_dirty(reader);
@@ -311,6 +326,7 @@ impl<H: Host> Engine<H> {
             return;
         };
         let mut deps: Vec<usize> = Vec::new();
+        let mut seen: HashSet<usize> = HashSet::new();
         let mut unresolved = false;
         if let Some(ast) = &slot.ast {
             for reference in ast.references() {
@@ -320,7 +336,7 @@ impl<H: Host> Engine<H> {
                     .and_then(|key| self.index.get(&key).copied());
                 match target {
                     Some(dep) => {
-                        if !deps.contains(&dep) {
+                        if seen.insert(dep) {
                             deps.push(dep);
                         }
                     }
@@ -338,17 +354,17 @@ impl<H: Host> Engine<H> {
         let old = std::mem::replace(&mut slot.deps, deps.clone());
         for dep in old {
             if let Some(list) = self.dependents.get_mut(dep) {
-                list.retain(|&reader| reader != id);
+                list.remove(&id);
             }
         }
         for dep in deps {
             if let Some(list) = self.dependents.get_mut(dep) {
-                list.push(id);
+                list.insert(id);
             }
         }
-        self.unresolved.retain(|&waiting| waiting != id);
+        self.unresolved.remove(&id);
         if unresolved {
-            self.unresolved.push(id);
+            self.unresolved.insert(id);
         }
     }
 
@@ -366,7 +382,7 @@ impl<H: Host> Engine<H> {
             }
         }
         while let Some(id) = stack.pop() {
-            for &reader in self.dependents.get(id).map_or(&[][..], Vec::as_slice) {
+            for &reader in self.dependents.get(id).into_iter().flatten() {
                 if let Some(flag) = seen.get_mut(reader) {
                     if !*flag {
                         *flag = true;
@@ -452,8 +468,11 @@ impl<H: Host> Engine<H> {
             return;
         };
         let Some(ast) = &slot.ast else {
-            // A formula that did not parse keeps its error value; readers still need a look.
-            Self::wake(&self.dependents, id, needs);
+            // A formula that did not parse keeps its error value, and readers still need a look.
+            // A constant has nothing to evaluate: its readers were scheduled when it changed.
+            if slot.source.is_some() {
+                Self::wake(&self.dependents, id, needs);
+            }
             return;
         };
         let env = EngineEnv {
@@ -475,8 +494,8 @@ impl<H: Host> Engine<H> {
         }
     }
 
-    fn wake(dependents: &[Vec<usize>], id: usize, needs: &mut [bool]) {
-        for &reader in dependents.get(id).map_or(&[][..], Vec::as_slice) {
+    fn wake(dependents: &[HashSet<usize>], id: usize, needs: &mut [bool]) {
+        for &reader in dependents.get(id).into_iter().flatten() {
             if let Some(flag) = needs.get_mut(reader) {
                 *flag = true;
             }

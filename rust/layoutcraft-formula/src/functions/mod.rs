@@ -83,7 +83,8 @@ pub(crate) fn call(evaluator: &mut Evaluator<'_>, name: &str, args: &[Expr]) -> 
         evaluator.note_unsupported(info.name);
         return Value::Error(ErrorValue::Unsupported);
     }
-    if args.len() < usize::from(info.min_args) || args.len() > usize::from(info.max_args) {
+    let too_many = info.max_args != u8::MAX && args.len() > usize::from(info.max_args);
+    if args.len() < usize::from(info.min_args) || too_many {
         return Value::Error(ErrorValue::Value);
     }
     let (imp, propagate) = match info.imp {
