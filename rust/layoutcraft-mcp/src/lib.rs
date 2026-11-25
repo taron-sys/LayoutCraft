@@ -1,5 +1,5 @@
-//! The MCP server on the native engine. Protocol and tool list are those of `mcp/server.mjs` (the reference);
-//! `tests/oracle/tools-list.json` is dumped from it and served as is, so names, descriptions and schemas are identical.
+//! The MCP server on the native engine (docs/32-mcp.md, docs/35-mcp-native.md). `tests/oracle/tools-list.json` is the tool list of the server:
+//! it is edited here, together with the tool it describes, and served as is. The retired Node server (last in commit c9aa852) had the same list.
 use std::path::{Component, Path, PathBuf};
 
 use layoutcraft_engine::Engine;
@@ -752,7 +752,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tools_list_is_the_one_of_the_node_server() {
+    fn tools_list_is_the_checked_in_one() {
         let mut s = Server::new(std::env::temp_dir());
         let got = s.handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})).unwrap()["result"].clone();
         let want: Value = serde_json::from_str(TOOLS_LIST).unwrap();
