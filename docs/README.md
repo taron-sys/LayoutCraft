@@ -26,6 +26,7 @@ is intended to be read before changing the importer or writer.
 20. [VSDX patch writer](20-vsdx-patch-writer.md)
 21. [Fresh VSDX writer](21-fresh-writer.md)
 42. [Removal of the JavaScript editor](42-javascript-removal.md) (what went, what stays, how to run the tools now)
+44. [Document model: in-memory source of truth, undo journal, recalculation, save (design)](44-document-model.md)
 
 ## Test fixtures and distribution
 
@@ -35,6 +36,7 @@ is intended to be read before changing the importer or writer.
   self-authored set in `fixtures/public/`
 - [41 Legal-risk audit loop](41-legal-audit-loop.md) — the repeatable audit prompt
   and the residual owner/counsel questions
+- [Feature names](feature-names.md) — naming checks and the labels to ship (naming policy record, not legal advice)
 
 ## Quick start
 
