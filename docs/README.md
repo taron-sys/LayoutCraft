@@ -25,6 +25,8 @@ is intended to be read before changing the importer or writer.
 19. [Headless scene/SVG/raster renderer](19-headless-renderer.md)
 20. [VSDX patch writer](20-vsdx-patch-writer.md)
 21. [Fresh VSDX writer](21-fresh-writer.md)
+42. [Removal of the JavaScript editor](42-javascript-removal.md) (what went, what stays, how to run the tools now)
+44. [Document model: in-memory source of truth, undo journal, recalculation, save (design)](44-document-model.md)
 
 ## Test fixtures and distribution
 
@@ -34,27 +36,29 @@ is intended to be read before changing the importer or writer.
   self-authored set in `fixtures/public/`
 - [41 Legal-risk audit loop](41-legal-audit-loop.md) — the repeatable audit prompt
   and the residual owner/counsel questions
+- [Feature names](feature-names.md) — naming checks and the labels to ship (naming policy record, not legal advice)
 
-## Quick start on Windows
+## Quick start
 
-Prerequisites: current Chrome or Edge, Node.js 18+ (or Python 3), and Microsoft
-Visio 2021/365 for validation.
+Prerequisites: a current stable Rust toolchain (`rustup`); for the browser shell also the `wasm32-unknown-unknown` target and a current Chrome or Edge;
+Microsoft Visio 2021/365 only for the compatibility checks. No Node.js is needed.
 
-```powershell
-cd C:\path\to\LayoutCraft
-npm start
-# open http://localhost:8137/
+```sh
+cd rust
+cargo run --release -p layoutcraft-app        # the desktop app
+cargo xtask serve                             # the browser shell: http://127.0.0.1:8137/web/shell.html
 ```
 
-There is no build step and no npm dependency install. `server.mjs` is a small
-static file server and now uses `fileURLToPath`, so it is Windows-safe. A
-`python -m http.server 8137` also works if Python is available.
+The browser shell needs `web/layoutcraft.wasm`, which is not committed: build it once with `CARGO_TOOLCHAIN= sh tools/build-web-wasm.sh public` (from the repository root;
+leave `CARGO_TOOLCHAIN=` out on the maintainers' Windows machine, which pins the GNU toolchain). `cargo xtask serve [port] [--host <address>]` is a small static file
+server for the repository root on 127.0.0.1 (see [42](42-javascript-removal.md)); `cargo xtask provenance` and `cargo xtask notices [--check]` are the other repository tools.
 
 ## What is currently true
 
-- The editor is a no-dependency browser app in plain ES modules.
+- The editor is the Rust core (`rust/`) behind two hosts: the native egui desktop app and a thin browser shell (`web/`) over the core compiled to WebAssembly.
+  The rest of this list was written for the JavaScript editor that has since been removed ([42](42-javascript-removal.md)); the Rust core carries the import and the save, but check the code before relying on a detail.
 - `.vsdx`, `.vstx`, `.vsdm` and `.vstm` files are imported by reading the OPC
-  package directly in the browser. `.vdx` is imported through the same page
+  package directly in the Rust core. `.vdx` is imported through the same page
   builder; `.vsd` is not supported.
 - Opening a VSDX retains the original package. Saving can **patch** that
   package, preserving unknown parts, masters, images and macros.
@@ -113,7 +117,7 @@ Further notes (research, working logs, legal and release preparation) are kept i
 
 ## Recommended first actions on Windows
 
-1. Read [Running on Windows](02-windows-setup.md) and start the server.
+1. Read [Running on Windows](02-windows-setup.md) and start the app or the server.
 2. Open each file in `examples/` and compare against its PNG thumbnail where
    one exists.
 3. Save a patched copy of **MS Example.vsdx**, open it in Visio and confirm

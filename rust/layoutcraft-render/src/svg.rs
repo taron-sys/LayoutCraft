@@ -1365,6 +1365,16 @@ fn render_text(out: &mut String, text: &SceneText) {
     if lines.is_empty() {
         return;
     }
+    if let Some(colour) = &text.background {
+        out.push_str(&format!(
+            r#"<rect x="{}" y="{}" width="{}" height="{}" fill="{}"/>"#,
+            num(text.x),
+            num(text.y),
+            num(text.w),
+            num(text.h),
+            escape(colour)
+        ));
+    }
     let total_height: f64 = lines.iter().map(|line| line.height + line.gap_before).sum();
     let start_y = if text.v_align == "top" {
         text.y
@@ -1387,7 +1397,15 @@ fn render_text(out: &mut String, text: &SceneText) {
             _ => text.x + indent + (text.w - indent) / 2.0,
         };
         let base_factor = baseline_factor(&text.font_family, text.outside);
-        let baseline = y + line_height * base_factor;
+        let mut baseline = y + line_height * base_factor;
+        if let Some(script) = text.script {
+            // Visio: a subscript sits `shift` of the full font size below the normal baseline; a superscript is raised by it, but its glyphs (smaller)
+            // never rise above the top of the line (measured with Calibri and Kalinga at 60 pt)
+            baseline += script.shift * text.font_size;
+            if script.shift < 0.0 {
+                baseline = baseline.max(y + text.font_size * script.scale * 1.2 * base_factor);
+            }
+        }
         // Shape-level weight/style/underline are inherited by the runs (a run only
         // states its own value when it differs), so they must be set here.
         let mut decor = String::new();
@@ -1433,7 +1451,7 @@ fn render_text(out: &mut String, text: &SceneText) {
             num(baseline),
             anchor,
             escape(&text.font_family),
-            num(text.font_size),
+            num(base_size(text)),
             escape(&text.color),
             decor
         ));
@@ -1462,7 +1480,8 @@ pub(crate) fn text_layout_height(text: &SceneText) -> f64 {
 /// paragraph's alignment) and the laid-out height, positioned by the vertical alignment. Visio
 /// exports a shape that paints nothing as just its text.
 pub(crate) fn text_ink_extent(text: &SceneText) -> (f64, f64, f64, f64) {
-    let total = text_layout_height(text);
+    // Sub- and superscript text is smaller than its line box: Visio's export reaches only to the bottom of the text block (`TxtHeight`)
+    let total = if text.script.is_some() { text_layout_height(text).min(text.h.max(text.glyph_size() * 1.2)) } else { text_layout_height(text) };
     let top = match text.v_align.as_str() {
         "top" => text.y,
         "bottom" => text.y + text.h - total,
@@ -1511,6 +1530,7 @@ fn bullet_run(paragraph: &SceneParagraph, text: &str) -> SceneRun {
         underline: None,
         strike: None,
         spacing: None,
+        script: None,
     });
     run.text = text.to_string();
     run
@@ -1553,6 +1573,7 @@ fn wrap_paragraph(paragraph: &SceneParagraph, text: &SceneText) -> Vec<Vec<Scene
         underline: None,
         strike: None,
         spacing: None,
+        script: None,
     };
     if paragraph.bullet && geometry.is_none() {
         let mut run = paragraph
@@ -1626,8 +1647,13 @@ fn wrap_paragraph(paragraph: &SceneParagraph, text: &SceneText) -> Vec<Vec<Scene
     lines
 }
 
+/// The size the glyphs of the block are drawn at (the font size, smaller for sub- and superscript text).
+fn base_size(text: &SceneText) -> f64 {
+    text.font_size * text.script.map_or(1.0, |script| script.scale)
+}
+
 fn run_size(run: &SceneRun, text: &SceneText) -> f64 {
-    run.font_size.unwrap_or(text.font_size)
+    run.font_size.unwrap_or(text.font_size) * run.script.or(text.script).map_or(1.0, |script| script.scale)
 }
 
 fn run_bold(run: &SceneRun, text: &SceneText) -> bool {
@@ -1682,15 +1708,19 @@ fn isolate_numbers(text: &str) -> String {
 }
 
 fn run_tspan(run: &SceneRun, text: &SceneText) -> String {
-    let size = run.font_size.unwrap_or(text.font_size);
+    let size = run_size(run, text);
     let family = run.font_family.as_deref().unwrap_or(&text.font_family);
     let color = run.color.as_deref().unwrap_or(&text.color);
     let bold = run.bold.unwrap_or(text.bold);
     let italic = run.italic.unwrap_or(text.italic);
     let underline = run.underline.unwrap_or(text.underline);
     let mut attrs = String::new();
-    if (size - text.font_size).abs() > 1e-9 {
+    if (size - base_size(text)).abs() > 1e-9 {
         attrs.push_str(&format!(r#" font-size="{}""#, num(size)));
+    }
+    if let (Some(script), None) = (run.script, text.script) {
+        // a sub/superscript run inside normal text: SVG's baseline-shift is positive upwards
+        attrs.push_str(&format!(r#" baseline-shift="{}""#, num(-script.shift * run.font_size.unwrap_or(text.font_size))));
     }
     if family != text.font_family {
         attrs.push_str(&format!(r#" font-family="{}""#, escape(family)));

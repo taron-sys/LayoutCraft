@@ -27,6 +27,13 @@ pub struct Scene {
     pub items: Vec<SceneItem>,
 }
 
+impl SceneText {
+    /// The size the glyphs are drawn at: the font size, smaller for sub- and superscript text (Visio pads the exported ink by this em).
+    pub fn glyph_size(&self) -> f64 {
+        self.font_size * self.script.map_or(1.0, |script| script.scale)
+    }
+}
+
 impl Scene {
     pub fn raster_size(&self) -> (u32, u32) {
         (
@@ -260,6 +267,10 @@ pub struct SceneText {
     /// so lines break only at hard line breaks. Our font metrics may measure a face Visio had (Kalinga) wider than Visio did,
     /// and a wrap there puts a second line on the artwork (HPE Aruba SFP modules).
     pub fit_line: bool,
+    /// The whole block is subscript or superscript text (`Char.Pos` of the shape).
+    pub script: Option<ScriptShift>,
+    /// Fill of the whole text block (`TextBkgnd`), drawn under the text and over the artwork.
+    pub background: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -291,6 +302,16 @@ pub struct SceneRun {
     /// (`Case`: all capitals, initial capitals) is applied to `text` when the run is built.
     pub strike: Option<bool>,
     pub spacing: Option<f64>,
+    /// Subscript / superscript run (`Char.Pos`): drawn smaller and shifted.
+    pub script: Option<ScriptShift>,
+}
+
+/// How Visio draws sub- and superscript text: the glyph size as a share of the font size, and the baseline shift as a share of the FULL font size
+/// (positive = down). Both come from the font's own OS/2 table (measured in Visio, Calibri 0.65 / Kalinga 0.32 of the size).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ScriptShift {
+    pub scale: f64,
+    pub shift: f64,
 }
 
 /// The text after a Visio `Case` change: 1 = ALL CAPITALS, 2 = Initial Capitals (every word).
@@ -364,7 +385,27 @@ pub fn scene_from_document_with_options(
     let mut ordered: Vec<(f64, usize, SceneItem)> = Vec::new();
     let mut z_index = 0usize;
     for shape in &page.shapes {
-        let z = shape.z.unwrap_or(z_index as f64);
+        let mut z = shape.z.unwrap_or(z_index as f64);
+        let mut background_members: Vec<(f64, f64, f64, f64)> = Vec::new();
+        if shape.text_bkgnd.is_some() && !shape.label.is_empty() {
+            // a group's text block is drawn over its members (and so is its background)
+            let own = shape.visio_id.as_deref();
+            let top = page
+                .shapes
+                .iter()
+                .filter(|member| member.group.as_ref().and_then(|group| group.get("id")).and_then(Value::as_str) == own && own.is_some())
+                .filter_map(|member| member.z)
+                .fold(f64::NEG_INFINITY, f64::max);
+            if top.is_finite() && top >= z {
+                z = top + 0.001;
+            }
+            background_members = page
+                .shapes
+                .iter()
+                .filter(|member| member.group.as_ref().and_then(|group| group.get("id")).and_then(Value::as_str) == own && own.is_some())
+                .map(|member| (member.x, member.y, member.w, member.h))
+                .collect();
+        }
         // Shapes only on hidden layers are not drawn (Visio layer visibility).
         if shape.layer_hidden || (options.print && shape.layer_nonprinting) {
             z_index += 1;
@@ -373,6 +414,14 @@ pub fn scene_from_document_with_options(
         if let Some(mut item) = scene_shape(shape, &shape_by_visio, media, &adjust_by_media) {
             if let Some(colour) = shape.layer_color.as_deref() {
                 apply_layer_color(&mut item, colour);
+            }
+            // The text background only changes the picture where the block lies over a member's artwork (a white block on the white page
+            // changes nothing): keep it for those labels.
+            if let Some(text) = item.text.as_mut() {
+                let covers = background_members.iter().any(|(x, y, w, h)| text.x < x + w && text.x + text.w > *x && text.y < y + h && text.y + text.h > *y);
+                if !covers {
+                    text.background = None;
+                }
             }
             ordered.push((z, z_index, SceneItem::Shape(Box::new(item))));
         }
@@ -842,6 +891,7 @@ fn scene_shape(
                     underline: Some(sub.underline),
                     strike: None,
                     spacing: None,
+                    script: None,
                 }],
             }],
             font_size: sub.font_size,
@@ -855,6 +905,8 @@ fn scene_shape(
             pad: sub.pad,
             outside: sub.h <= sub.font_size * 1.8,
             fit_line: sub.fit_line,
+            script: None,
+            background: None,
         })
         .collect();
     // A group's label and a child that draws the very same text (a DefaultLabel group: its placeholder text became the
@@ -1500,6 +1552,7 @@ fn text_scene(shape: &Shape, text: &str) -> SceneText {
                 underline: None,
                 strike: None,
                 spacing: None,
+                script: None,
             }],
         })
         .collect();
@@ -1561,6 +1614,13 @@ fn text_scene_with_paragraphs(shape: &Shape, paragraphs: Vec<SceneParagraph>) ->
         pad: false,
         outside: block_outside(shape, x + w / 2.0, y + h / 2.0),
         fit_line: shape.text_fits_line,
+        background: shape.text_bkgnd.clone(),
+        script: crate::text::script_shift(
+            shape.text_script,
+            shape.font_family.as_deref().unwrap_or(""),
+            shape.bold.unwrap_or(false),
+            shape.italic.unwrap_or(false),
+        ),
     }
 }
 
@@ -1583,6 +1643,14 @@ fn rich_paragraphs(rich: &Value, fallback_align: &Option<String>, spacing: &[[f6
                             let caps = style.and_then(|style| style.get("caps")).and_then(Value::as_u64).unwrap_or(0);
                             SceneRun {
                                 strike: style.and_then(|style| style.get("strike")).and_then(Value::as_bool),
+                                script: style.and_then(|style| style.get("scriptPos")).and_then(Value::as_u64).and_then(|pos| {
+                                    crate::text::script_shift(
+                                        pos as u8,
+                                        style.and_then(|style| style.get("fontFamily")).and_then(Value::as_str).unwrap_or(""),
+                                        style.and_then(|style| style.get("bold")).and_then(Value::as_bool).unwrap_or(false),
+                                        style.and_then(|style| style.get("italic")).and_then(Value::as_bool).unwrap_or(false),
+                                    )
+                                }),
                                 spacing: style.and_then(|style| style.get("spacing")).and_then(Value::as_f64),
                                 text: apply_case(
                                     run.get("text").and_then(Value::as_str).unwrap_or(""),
@@ -1714,7 +1782,7 @@ impl Bounds {
                 let (x0, y0, x1, y1) = crate::svg::text_ink_extent(text);
                 // Visio pads the exported text by about half an em at the sides, a quarter em above
                 // and a little over half an em below (measured on 8 pt and 12 pt blocks).
-                let em = text.font_size;
+                let em = text.glyph_size();
                 self.add(x0 - em * TEXT_INK_PAD_X, y0 - em * TEXT_INK_PAD_TOP);
                 self.add(x1 + em * TEXT_INK_PAD_X, y1 + em * TEXT_INK_PAD_BOTTOM);
             }
@@ -1968,18 +2036,18 @@ impl Bounds {
             self.add(x0, y0);
             self.add(x1, y1);
             if text.pad {
-                let em = text.font_size;
+                let em = text.glyph_size();
                 self.add(x0 - em * TEXT_INK_PAD_X, y0 - em * TEXT_INK_PAD_TOP);
                 self.add(x1 + em * TEXT_INK_PAD_X, y1 + em * TEXT_INK_PAD_BOTTOM);
             }
             // A label that hangs below the shape (a bus's "W1") is exported with the same room
             // under its ink as a text-only shape gets.
             if y1 > shape.y + shape.h + 1.0 {
-                self.add(x1, y1 + text.font_size * TEXT_INK_PAD_BOTTOM);
+                self.add(x1, y1 + text.glyph_size() * TEXT_INK_PAD_BOTTOM);
             }
             // Likewise a label that sticks out to the side or above (the "C" beside an ALARM
             // keypad icon) keeps its padding on that side.
-            let em = text.font_size;
+            let em = text.glyph_size();
             if x1 > shape.x + shape.w + 1.0 {
                 self.add(x1 + em * TEXT_INK_PAD_X, y0);
             }

@@ -1,5 +1,7 @@
 # Document schema and golden fixtures
 
+> Historical note: the JavaScript editor described here (the `js/` folder) was removed; see [42](42-javascript-removal.md). The last commit that still has it is `c9aa852`. The Rust crates carry this work now.
+
 LayoutCraft's portable interchange is JSON. It is used by **Export JSON / Import
 JSON**, browser autosave and the golden fixtures for the planned native port.
 The current schema is **version 1**.

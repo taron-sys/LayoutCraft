@@ -13,7 +13,7 @@ material from what the project publishes, and marks the genuinely open questions
 The guard is deterministic and should stay green:
 
 ```sh
-npm run check:provenance        # node tools/check-provenance.mjs
+cargo xtask provenance            # in rust/; source: rust/xtask/src/provenance/ (it replaced tools/check-provenance.mjs)
 ```
 
 The audit itself is an agent loop. Run `/loop` with the prompt below (a 20–30 minute interval is reasonable), or run one pass by
@@ -41,13 +41,13 @@ SCOPE AND SAFETY
   come back.
 
 EACH PASS
-1. Run `node tools/check-provenance.mjs` and record the result.
+1. Run `cargo xtask provenance` (in `rust/`) and record the result.
 2. Scan the publishable files (`git ls-files -co --exclude-standard`) and pick the highest-risk finding:
    false provenance claim > third-party asset or code > trademark/branding > missing provenance/licence > personal data >
    stale legal TODO.
 3. Classify: A = fix in code/docs now; B = owner decision; C = genuine counsel question. Only implement A.
 4. Implement A, then run the relevant checks and report exactly what ran:
-   node tools/check-provenance.mjs; cargo test -p <crate>; node tools/gen-third-party.mjs --check; cargo deny check (if set up).
+   cargo xtask provenance; cargo test -p <crate>; cargo xtask notices --check; cargo deny check (if set up).
 5. For B/C, write one short paragraph with the code-side alternatives you considered. Do not implement a legal conclusion.
 
 SEARCH CATEGORIES

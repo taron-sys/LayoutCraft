@@ -1,13 +1,14 @@
 // H7 (round 8): keyboard access to the ribbon and the window regions.
 //  * Alt (pressed and released on its own) shows KEY TIPS, a letter on every ribbon tab; the letter opens that tab (File opens the backstage).
-//    The letters are those Office uses for the same tabs (F File, H Home, N Insert, G Design, A Data, R Review, W View, E Help) - read from a screenshot
-//    of the installed Visio's Alt key tips (visio-test-runs/ribbon-shots/alt-labels.png): Help is E, not Y. Key tips for single commands are not built.
+//    Evidence: Microsoft's public "Keyboard shortcuts for Visio" page states only Alt+H for the Home tab (checked 2026-11-25; it says Alt shows key tips
+//    but does not list the other tab letters). The other letters (F File, N Insert, G Design, A Data, R Review, W View, E Help, P Process) are OUR OWN choice,
+//    following the common Office convention; they are not verified against any public source. Key tips for single commands are not built.
 //  * F6 / Shift+F6 move the focus round the regions: ribbon, shapes pane, drawing, side panel, page tabs.
 //  * Ctrl+F1 collapses / expands the ribbon (only the tab strip stays); a click on a tab then shows its panel until Esc or a click elsewhere.
 const $ = (id) => document.getElementById(id);
 
 // ---- key tips ----
-const TIPS = { File: 'F', Home: 'H', Insert: 'N', Design: 'G', Data: 'A', Process: 'P', Review: 'R', View: 'W', Help: 'E' }; // checked against the user's Visio screenshot (ribbon-shots/alt-labels.png); Draw = JI, Process = P, Org Chart = O are not built
+const TIPS = { File: 'F', Home: 'H', Insert: 'N', Design: 'G', Data: 'A', Process: 'P', Review: 'R', View: 'W', Help: 'E' }; // only Home = H is documented publicly (see the note at the top); Draw, Org Chart and other tabs have no key tip yet
 let altArmed = false;
 let tipsOn = false;
 function showTips() {

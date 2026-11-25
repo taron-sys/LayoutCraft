@@ -1,5 +1,5 @@
-//! The MCP server on the native engine. Protocol and tool list are those of `mcp/server.mjs` (the reference);
-//! `tests/oracle/tools-list.json` is dumped from it and served as is, so names, descriptions and schemas are identical.
+//! The MCP server on the native engine (docs/32-mcp.md, docs/35-mcp-native.md). `tests/oracle/tools-list.json` is the tool list of the server:
+//! it is edited here, together with the tool it describes, and served as is. The retired Node server (last in commit c9aa852) had the same list.
 use std::path::{Component, Path, PathBuf};
 
 use layoutcraft_engine::Engine;
@@ -157,7 +157,7 @@ impl Server {
             "initialize" => {
                 let want = params.get("protocolVersion").and_then(Value::as_str).unwrap_or("");
                 let version = if PROTOCOLS.contains(&want) { want } else { PROTOCOLS[0] };
-                ok(json!({ "protocolVersion": version, "capabilities": { "tools": { "listChanged": false }, "resources": { "listChanged": false } }, "serverInfo": { "name": "layoutcraft", "version": "0.1.0" }, "instructions": INSTRUCTIONS }))
+                ok(json!({ "protocolVersion": version, "capabilities": { "tools": { "listChanged": false }, "resources": { "listChanged": false } }, "serverInfo": { "name": "layoutcraft", "version": env!("CARGO_PKG_VERSION") }, "instructions": INSTRUCTIONS }))
             }
             "ping" => ok(json!({})),
             "tools/list" => ok(serde_json::from_str(TOOLS_LIST).expect("tools-list.json")),
@@ -752,7 +752,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tools_list_is_the_one_of_the_node_server() {
+    fn tools_list_is_the_checked_in_one() {
         let mut s = Server::new(std::env::temp_dir());
         let got = s.handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list"})).unwrap()["result"].clone();
         let want: Value = serde_json::from_str(TOOLS_LIST).unwrap();
