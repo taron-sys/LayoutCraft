@@ -79,11 +79,6 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: github.ref_type != 'tag' # a release is built from a clean cache
-        with:
-          workspaces: rust
-          key: windows-${{ matrix.arch }}
       - name: Build the programs
         run: tools/packaging/windows/build.ps1 -Arch ${{ matrix.arch }}
       - name: Start the MCP server (x64 only, the ARM64 build cannot run here)
@@ -144,11 +139,6 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: github.ref_type != 'tag' # a release is built from a clean cache
-        with:
-          workspaces: rust
-          key: linux-${{ matrix.arch }}
       - name: Build the programs
         run: tools/packaging/linux/build.sh ${{ matrix.arch }}
       - name: Start the MCP server (x86_64 only, the aarch64 build cannot run here)
@@ -181,11 +171,6 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: github.ref_type != 'tag' # a release is built from a clean cache
-        with:
-          workspaces: rust
-          key: macos-universal
       - name: Build the programs (both architectures, joined with lipo)
         run: tools/packaging/macos/build.sh
       - name: Start the MCP server (the arm64 half; the runner is an Apple-silicon Mac)
@@ -238,11 +223,6 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        if: github.ref_type != 'tag' # a release is built from a clean cache
-        with:
-          workspaces: rust
-          key: web
       - name: Public wasm build and zip
         run: tools/packaging/web/package.sh
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
