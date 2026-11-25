@@ -33,4 +33,6 @@ New-Item -ItemType Directory -Force $OutDir | Out-Null
 $msi = Join-Path $OutDir "LayoutCraft-$version-windows-$Arch.msi"
 & wix build (Join-Path $PSScriptRoot 'layoutcraft.wxs') -arch $Arch -d "Version=$msiVersion" -d "Bin=$bin" -d "Layout=$layout" -d "Resources=$(Join-Path $layout 'rust\resources')" -o $msi
 if ($LASTEXITCODE -ne 0) { throw 'wix build failed' }
+# wix also writes a debug database (<name>.wixpdb) next to the MSI; it is not a release file
+Remove-Item ([IO.Path]::ChangeExtension($msi, '.wixpdb')) -ErrorAction SilentlyContinue
 Write-Output "wrote $msi ($((Get-Item $msi).Length) bytes)"
