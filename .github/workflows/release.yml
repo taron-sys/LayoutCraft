@@ -92,10 +92,6 @@ jobs:
         run: tools/packaging/smoke-mcp.sh "rust/target/${{ matrix.target }}/release/layoutcraft-mcp.exe"
       # Authenticode. Without WINDOWS_CERT_PFX_BASE64 (and always outside a tag build) the script says so and does nothing.
       - name: Sign the programs
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, installs the current stable Rust
-      - name: Portable zip (builds both exes)
-        shell: pwsh
         env:
           WINDOWS_CERT_PFX_BASE64: ${{ github.ref_type == 'tag' && secrets.WINDOWS_CERT_PFX_BASE64 || '' }}
           WINDOWS_CERT_PASSWORD: ${{ github.ref_type == 'tag' && secrets.WINDOWS_CERT_PASSWORD || '' }}
@@ -119,26 +115,6 @@ jobs:
           path: dist/LayoutCraft-*
           if-no-files-found: error
           retention-days: ${{ env.RETENTION_DAYS }}
-          # LC_TOOLCHAIN makes the script use the runner's default (msvc) toolchain instead of the gnu one of the maintainers' machine
-          pwsh tools/package-portable.ps1
-      # - name: Sign the exes (Authenticode)
-      #   shell: pwsh
-      #   env:
-      #     WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
-      #     WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-      #   run: |
-      #     [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
-      #     signtool sign /f "$env:RUNNER_TEMP\cert.pfx" /p $env:WINDOWS_CERT_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 rust\target\release\layoutcraft-app.exe rust\target\release\layoutcraft-mcp.exe
-      #     Remove-Item "$env:RUNNER_TEMP\cert.pfx"
-      # - name: MSI (needs the WiX Toolset v4)
-      #   shell: pwsh
-      #   run: |
-      #     dotnet tool install --global wix
-      #     pwsh tools/installer/build-msi.ps1 -NoBuild
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: windows
-          path: dist/*
 
   # ---------------------------------------------------------------- Linux x86_64 and aarch64
   # Built on Ubuntu 22.04, the oldest runner image, so that the programs need no newer glibc than 2.35 (build.sh checks it). aarch64 is
@@ -299,35 +275,6 @@ jobs:
           path: release/*
           if-no-files-found: error
           retention-days: ${{ env.RETENTION_DAYS }}
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, installs the current stable Rust
-      - name: System libraries of eframe (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libegl1-mesa-dev libgtk-3-dev
-      - name: Build
-        working-directory: rust
-        run: cargo build --release -p layoutcraft-app -p layoutcraft-mcp
-      - name: Archive
-        run: |
-          mkdir -p out/LayoutCraft-${{ matrix.name }}
-          cp rust/target/release/layoutcraft-app rust/target/release/layoutcraft-mcp THIRD-PARTY-NOTICES.txt LICENSE-MIT LICENSE-APACHE out/LayoutCraft-${{ matrix.name }}/
-          tar -C out -czf out/LayoutCraft-${{ matrix.name }}.tar.gz LayoutCraft-${{ matrix.name }}
-          (cd out && shasum -a 256 LayoutCraft-${{ matrix.name }}.tar.gz > SHA256SUMS-${{ matrix.name }}.txt)
-      # - name: Sign and notarise (macOS; needs an Apple Developer ID)
-      #   if: runner.os == 'macOS'
-      #   env:
-      #     APPLE_DEVELOPER_ID_CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
-      #     APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-      #     APPLE_ID: ${{ secrets.APPLE_ID }}
-      #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      #     APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-      #   run: |
-      #     # import the certificate into a temporary keychain, codesign --options runtime --timestamp both binaries,
-      #     # zip them, xcrun notarytool submit --wait, xcrun stapler staple (a bare binary cannot be stapled: ship a .app or .dmg then)
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: ${{ matrix.name }}
-          path: out/*
 
   # ---------------------------------------------------------------- the release: tags only, the only job that can write
   release:
@@ -343,7 +290,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-files
           path: release
