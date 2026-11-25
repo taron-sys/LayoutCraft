@@ -1,7 +1,10 @@
 //! Time every stage of drawing a page: scene build, SVG string, usvg parse, rasterize, PNG encode, PNG decode (the path `raster_scene` used to take),
 //! and the direct RGBA path (`render_rgba`), on every public fixture page and on a generated stress drawing, at 1x and 2x. Medians over several runs.
 //!
-//! usage: cargo run --release -p layoutcraft-render --example raster_bench -- [--runs N] [--no-stress] [--only <substring of the page name>]
+//! usage: cargo run --release -p layoutcraft-render --example raster_bench -- [--runs N] [--no-stress] [--only <substring of the page name>] [--hash]
+//!
+//! `--hash` prints one FNV-1a hash of the straight RGBA pixels per page and scale instead of timings: run it before and after a change to see that
+//! no pixel moved.
 //!
 //! Timing code lives here, not in the library (AGENTS.md rule 9). The page's raster scale follows the app (`raster_scale_for`): the wanted scale is
 //! clamped so the long side stays within 8192 px and the picture within about 24 million pixels.
@@ -202,6 +205,19 @@ fn main() {
     }
     if let Some(only) = only {
         pages.retain(|p| p.name.contains(&only));
+    }
+    if args.iter().any(|a| a == "--hash") {
+        for page in &pages {
+            for wanted in [1.0, 2.0] {
+                let scene = scene_from_document_with_media(&page.document, page.index, &page.media).expect("scene");
+                let (w, h) = scene.raster_size();
+                let scale = app_scale(f64::from(w), f64::from(h), wanted);
+                let (pw, ph, rgba) = render_rgba(&scene, scale).expect("rgba");
+                let hash = rgba.iter().fold(0xcbf2_9ce4_8422_2325u64, |hash, byte| (hash ^ u64::from(*byte)).wrapping_mul(0x0000_0100_0000_01b3));
+                println!("{} {wanted}x {pw}x{ph} {hash:016x}", page.name);
+            }
+        }
+        return;
     }
     // warm the shared font database once, so no row pays for the system font scan
     black_box(usvg_options());
