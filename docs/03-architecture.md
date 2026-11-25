@@ -1,30 +1,60 @@
 # Architecture
 
-## Module map
+## Current architecture
+
+LayoutCraft is a Rust core with two hosts (`AGENTS.md`, rules 8 and 9).
+
+```text
+                      .vsdx / .vssx / draw.io / Excalidraw
+                                    │
+   layoutcraft-vsdx  (read and write the package: import, patch writer, fresh writer, page and shape edits)
+   layoutcraft-model (the document model, JSON)
+                                    │
+   layoutcraft-engine (the open drawing, edits, undo and redo, clipboard, stencils, exporters and importers)
+   layoutcraft-render (scene, SVG, PNG)
+          │                    │                      │
+   layoutcraft-app      layoutcraft-wasm         layoutcraft-mcp
+   native egui app      C ABI for web/engine.js  MCP server, stdio
+                        and the browser shell
+```
+
+- The editable model is what is drawn; the opened package stays in the engine and is the side artifact the patch writer works on, so parts the editor does not model survive a save.
+  Without a source package, or for a page that was added, the fresh writer builds the part from the model.
+- Behaviour belongs in `layoutcraft-engine` and the crates below it. A host calls the engine and draws; it does not carry its own copy of a rule. The same engine call gives the same result in the desktop app, the browser shell and the MCP server.
+- The engine, `layoutcraft-vsdx`, `layoutcraft-render` and `layoutcraft-model` also compile to WebAssembly: no `std::time::Instant` and no debug or timing code in them.
+- `web/` is the browser shell: `shell.html`, `shell.js`, the ribbon and the dialogs, over `web/layoutcraft.wasm` through `web/engine.js`. It is the only JavaScript left in the repository
+  (with `tools/dump-ribbon.mjs`, which dumps its ribbon for the native app); it goes when the egui app runs in the browser ([42](42-javascript-removal.md)).
+- `rust/xtask` holds the repository tools: `cargo xtask provenance`, `notices` and `serve`.
+
+The file-by-file map is in [09](09-file-reference.md); the desktop build and its milestones in [34](34-desktop-build.md); the MCP server in [32](32-mcp.md) and [35](35-mcp-native.md).
+
+## The JavaScript editor (historical)
+
+The rest of this page describes the JavaScript editor that was removed ([42](42-javascript-removal.md)); the last commit that still has it is `c9aa852`. The module names below are the files of its `js/` folder.
+The development server it came with (`server.mjs`) and its `index.html` and `css/app.css` are not in the table: `cargo xtask serve` replaces the server, and the shell page is `web/shell.html`.
+
+### Module map
 
 | File | Responsibility |
 | --- | --- |
-| `index.html` | Toolbar, canvas SVG, palette/inspector containers, file input |
-| `css/app.css` | All application styling |
-| `js/main.js` | App object, document ownership, commands, import/save routing |
-| `js/model.js` | Pages, shapes, connectors, defaults, undo history |
-| `js/shapes.js` | Shape catalogue: SVG path generators and text boxes |
-| `js/svg-path.js` | Pure SVG-path flattener used when authoring Visio Geometry |
-| `js/render.js` | SVG shape/connector/overlay renderer, gradients, markers |
-| `js/router.js` | Glue points, side selection, route generation |
-| `js/interact.js` | Pointer and keyboard interaction |
-| `js/ui.js` | Palette, inspector, context menu, page tabs, toolbar wiring |
-| `js/file.js` | localStorage autosave, JSON/SVG/PNG import/export |
-| `js/visio.js` | VSDX/VDX importer |
-| `js/vsdx-writer.js` | VSDX audit, patch writer, fresh-package builder, ZIP writer |
-| `js/vsdx-source.js` | IndexedDB cache for the original OPC package |
-| `js/util.js` | Geometry, text measurement/wrapping, download helper |
-| `server.mjs` | Zero-dependency static file server for development |
+| `main.js` | App object, document ownership, commands, import/save routing |
+| `model.js` | Pages, shapes, connectors, defaults, undo history |
+| `shapes.js` | Shape catalogue: SVG path generators and text boxes |
+| `svg-path.js` | Pure SVG-path flattener used when authoring Visio Geometry |
+| `render.js` | SVG shape/connector/overlay renderer, gradients, markers |
+| `router.js` | Glue points, side selection, route generation |
+| `interact.js` | Pointer and keyboard interaction |
+| `ui.js` | Palette, inspector, context menu, page tabs, toolbar wiring |
+| `file.js` | localStorage autosave, JSON/SVG/PNG import/export |
+| `visio.js` | VSDX/VDX importer |
+| `vsdx-writer.js` | VSDX audit, patch writer, fresh-package builder, ZIP writer |
+| `vsdx-source.js` | IndexedDB cache for the original OPC package |
+| `util.js` | Geometry, text measurement/wrapping, download helper |
 
 The application has no framework and no runtime dependency. Modules are loaded
 directly by the browser as ES modules.
 
-## Main data flow
+### Main data flow
 
 ```text
 .open VSDX ──► visio.js ──► editable document model ──► render.js / router.js
@@ -41,15 +71,15 @@ Save VSDX ──► audit ──► matching source package?
 The editable model is the single source of truth for what is drawn. The
 original Visio package is a side artifact used only by the writer.
 
-## Document model
+### Document model
 
-`js/model.js` defines:
+`model.js` defines:
 
 ```js
 doc = {
   name,
   version,
-  schemaVersion,        // current portable JSON schema (js/schema.js)
+  schemaVersion,        // current portable JSON schema (schema.js)
   pages: [{
     id,
     name,
@@ -148,7 +178,7 @@ An authored container is a normal model shape with `containerInfo`
 record with no `visioId`; the writer emits its User rows and resolves its
 membership to the new sheet ID. Full swimlane/CFF authoring is not implemented.
 
-## Coordinate systems and units
+### Coordinate systems and units
 
 This is the source of several subtle bugs; read it before touching geometry.
 
@@ -172,7 +202,7 @@ This is the source of several subtle bugs; read it before touching geometry.
   the writer uses `strokeWidth / 96`.
 - Visio `Angle` is written as `-rot * PI / 180`.
 
-## Imported object provenance
+### Imported object provenance
 
 The importer attaches source metadata to the editable model:
 
@@ -209,14 +239,14 @@ conn.visio = {
 ```
 
 `orig` is what makes patch-on-save possible without touching unchanged cells.
-Do not rename or drop these fields casually; `js/vsdx-writer.js` compares
+Do not rename or drop these fields casually; `vsdx-writer.js` compares
 against them.
 
-## Original package lifecycle
+### Original package lifecycle
 
 When a VSDX/VSTX/VDM/VSTM is opened:
 
-1. `js/visio.js` reads the ZIP into a `Map<path, Uint8Array>`.
+1. `visio.js` reads the ZIP into a `Map<path, Uint8Array>`.
 2. `importVisioFile` returns the document and attaches the package as a
    non-enumerable `_visioPackage` property and the file name as
    `_visioFileName`.
@@ -225,7 +255,7 @@ When a VSDX/VSTX/VDM/VSTM is opened:
    { package, name, pageParts, key }
    ```
    and assigns `doc.visioKey` and `pg.visio.docKey`.
-4. `js/vsdx-source.js` stores the package in IndexedDB under that key.
+4. `vsdx-source.js` stores the package in IndexedDB under that key.
 5. On reload, boot reads the saved document and restores the package by
    `visioKey`.
 
@@ -233,9 +263,9 @@ The package is deliberately non-enumerable and excluded from JSON/undo so
 undoredo snapshots remain small and serialisable. Shape/page provenance is
 enumerable and survives undo/redo.
 
-## Renderer
+### Renderer
 
-`js/render.js` draws every item from the document on every change. There is no
+`render.js` draws every item from the document on every change. There is no
 incremental scene graph.
 
 - Imported custom shapes use `shape.parts`: one or more SVG sub-paths, each with
@@ -252,16 +282,16 @@ incremental scene graph.
   (including the visible parts of an imported multi-part shape). Text, ratios,
   levels and colours are derived from Shape Data, never stored separately.
 - Catalogue shapes use `shapePath`, `shapeDetail` and `shapeTextBox` from
-  `js/shapes.js`.
+  `shapes.js`.
 - Connectors are routed by `routeConnector` on every render. Imported connector
   waypoints are used as the polyline vertices.
 - Selection handles, the marquee, glue hints and connector previews live in the
   overlay layer.
 - Dash arrays and arrow markers are generated from the small line/arrow enums.
 
-## Router and glue
+### Router and glue
 
-`js/router.js`:
+`router.js`:
 
 - `anchorOnShapeAt(shape, side, toward)` slides a side-glued endpoint along that
   side toward the other endpoint. This prevents page-sized background shapes
@@ -274,25 +304,25 @@ incremental scene graph.
   produces sideways arrowheads.
 - `routeConnector` produces line, polyline or cubic curve geometry.
 
-`hitShape` in `js/interact.js` prefers the smallest foreground shape under the
+`hitShape` in `interact.js` prefers the smallest foreground shape under the
 pointer, then distance/z. This keeps large background shapes from stealing
 clicks or connector drops.
 
-## Undo, autosave and page state
+### Undo, autosave and page state
 
 - `History` stores JSON snapshots of the whole document, limit 200. The `media`
   map is kept by reference rather than serialised into every snapshot: picture
   records are immutable and only ever added, so a shared map preserves undo
   without duplicating megabytes of data URLs per step.
 - Autosave writes `app.doc` to localStorage 700 ms after a render/change;
-  `js/schema.js` normalises legacy data and rejects newer schemas on load/import.
+  `schema.js` normalises legacy data and rejects newer schemas on load/import.
 - Pages have only an ID, name, shapes and connectors. Page size/view is not in
   the editable model; the writer derives it for fresh pages and preserves the
   source page part for imported pages.
 - Page deletion while patching an existing package is not a partial XML edit;
   `app.saveVSDX` offers a fresh rebuild instead.
 
-## What the architecture deliberately does not do
+### What the architecture deliberately does not do
 
 - No ShapeSheet object model in the browser.
 - No full Visio formula engine: a small evaluator covers the common arithmetic and the cached values cover the rest.

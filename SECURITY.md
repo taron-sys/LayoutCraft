@@ -19,7 +19,8 @@ downloaded file. The reader is written to refuse hostile packages rather than tr
 
 - ZIP entries are limited to 256 MiB each and 512 MiB in total (`MAX_ENTRY_BYTES`, `MAX_TOTAL_BYTES` in `rust/layoutcraft-vsdx/src/lib.rs`); shape nesting is limited to a depth of 200 (`MAX_SHAPE_DEPTH`).
 - The browser build runs the Rust core as WebAssembly; a test harness (25 hostile-file cases: bad ZIPs, size bombs, deep nesting, fuzzed input) runs before releases.
-- The MCP servers (`mcp/`, `rust/layoutcraft-mcp`) refuse file access outside the folders they were started with.
+- The MCP server (`rust/layoutcraft-mcp`) refuses file access outside the folder it was started with.
+- The development web server (`cargo xtask serve`) listens on 127.0.0.1 unless `--host` says otherwise, answers only GET and HEAD, and refuses `..`, drive and stream names, hidden files such as `.git` and links that lead out of the repository folder.
 
 These limits are a first line of defence, not a promise that every malformed file is harmless. Reports that show a crash, a hang, unbounded memory use, or access outside the allowed folders are in scope.
 

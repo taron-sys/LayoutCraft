@@ -1,8 +1,8 @@
 # 35 - native MCP server (N5)
 
-Crate `rust/layoutcraft-mcp` (bin `layoutcraft-mcp --root <folder>`): stdio JSON-RPC 2.0, one message per line, same protocol, resources and tools as `mcp/server.mjs` (the reference, which keeps passing). `tools/list` is served from `tests/oracle/tools-list.json`, dumped from the node server by `visio-test-harness/dump-mcp-tools.mjs` and compared exactly by a Rust test.
+Crate `rust/layoutcraft-mcp` (bin `layoutcraft-mcp --root <folder>`): stdio JSON-RPC 2.0, one message per line, same protocol, resources and tools as the Node server `mcp/server.mjs`, which was the reference while this crate was written and is removed now ([42](42-javascript-removal.md)). `tools/list` is served from `tests/oracle/tools-list.json`: it was dumped from the Node server and is now the file of record, edited together with the tool it describes; a Rust test compares it with the list the server answers.
 
-Parity run: `LAYOUTCRAFT_MCP_BIN=<exe> node visio-test-harness/test-mcp.mjs` (107 checks; without the variable it tests the node server).
+Parity run (the maintainers' harness, private repository): `LAYOUTCRAFT_MCP_BIN=<exe> node visio-test-harness/test-mcp.mjs` (107 checks) against the built program; the mode of that script that started the Node server has nothing left to start.
 
 ## Progress
 - Step 398: protocol, resources, tools/list, 7 tools.
