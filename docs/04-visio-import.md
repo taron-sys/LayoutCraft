@@ -1,5 +1,7 @@
 # Visio import
 
+> Historical note: the JavaScript editor described here (the `js/` folder) was removed; see [42](42-javascript-removal.md). The last commit that still has it is `c9aa852`. The Rust crates carry this work now.
+
 ## Entry points
 
 `js/visio.js` exports `importVisioFile(file)`. It dispatches on extension:

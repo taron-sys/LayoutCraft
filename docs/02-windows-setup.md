@@ -1,198 +1,107 @@
 # Running on Windows
 
+The JavaScript editor that this page used to start (`npm start`, `server.mjs`) was removed ([42](42-javascript-removal.md)). What runs now is the Rust core: the native
+app, and the browser shell over the core compiled to WebAssembly.
+
 ## Prerequisites
 
 - Windows 10 or 11
-- Node.js 18 or newer (Node 20/22 recommended)
-- Current Google Chrome or Microsoft Edge
+- Rust, the current stable toolchain, through `rustup`. The maintainers' machine has no MSVC linker and builds with `cargo +stable-x86_64-pc-windows-gnu`
+  (the scripts that name a toolchain default to it: set `CARGO_TOOLCHAIN=` to the empty string to use your default toolchain instead). The MSVC toolchain works too;
+  the MSVC linker fails on very long paths, so keep the repository at a short path or point `CARGO_TARGET_DIR` at a short one.
+- Git for Windows (it brings the `sh` that runs `tools/build-web-wasm.sh`)
+- For the browser shell: the `wasm32-unknown-unknown` target (`rustup target add wasm32-unknown-unknown`) and a current Chrome or Edge
 - Microsoft Visio 2021/365 for the compatibility checks
-- Optional: Python 3.10+ if you prefer `python -m http.server` over Node
-- Optional: Git for Windows (recommended before further development)
-
-No npm dependencies are installed by this project. `npm install` is not needed.
+- No Node.js and no `npm install`
 
 ## Get the files
 
-Copy the whole `LayoutCraft` folder to a local path, for example:
+Clone or copy the whole `LayoutCraft` folder to a local path, for example `C:\src\LayoutCraft`. Avoid a network share or a path with unusual characters.
+The `examples/` folder (the private test corpus, see [38](38-private-fixtures.md)) is filled in separately; the redistributable set is `fixtures/public/`.
 
-```text
-C:\src\LayoutCraft
-```
-
-Keep `examples/` with the app; they are the manual test corpus. Keep `docs/`
-with the project for handover continuity.
-
-Avoid running the app from a network share or from a path containing
-unusual characters; the static server and browser file dialogs are simpler
-with a normal local path.
-
-If the folder arrived as a ZIP, extract it first, then optionally unblock the
-files:
+## The desktop app
 
 ```powershell
-Get-ChildItem -Recurse C:\src\LayoutCraft | Unblock-File
+cd C:\src\LayoutCraft\rust
+cargo run --release -p layoutcraft-app
 ```
 
-## Start the server
+The release build of both programs is `cargo build --release -p layoutcraft-app -p layoutcraft-mcp`; they are `rust\target\release\layoutcraft-app.exe` and `layoutcraft-mcp.exe`
+([36](36-packaging.md) packages them). Use `CARGO_TARGET_DIR=<a short folder>` if the linker complains about the path length.
 
-### Node
+## The browser shell
 
-```powershell
-cd C:\src\LayoutCraft
-npm start
+The shell is `web/shell.html` with the modules next to it. It needs `web/layoutcraft.wasm`, which is not committed:
+
+```sh
+cd /c/src/LayoutCraft
+CARGO_TOOLCHAIN= sh tools/build-web-wasm.sh public    # the build that may be published; leave CARGO_TOOLCHAIN= out on the maintainers' machine
+cd rust
+cargo xtask serve
 ```
 
-Expected output:
+Open <http://127.0.0.1:8137/web/shell.html> in Chrome or Edge. `cargo xtask serve [port] [--host <address>]` takes a port (or the `PORT` variable); if 8137 is busy it says so and
+`cargo xtask serve 8138` picks another. A server is required because browsers do not run ES modules or fetch the wasm from `file://` pages.
 
-```text
-LayoutCraft running at http://localhost:8137
-```
+### What the server does
 
-Open <http://localhost:8137/> in Chrome or Edge.
+`cargo xtask serve` replaces the Node script `server.mjs`. It serves the repository root, so `/web/shell.html` is the page; it maps a few extensions to a type (`.html`, `.js`, `.mjs`, `.css`, `.json`,
+`.svg`, `.png`, `.ico`, `.wasm` as `application/wasm`; anything else `application/octet-stream`), sends `Cache-Control: no-cache`, answers a folder without a trailing slash with a redirect and a folder
+with its `index.html`, and answers 404 for what is not there. It is made for development, not for the network:
 
-If port 8137 is busy:
-
-```powershell
-npm start -- 8138
-# or
-node server.mjs 8138
-```
-
-### Python alternative
-
-```powershell
-cd C:\src\LayoutCraft
-python -m http.server 8137
-```
-
-Then open <http://localhost:8137/>.
-
-### Why a server is required
-
-`index.html` loads ES modules from `js/`. Browsers do not allow module scripts
-from `file://` pages. Use the local server.
-
-## The static server on Windows
-
-`server.mjs` was changed during the handover pass to use:
-
-- `fileURLToPath(import.meta.url)` instead of `new URL(...).pathname` — the
-  latter produces `/C:/...` on Windows.
-- normalized relative paths with the leading URL slash stripped before
-  resolving against the project root.
-
-It serves the repository root, maps unknown extensions to
-`application/octet-stream`, sends `Cache-Control: no-cache`, and returns 404
-for missing files. The server was tested on Linux after the change but not on
-Windows itself. If startup fails on Windows, run `node server.mjs` from the
-project folder and report the exact error; there is no build step that could
-hide it.
+- it listens on 127.0.0.1 only, unless you pass `--host` (`--host 0.0.0.0` shares the files of the repository with everyone who can reach the machine; it says so when it starts);
+- it answers GET and HEAD only (405 otherwise) and, while bound to a loopback address, only requests whose `Host` is an IP address or `localhost` (a web page on another site cannot read it by pointing a name at your machine);
+- it refuses (403) a path with `..`, a backslash, a drive letter or stream name (`C:`, `file:stream`), a Windows device name (`NUL`, `COM1`, ...), a hidden file or folder (`.git`, `.claude`), and a
+  link that leads out of the repository; a bad percent escape or a NUL is a 400;
+- one thread per connection, at most 64 at a time, a time limit for the request head and for the response.
 
 ## Source control
 
-The handover copy was not a Git repository. Initialise it manually before
-making changes, for example:
-
-```powershell
-cd C:\src\LayoutCraft
-git init
-git add .
-# create the first commit manually
-```
-
-Do not commit generated `.vsdx` outputs or browser test folders; add them to
-`.gitignore` as needed.
+Do not commit generated `.vsdx` outputs or browser test folders; `.gitignore` already lists `web/layoutcraft.wasm`, the private folders and the build output.
 
 ## First-run smoke test
 
-1. Open <http://localhost:8137/>. A sample network diagram should appear.
-2. Open `examples/MS Example.vsdx` with the folder button or `Ctrl+O`.
-3. Check the page renders: title, 3-D blocks, arrows and labels.
-4. Press `Ctrl+Shift+S` or click the VSDX toolbar button.
-5. A file named `MS Example-edited.vsdx` should download.
-6. Open that downloaded file in Microsoft Visio.
-
-The first Visio test is the highest-value action in this handover.
-
-## Where browser data lives
-
-- **Autosave:** localStorage, key `layoutcraft.document.v1`.
-- **Original VSDX package cache:** IndexedDB, database `layoutcraft-vsdx`,
-  object store `packages`.
-- **Undo history:** in memory only; it is lost on reload.
-- **Open document:** if a source package is cached, reloading restores the
-  package from IndexedDB. If not, the document can still be saved as a fresh
-  VSDX from the model.
-
-To start completely clean, use DevTools → Application → Storage → Clear site
-data, or run in a private window. Clearing site data removes the cached original
-package, so VSDX save will fall back to a fresh rebuild.
+1. Start the app (or the browser shell) and open a `.vsdx` with the Open command; `fixtures/public/sources/` has self-authored ones.
+2. Check that the page renders: shapes, connectors and labels.
+3. Save a copy (`Ctrl+S` in the app, which writes a copy; the browser shell downloads the file).
+4. Open the saved file in Microsoft Visio and check that it opens without a repair dialog.
 
 ## Working with Visio on Windows
 
-- Save downloads go to the browser's normal Downloads folder. Move them out
-  before comparing or opening several versions with the same name.
-- Office may show a Protected View or "Enable Editing" bar. That is normal for
-  a downloaded file; enable editing before checking whether Visio performs a
-  repair.
+- Browser downloads go to the normal Downloads folder. Move them out before comparing or opening several versions with the same name.
+- Office may show a Protected View or "Enable Editing" bar. That is normal for a downloaded file; enable editing before checking whether Visio performs a repair.
 - Watch for these Visio behaviours and record them:
   - "Visio found an error... repair" / "repaired" dialogs
   - page tabs missing or duplicated
   - connectors detached from shapes
   - text shifted, clipped or missing
   - shapes visibly different from the LayoutCraft canvas
-  - Save/Save As in Visio succeeding, then re-import into LayoutCraft
-- Do not overwrite the original source `.vsdx` while testing. Keep the original
-  in `examples/` and compare against downloaded copies.
+  - Save/Save As in Visio succeeding, then re-open in LayoutCraft
+- Do not overwrite the original source `.vsdx` while testing; compare against saved copies.
 
 ## File types on Windows
 
-- `.vsdx`, `.vstx`, `.vsdm`, `.vstm` are ZIP/OPC packages. You can rename a copy
-  to `.zip` and use Explorer or `Expand-Archive` to inspect the XML.
-- `.vdx` is a single XML file.
-- `.vsd` is not supported by LayoutCraft.
+- `.vsdx`, `.vstx`, `.vssx` are ZIP/OPC packages. You can rename a copy to `.zip` and use Explorer or `Expand-Archive` to inspect the XML.
+- `.vsd` (the legacy binary format) is not supported.
 
 ## Browser choice
 
-Chrome and Edge are the primary targets. Both provide the required
-`DecompressionStream`, `CompressionStream`, DOMParser and IndexedDB APIs.
-
-Firefox may import if its current version supports the required streams, but
-the writer can fall back to stored ZIP entries only if `CompressionStream` is
-missing. The importer still needs `DecompressionStream` for normal deflated
-VSDX entries.
-
-## Optional automated testing
-
-There is no test runner committed. The Linux development used Playwright with a
-local Chromium, driving the UI by:
-
-- selecting an example with `#fileInput`
-- interacting with `window.layoutcraft`
-- reading the document model
-- downloading the VSDX and re-importing it
-- opening the result with LibreOffice
-
-If you add Playwright on Windows, keep it as a dev-only dependency and do not
-make the app runtime depend on it. The repository currently has no
-`node_modules` folder.
+Chrome and Edge are the primary targets for the browser shell. The wasm core does the file work, so the shell needs no more of the browser than the page itself.
 
 ## Troubleshooting
 
 | Symptom | Likely cause | Action |
 | --- | --- | --- |
-| Blank page / module error | Opened `index.html` via `file://` | Use `npm start` and `http://localhost:8137/` |
-| `DecompressionStream` error | Unsupported browser | Use current Chrome/Edge |
+| Blank page / module error | Opened `web/shell.html` via `file://` | Use `cargo xtask serve` and `http://127.0.0.1:8137/web/shell.html` |
+| 404 for `/web/layoutcraft.wasm` | The wasm is not built | `sh tools/build-web-wasm.sh public` |
+| `cargo xtask serve` says the port is in use | Another program has 8137 | `cargo xtask serve 8138` |
+| 403 for a page you know exists | A hidden name (`.x`), or a `Host` that is not local | Use `127.0.0.1` or `localhost` in the address |
+| The linker fails on a long path | MSVC linker limit | Short repository path or a short `CARGO_TARGET_DIR` |
 | Import fails with "Not a ZIP archive" | File is `.vsd` or not a VSDX | `.vsd` is unsupported |
-| "Could not open file: ..." alert | Malformed/unsupported package | Check the exact message; test the original in Visio |
-| Save says "No original package..." | No source package and no rebuild happened | Current code rebuilds; this message belongs to older Phase A builds |
-| Save downloads but Visio repairs it | Visio compatibility gap | Record the repair message and the exact test file |
-| Save works but reload lost package | Site data/IndexedDB cleared | Reopen the original or save a fresh VSDX |
-| Port 8137 in use | Another dev server | Use `npm start -- 8138` |
+| Save opens in Visio with a repair dialog | Visio compatibility gap | Record the repair message and the exact test file ([07](07-known-gaps.md)) |
 
 ## Security and licensing notes
 
-- The app is local and makes no network calls.
+- The programs are local and make no network calls (the dev server listens on loopback only).
 - No Microsoft binaries or Microsoft stencil files are part of this repository.
-- The generated VSDX files are ordinary documents. Test them with your own
-  Visio licensing before distributing them.
+- The generated VSDX files are ordinary documents. Test them with your own Visio licensing before distributing them.

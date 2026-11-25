@@ -110,7 +110,7 @@ function build() {
     return el('div', { class: 'rdd' }, button, menu);
   }
 
-  const qat = el('div', { id: 'qat', role: 'toolbar', 'aria-label': 'Quick access toolbar' }, el('b', { class: 'appname', text: window.layoutcraftProduct.name }), ...qatNodes);
+  const qat = el('div', { id: 'qat', role: 'toolbar', 'aria-label': 'Favourite commands bar' }, el('b', { class: 'appname', text: window.layoutcraftProduct.name }), ...qatNodes);
   const tablist = el('div', { id: 'ribbonTabs', role: 'tablist', 'aria-label': 'Ribbon tabs' });
   const panels = el('div', { id: 'ribbonPanels' });
   const tabButtons = [];

@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=LayoutCraft
+GenericName=Diagram editor
+Comment=Draw diagrams and open .vsdx files
+Exec=layoutcraft-app %f
+Icon=layoutcraft
+Terminal=false
+Categories=Graphics;2DGraphics;VectorGraphics;
+Keywords=diagram;flowchart;network;vsdx;
+MimeType=application/vnd.ms-visio.drawing;
+# the window class of the app (eframe uses the application name), so that the taskbar groups the windows under this launcher
+StartupWMClass=LayoutCraft
