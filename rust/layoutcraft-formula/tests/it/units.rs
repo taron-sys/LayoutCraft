@@ -141,6 +141,9 @@ fn units_the_pages_do_not_list_are_parse_errors_not_guesses() {
         let outcome = parse(source);
         assert!(outcome.is_err(), "{source:?} parsed as {outcome:?}");
     }
+    // A length unit followed by `^2` is an area unit (D9), so a power written that way leaves
+    // the unit behind it dangling.
+    assert!(parse("1 in ^ 2 in").is_err());
     let error = parse("5xyz").expect_err("unknown unit");
     assert_eq!(error.kind, ParseErrorKind::UnknownUnit("xyz".into()));
 }
