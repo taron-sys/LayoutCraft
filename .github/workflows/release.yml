@@ -1,101 +1,279 @@
-# DRAFT - never run. Release builds of the native programs on a tag "v*" (docs/36-packaging.md).
-# Every action is pinned to a commit SHA (the tag is in the comment). Signing and notarisation are COMMENTED placeholders: they need a
-# Windows code-signing certificate and an Apple Developer ID (docs/36-packaging.md); until then the files are unsigned.
-# Secret names: WINDOWS_CERT_PFX_BASE64, WINDOWS_CERT_PASSWORD, APPLE_DEVELOPER_ID_CERT_BASE64, APPLE_CERT_PASSWORD, APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD.
-# Secrets are never echoed: they are only used as environment values of the one step that needs them.
+# Release pipeline (docs/36-packaging.md). The work is done by the scripts in tools/packaging/; this file only says where each one runs.
+#
+#   push of a tag v*   builds every package, then ONE job (release) creates the GitHub release: a draft with all files and SHA256SUMS.txt,
+#                      published only after every build job succeeded and the uploaded files were checked against the checksums.
+#   workflow_dispatch  dry run: the same builds, the files are kept as workflow artifacts, no release is created.
+#   pull_request       the same dry run, for pull requests that change this workflow or the packaging files.
+#
+# Permissions: everything has contents: read; only the release job has contents: write. Every action is pinned to a commit SHA (the version is in the
+# comment); the tool versions are pinned in tools/packaging/versions.env. Signing and notarisation are skipped without their secrets (see the end of
+# docs/36-packaging.md): the secrets are only ever given to the signing steps, never to a build step, and only on a tag.
 name: release
 
 on:
   push:
     tags: ['v*']
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - tools/packaging/**
+      - tools/installer/**
+      - tools/package-portable.ps1
+      - tools/build-web-wasm.sh
+      - rust/resources/**
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-jobs:
-  windows:
-    runs-on: windows-latest
-    env:
-      LAYOUTCRAFT_PUBLIC_BUILD: '1'
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, installs the current stable Rust
-      - name: Portable zip (builds both exes)
-        shell: pwsh
-        env:
-          LC_TOOLCHAIN: '+stable'
-        run: |
-          # LC_TOOLCHAIN makes the script use the runner's default (msvc) toolchain instead of the gnu one of the maintainers' machine
-          pwsh tools/package-portable.ps1
-      # - name: Sign the exes (Authenticode)
-      #   shell: pwsh
-      #   env:
-      #     WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
-      #     WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-      #   run: |
-      #     [IO.File]::WriteAllBytes("$env:RUNNER_TEMP\cert.pfx", [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
-      #     signtool sign /f "$env:RUNNER_TEMP\cert.pfx" /p $env:WINDOWS_CERT_PASSWORD /tr http://timestamp.digicert.com /td sha256 /fd sha256 rust\target\release\layoutcraft-app.exe rust\target\release\layoutcraft-mcp.exe
-      #     Remove-Item "$env:RUNNER_TEMP\cert.pfx"
-      # - name: MSI (needs the WiX Toolset v4)
-      #   shell: pwsh
-      #   run: |
-      #     dotnet tool install --global wix
-      #     pwsh tools/installer/build-msi.ps1 -NoBuild
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: windows
-          path: dist/*
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }} # never cancel a release build
 
-  unix:
-    env:
-      LAYOUTCRAFT_PUBLIC_BUILD: '1'
+env:
+  LAYOUTCRAFT_PUBLIC_BUILD: '1' # no private modules, in every build (the scripts set it as well)
+  CARGO_TERM_COLOR: always
+  RETENTION_DAYS: 7 # how long the workflow artifacts (dry-run output, files passed between jobs) are kept
+
+jobs:
+  # ---------------------------------------------------------------- the tag must match the version of the programs
+  prepare:
+    name: check the version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Tag and Cargo.toml versions agree
+        id: version
+        run: |
+          tag=''
+          if [ "$GITHUB_REF_TYPE" = tag ]; then tag="$GITHUB_REF_NAME"; fi
+          tools/packaging/check-version.sh "$tag"
+
+  # ---------------------------------------------------------------- Windows x64 and ARM64 (ARM64 is cross-compiled on the x64 runner)
+  windows:
+    name: windows ${{ matrix.arch }}
+    needs: prepare
+    runs-on: windows-2025
+    timeout-minutes: 60
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-latest, name: linux-x86_64 }
-          - { os: macos-latest, name: macos-arm64 }
-    runs-on: ${{ matrix.os }}
+          - { arch: x64, target: x86_64-pc-windows-msvc }
+          - { arch: arm64, target: aarch64-pc-windows-msvc }
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, installs the current stable Rust
-      - name: System libraries of eframe (Linux)
-        if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libegl1-mesa-dev libgtk-3-dev
-      - name: Build
-        working-directory: rust
-        run: cargo build --release -p layoutcraft-app -p layoutcraft-mcp
-      - name: Archive
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Pinned tool versions
+        shell: bash
+        run: grep -Ev '^(#|$)' tools/packaging/versions.env >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch; the toolchain input pins the version
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+      - name: Build the programs
+        run: tools/packaging/windows/build.ps1 -Arch ${{ matrix.arch }}
+      - name: Start the MCP server (x64 only, the ARM64 build cannot run here)
+        if: matrix.arch == 'x64'
+        shell: bash
+        run: tools/packaging/smoke-mcp.sh "rust/target/${{ matrix.target }}/release/layoutcraft-mcp.exe"
+      # Authenticode. Without WINDOWS_CERT_PFX_BASE64 (and always outside a tag build) the script says so and does nothing.
+      - name: Sign the programs
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ github.ref_type == 'tag' && secrets.WINDOWS_CERT_PFX_BASE64 || '' }}
+          WINDOWS_CERT_PASSWORD: ${{ github.ref_type == 'tag' && secrets.WINDOWS_CERT_PASSWORD || '' }}
+        run: tools/packaging/windows/sign.ps1 -Path rust/target/${{ matrix.target }}/release/layoutcraft-app.exe, rust/target/${{ matrix.target }}/release/layoutcraft-mcp.exe
+      - name: Portable zip
+        run: tools/package-portable.ps1 -Arch ${{ matrix.arch }} -NoBuild -OutDir dist
+      - name: Install WiX
         run: |
-          mkdir -p out/LayoutCraft-${{ matrix.name }}
-          cp rust/target/release/layoutcraft-app rust/target/release/layoutcraft-mcp THIRD-PARTY-NOTICES.txt LICENSE-MIT LICENSE-APACHE out/LayoutCraft-${{ matrix.name }}/
-          tar -C out -czf out/LayoutCraft-${{ matrix.name }}.tar.gz LayoutCraft-${{ matrix.name }}
-          (cd out && shasum -a 256 LayoutCraft-${{ matrix.name }}.tar.gz > SHA256SUMS-${{ matrix.name }}.txt)
-      # - name: Sign and notarise (macOS; needs an Apple Developer ID)
-      #   if: runner.os == 'macOS'
-      #   env:
-      #     APPLE_DEVELOPER_ID_CERT_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERT_BASE64 }}
-      #     APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
-      #     APPLE_ID: ${{ secrets.APPLE_ID }}
-      #     APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      #     APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-      #   run: |
-      #     # import the certificate into a temporary keychain, codesign --options runtime --timestamp both binaries,
-      #     # zip them, xcrun notarytool submit --wait, xcrun stapler staple (a bare binary cannot be stapled: ship a .app or .dmg then)
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+          dotnet tool install --global wix --version "$env:WIX_VERSION"
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:USERPROFILE '.dotnet\tools')
+      - name: MSI
+        run: tools/installer/build-msi.ps1 -Arch ${{ matrix.arch }} -NoBuild -OutDir dist
+      - name: Sign the MSI
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ github.ref_type == 'tag' && secrets.WINDOWS_CERT_PFX_BASE64 || '' }}
+          WINDOWS_CERT_PASSWORD: ${{ github.ref_type == 'tag' && secrets.WINDOWS_CERT_PASSWORD || '' }}
+        run: tools/packaging/windows/sign.ps1 -Path "dist/LayoutCraft-$env:VERSION-windows-${{ matrix.arch }}.msi"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ${{ matrix.name }}
-          path: out/*
+          name: asset-windows-${{ matrix.arch }}
+          path: dist/LayoutCraft-*
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
 
-  publish:
-    needs: [windows, unix]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # only this job may create the release
+  # ---------------------------------------------------------------- Linux x86_64 and aarch64
+  # Built on Ubuntu 22.04, the oldest runner image, so that the programs need no newer glibc than 2.35 (build.sh checks it). aarch64 is
+  # cross-compiled on the same x86_64 runner: GitHub's free ARM runners exist only for public repositories, and the build links no system library.
+  linux:
+    name: linux ${{ matrix.arch }}
+    needs: prepare
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, target: x86_64-unknown-linux-gnu, cross_packages: '' }
+          - { arch: aarch64, target: aarch64-unknown-linux-gnu, cross_packages: 'gcc-aarch64-linux-gnu libc6-dev-arm64-cross' }
     steps:
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          path: artifacts
-      - name: Release
+          persist-credentials: false
+      - name: Pinned tool versions
+        run: grep -Ev '^(#|$)' tools/packaging/versions.env >> "$GITHUB_ENV"
+      - name: Packaging tools (rpm for rpmbuild, desktop-file-utils for the .desktop check, the cross compiler for aarch64)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm desktop-file-utils ${{ matrix.cross_packages }}
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch; the toolchain input pins the version
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: ${{ matrix.target }}
+      - name: Build the programs
+        run: tools/packaging/linux/build.sh ${{ matrix.arch }}
+      - name: Start the MCP server (x86_64 only, the aarch64 build cannot run here)
+        if: matrix.arch == 'x86_64'
+        run: tools/packaging/smoke-mcp.sh "rust/target/${{ matrix.target }}/release/layoutcraft-mcp"
+      - name: tar.gz, deb, rpm, AppImage
+        run: tools/packaging/linux/package.sh ${{ matrix.arch }}
+      - name: Check the packages
+        run: tools/packaging/linux/verify.sh ${{ matrix.arch }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asset-linux-${{ matrix.arch }}
+          path: dist/LayoutCraft-*
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+
+  # ---------------------------------------------------------------- macOS universal (arm64 + x86_64 on one Apple-silicon runner)
+  macos:
+    name: macos universal
+    needs: prepare
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Pinned tool versions
+        run: grep -Ev '^(#|$)' tools/packaging/versions.env >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch; the toolchain input pins the version
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - name: Build the programs (both architectures, joined with lipo)
+        run: tools/packaging/macos/build.sh
+      - name: Start the MCP server (the arm64 half; the runner is an Apple-silicon Mac)
+        run: tools/packaging/smoke-mcp.sh rust/target/universal-apple-darwin/release/layoutcraft-mcp
+      - name: LayoutCraft.app
+        run: tools/packaging/macos/make-app.sh
+      # Without the secrets this is an ad-hoc signature (Apple-silicon Macs run no unsigned code); with them, Developer ID + hardened runtime.
+      - name: Sign the app
+        env:
+          APPLE_DEVELOPER_ID_CERT_BASE64: ${{ github.ref_type == 'tag' && secrets.APPLE_DEVELOPER_ID_CERT_BASE64 || '' }}
+          APPLE_CERT_PASSWORD: ${{ github.ref_type == 'tag' && secrets.APPLE_CERT_PASSWORD || '' }}
+        run: tools/packaging/macos/sign.sh app dist/macos-app/LayoutCraft.app
+      - name: dmg and tar.gz
+        run: tools/packaging/macos/make-dmg.sh
+      - name: Sign the dmg (Developer ID only)
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          APPLE_DEVELOPER_ID_CERT_BASE64: ${{ github.ref_type == 'tag' && secrets.APPLE_DEVELOPER_ID_CERT_BASE64 || '' }}
+          APPLE_CERT_PASSWORD: ${{ github.ref_type == 'tag' && secrets.APPLE_CERT_PASSWORD || '' }}
+        run: tools/packaging/macos/sign.sh file "dist/LayoutCraft-$VERSION-macos-universal.dmg"
+      - name: Notarise the dmg (Apple ID secrets only)
+        env:
+          VERSION: ${{ needs.prepare.outputs.version }}
+          APPLE_ID: ${{ github.ref_type == 'tag' && secrets.APPLE_ID || '' }}
+          APPLE_TEAM_ID: ${{ github.ref_type == 'tag' && secrets.APPLE_TEAM_ID || '' }}
+          APPLE_APP_PASSWORD: ${{ github.ref_type == 'tag' && secrets.APPLE_APP_PASSWORD || '' }}
+        run: tools/packaging/macos/notarize.sh "dist/LayoutCraft-$VERSION-macos-universal.dmg"
+      - name: Check the dmg
+        run: tools/packaging/macos/verify.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asset-macos-universal
+          path: dist/LayoutCraft-*
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+
+  # ---------------------------------------------------------------- the browser build
+  web:
+    name: web (wasm)
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Pinned tool versions
+        run: grep -Ev '^(#|$)' tools/packaging/versions.env >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch; the toolchain input pins the version
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: wasm32-unknown-unknown
+      - name: Public wasm build and zip
+        run: tools/packaging/web/package.sh
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: asset-web
+          path: dist/LayoutCraft-*
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+
+  # ---------------------------------------------------------------- all files in one place, with checksums (also in a dry run)
+  assemble:
+    name: checksums
+    needs: [prepare, windows, linux, macos, web]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: asset-*
+          merge-multiple: true
+          path: release
+      - name: Expected files only, SHA256SUMS.txt
+        run: tools/packaging/assemble.sh release
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-files
+          path: release/*
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+
+  # ---------------------------------------------------------------- the release: tags only, the only job that can write
+  release:
+    name: create the release
+    if: github.ref_type == 'tag'
+    needs: [prepare, assemble]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write # the only job that may create a release
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: release-files
+          path: release
+      - name: Draft, upload, check, publish
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" --draft --title "${{ github.ref_name }}" --repo "${{ github.repository }}" $(find artifacts -type f)
+        run: tools/packaging/publish-release.sh "$GITHUB_REF_NAME" release

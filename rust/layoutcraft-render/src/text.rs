@@ -22,6 +22,31 @@ impl Measurer {
         Self { db }
     }
 
+    /// (size, offset) of the sub- or superscript of the first family that is installed, as shares of the em.
+    fn script(&self, family: &str, bold: bool, italic: bool, superscript: bool) -> Option<(f64, f64)> {
+        for family in parse_families(family) {
+            let query = Query {
+                families: &[family],
+                weight: if bold { Weight::BOLD } else { Weight::NORMAL },
+                stretch: fontdb::Stretch::default(),
+                style: if italic { Style::Italic } else { Style::Normal },
+            };
+            let Some(id) = self.db.query(&query) else {
+                continue;
+            };
+            let found = self.db.with_face_data(id, |data, index| {
+                let face = ttf_parser::Face::parse(data, index).ok()?;
+                let units = f64::from(face.units_per_em());
+                let metrics = if superscript { face.superscript_metrics()? } else { face.subscript_metrics()? };
+                (units > 0.0 && metrics.y_size > 0).then(|| (f64::from(metrics.y_size) / units, f64::from(metrics.y_offset) / units))
+            });
+            if let Some(Some(found)) = found {
+                return Some(found);
+            }
+        }
+        None
+    }
+
     fn width(&self, value: &str, family: &str, size: f64, bold: bool, italic: bool) -> Option<f64> {
         for family in parse_families(family) {
             let query = Query {
@@ -164,6 +189,25 @@ pub fn measure(value: &str, family: &str, size: f64, bold: bool, italic: bool) -
         }
         fallback_width(value, size, bold)
     })
+}
+
+/// The sub- (`pos` 2) or superscript (`pos` 1) size and shift of a font, read from its OS/2 table as Visio does; None for normal text.
+/// Where no installed face is found the values of Calibri are used (size 0.65, shift 0.14 down / 0.48 up).
+pub fn script_shift(pos: u8, family: &str, bold: bool, italic: bool) -> Option<crate::scene::ScriptShift> {
+    let superscript = match pos {
+        1 => true,
+        2 => false,
+        _ => return None,
+    };
+    let measured = MEASURER.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if slot.is_none() {
+            *slot = Some(Measurer::new());
+        }
+        slot.as_ref().and_then(|m| m.script(family, bold, italic, superscript))
+    });
+    let (scale, offset) = measured.unwrap_or((0.65, if superscript { 0.48 } else { 0.14 }));
+    Some(crate::scene::ScriptShift { scale, shift: if superscript { -offset } else { offset } })
 }
 
 fn parse_family_names(value: &str) -> Vec<String> {

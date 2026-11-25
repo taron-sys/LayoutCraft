@@ -9,7 +9,7 @@ publish = false
 [dependencies]
 layoutcraft-model = { path = "../layoutcraft-model" }
 serde_json = { version = "1", features = ["float_roundtrip"] }
-resvg = "0.49"
+resvg = "0.50"
 fontdb = "0.24"
 ttf-parser = "0.25"
 

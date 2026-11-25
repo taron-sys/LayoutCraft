@@ -1,5 +1,7 @@
 # Handover brief: LayoutCraft → Linux independent Rust port
 
+> Historical note: the JavaScript editor described here (the `js/` folder) was removed; see [42](42-javascript-removal.md). The last commit that still has it is `c9aa852`. The Rust crates carry this work now.
+
 Status: 2026-10-28. The Windows/JavaScript implementation is feature-complete
 for the five planned sprints plus the current data-graphics slices. This brief
 records what is done, what should be finished before a port, what can move to

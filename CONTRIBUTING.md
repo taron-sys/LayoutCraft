@@ -22,5 +22,5 @@ The project is available under MIT OR Apache-2.0, at your option. By submitting 
 
 ## Before you open a pull request
 
-Run the checks for the crates you changed (see `AGENTS.md`, section "Pull requests"), say in the pull request what ran and what did not, and do not report a check that did not run as passed. Run `npm run check:provenance` (or `node tools/check-provenance.mjs`) before opening a pull request: it rejects unverifiable provenance wording, private paths and third-party packages in the publishable tree.
+Run the checks for the crates you changed (see `AGENTS.md`, section "Pull requests"), say in the pull request what ran and what did not, and do not report a check that did not run as passed. Run `cargo xtask provenance` (from `rust/`) before opening a pull request: it rejects unverifiable provenance wording, private paths and third-party packages in the publishable tree.
 Security problems go to the private channel in `SECURITY.md`, never into a public issue.

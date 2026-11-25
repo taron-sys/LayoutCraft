@@ -13,5 +13,7 @@ CARGO_DIR="$(winpath "${CARGO_HOME:-$HOME/.cargo}")"
 REPO_DIR="$(winpath "$(cd .. && pwd)")"
 US="$(printf '')"
 export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=${CARGO_DIR}=/cargo${US}--remap-path-prefix=${REPO_DIR}=/layoutcraft"
-cargo $TC build -p layoutcraft-wasm --release --target wasm32-unknown-unknown || exit 1
+# CARGO_BUILD_FLAGS: extra cargo options (the release workflow passes --locked)
+# shellcheck disable=SC2086 # TC and the flags are words on purpose
+cargo $TC build -p layoutcraft-wasm --release --target wasm32-unknown-unknown ${CARGO_BUILD_FLAGS-} || exit 1
 cp target/wasm32-unknown-unknown/release/layoutcraft_wasm.wasm ../web/layoutcraft.wasm && echo "web/layoutcraft.wasm updated"

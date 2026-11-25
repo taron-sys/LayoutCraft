@@ -1,0 +1,3 @@
+# `cargo xtask <command>` runs the repository tools in `xtask/` (provenance, notices, serve).
+[alias]
+xtask = "run --package xtask --"
