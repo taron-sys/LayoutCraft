@@ -1,4 +1,4 @@
-# DRAFT - never run. CI of the public repository: what a stranger's clone builds and tests (docs/36-packaging.md, docs/38-private-fixtures.md).
+# CI of the public repository: what a stranger's clone builds and tests (docs/36-packaging.md, docs/38-private-fixtures.md).
 # Tests that need the private corpus are compiled out (cfg(private_fixtures)); the Visio-based checks are run by the maintainers elsewhere.
 # Every action is pinned to a commit SHA (the tag is in the comment); keep them current with Dependabot (github-actions).
 name: ci
@@ -10,6 +10,11 @@ on:
 
 permissions:
   contents: read
+
+# A newer push to a pull request cancels the older run of the same PR (runs on main always finish).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   LAYOUTCRAFT_PUBLIC_BUILD: '1' # exactly what the public repository builds (no private modules)
@@ -28,6 +33,15 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, installs the current stable Rust
+      - name: Cache cargo registry and build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: cargo-native-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: cargo-native-${{ runner.os }}-
       - name: System libraries of eframe (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libgl1-mesa-dev libegl1-mesa-dev libgtk-3-dev
@@ -35,7 +49,8 @@ jobs:
         run: cargo test --workspace --no-fail-fast
       - name: Public fixture conformance (self-authored set)
         run: cargo run --quiet -p layoutcraft-conformance -- --root .. --manifest ../fixtures/public/manifest.json
-      - name: Release build
+      - name: Release build (main only; the tests above already compile every crate)
+        if: github.event_name == 'push'
         run: cargo build --release -p layoutcraft-app -p layoutcraft-mcp
 
   web:
@@ -46,6 +61,15 @@ jobs:
       - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable branch, installs the current stable Rust
         with:
           targets: wasm32-unknown-unknown
+      - name: Cache cargo registry and build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            rust/target
+          key: cargo-web-${{ runner.os }}-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: cargo-web-${{ runner.os }}-
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
