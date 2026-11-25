@@ -4632,7 +4632,7 @@ impl eframe::App for LayoutCraftApp {
             let mut goto: Option<(usize, String)> = None;
             let mut save_csv = false;
             let names: Vec<String> = self.engine.document().map(|document| document.pages.iter().map(|page| page.name.clone()).collect()).unwrap_or_default();
-            egui::Window::new("Check Diagram").open(&mut open).collapsible(false).default_width(560.0).default_height(360.0).show(&ctx, |ui| {
+            egui::Window::new("Check Drawing").open(&mut open).collapsible(false).default_width(560.0).default_height(360.0).show(&ctx, |ui| {
                 ui.horizontal(|ui| {
                     if ui.checkbox(&mut self.check_alt, "Also list shapes without text and alt text").changed() {
                         recheck = true;

@@ -381,6 +381,14 @@ pub struct Shape {
     /// line wide by definition and the renderer never wraps it. NOT serialized: `text_fit` is compared with the golden models and keeps its meaning.
     #[serde(default, skip_serializing)]
     pub text_fits_line: bool,
+    /// The label's `Char.Pos`: 1 = superscript, 2 = subscript (0 = normal). Visio draws such text smaller and shifted by the font's own sub/superscript
+    /// size and offset (HPE Aruba SFP labels are subscripts). NOT serialized: the golden model JSON stays as it was.
+    #[serde(default, skip_serializing)]
+    pub text_script: u8,
+    /// The text block's background (`TextBkgnd` as `#rrggbb`, not transparent): Visio fills the whole text block with it, over the shape's own
+    /// artwork and its members. NOT serialized: the golden model JSON stays as it was.
+    #[serde(default, skip_serializing)]
+    pub text_bkgnd: Option<String>,
     /// The first `front_parts` entries of `parts` are a group's OWN geometry that Visio draws IN FRONT of the members' parts that follow
     /// (the group's `DisplayMode` cell is absent or 2; step 219). NOT serialized: the golden models keep the order they have, the renderer
     /// draws these parts last.

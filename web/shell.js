@@ -925,7 +925,7 @@ $('masters').addEventListener('click', (event) => {
   const same = !!armedMaster && armedMaster.master === li.dataset.master && armedMaster.stencil === li.dataset.stencil;
   armedMaster = same ? null : { master: li.dataset.master, stencil: li.dataset.stencil };
   for (const e of $('masters').children) e.classList.toggle('armed', !!armedMaster && e.dataset.master === armedMaster.master && e.dataset.stencil === armedMaster.stencil);
-  say(armedMaster ? `AutoConnect will place "${li.dataset.name}": point at a shape and click an arrow.` : 'AutoConnect will copy the shape you point at.');
+  say(armedMaster ? `Add and Connect Arrows will place "${li.dataset.name}": point at a shape and click an arrow.` : 'Add and Connect Arrows will copy the shape you point at.');
 });
 $('stencilFilter').oninput = renderMasters;
 $('stencilAll').onchange = renderMasters;
@@ -1609,11 +1609,11 @@ function drawDataSets() {
 }
 $('dataSetSave').onclick = () => run(() => {
   const ids = dataTargets();
-  if (ids.length !== 1) throw new Error('Select one shape: its Shape Data rows become the set');
+  if (ids.length !== 1) throw new Error('Select one shape: its Shape Fields become the set');
   const name = $('dataSetName').value.trim();
   if (!name) throw new Error('Type a name for the set');
   const rows = setFromRows(dataRows(ids[0]));
-  if (!rows.length) throw new Error('This shape has no Shape Data rows to save');
+  if (!rows.length) throw new Error('This shape has no Shape Fields to save');
   const sets = loadSets(); sets[name] = rows; saveSets(sets);
   $('dataSetName').value = ''; drawDataSets(); $('dataSetSel').value = name;
   say(`Saved the set "${name}" (${rows.length} rows)`);
@@ -2117,10 +2117,10 @@ function renderSheetPane() {
   if (!on) return;
   const body = $('shBody');
   body.innerHTML = '';
-  if (selection.length !== 1) { body.textContent = selection.length ? 'Select one shape to see its ShapeSheet.' : 'Nothing is selected.'; $('shHeading').textContent = 'Shape Sheet'; return; }
+  if (selection.length !== 1) { body.textContent = selection.length ? 'Select one shape to see its Shape Formulas.' : 'Nothing is selected.'; $('shHeading').textContent = 'Shape Formulas'; return; }
   let sheet = null;
   try { sheet = engine.shapeSheet(page, selection[0]); } catch (error) { body.textContent = error.message; return; }
-  $('shHeading').textContent = `Shape Sheet - Shape ${sheet.id}${sheet.name ? ` (${sheet.name})` : ''}${sheet.master ? `, master ${sheet.master}` : ''}`;
+  $('shHeading').textContent = `Shape Formulas - Shape ${sheet.id}${sheet.name ? ` (${sheet.name})` : ''}${sheet.master ? `, master ${sheet.master}` : ''}`;
   const transform = SHEET_TRANSFORM.map((n) => sheet.cells.find((c) => c.name === n)).filter(Boolean);
   const rest = sheet.cells.filter((c) => !SHEET_TRANSFORM.includes(c.name));
   const t = sheetDetails('Shape Transform', true);
@@ -3595,7 +3595,7 @@ function acShow(id) {
     const a = document.createElement('div');
     a.className = `acarrow ${dir}`;
     a.dataset.dir = dir;
-    a.title = `AutoConnect: ${armedMaster ? 'place the picked shape' : 'copy this shape'} ${dir === 'up' ? 'above' : dir === 'down' ? 'below' : 'to the ' + dir} and connect them`;
+    a.title = `Add and Connect Arrows: ${armedMaster ? 'place the picked shape' : 'copy this shape'} ${dir === 'up' ? 'above' : dir === 'down' ? 'below' : 'to the ' + dir} and connect them`;
     Object.assign(a.style, { left: `${b.x + b.w / 2 + dx * (b.w / 2 + 16)}px`, top: `${b.y + b.h / 2 - dy * (b.h / 2 + 16)}px` });
     a.addEventListener('pointerenter', () => { clearTimeout(acTimer); acTimer = null; });
     for (const type of ['pointerdown', 'mousedown']) a.addEventListener(type, (event) => { event.preventDefault(); event.stopPropagation(); if (type === 'pointerdown') acPress(id, dir, event); });
@@ -3626,12 +3626,12 @@ function acPress(id, dir, event) {
     if (Math.hypot(e.clientX - x0, e.clientY - y0) <= 6) { autoConnect(id, dir); return; }
     const target = shapeUnder(e);
     acHide();
-    if (!target || target === id || isConnector(target)) { say('AutoConnect: drop the arrow on another shape to connect the two.'); return; }
+    if (!target || target === id || isConnector(target)) { say('Add and Connect Arrows: drop the arrow on another shape to connect the two.'); return; }
     run(() => {
       const connector = engine.addConnector(page, { id, n: 0 }, { id: target, n: 0 });
       selection = [connector];
       render();
-      say('AutoConnect: connected to the shape.');
+      say('Add and Connect Arrows: connected to the shape.');
     });
   };
   window.addEventListener('pointerup', finish, true);
@@ -3654,7 +3654,7 @@ function autoConnect(id, dir) {
     try { created = engine.autoConnect(page, id, dir, pick); } catch (e) { say(String(e.message || e)); return; }
     selection = [created];
     render();
-    say('AutoConnect: shape placed and connected.');
+    say('Add and Connect Arrows: shape placed and connected.');
   });
 }
 $('autoConnectToggle').addEventListener('change', () => { if (!$('autoConnectToggle').checked) acHide(); });

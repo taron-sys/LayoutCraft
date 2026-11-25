@@ -232,3 +232,80 @@ and "unclear" rows.
 Record the same table in the pull request that renames a label (rule 4). Do the renames as one labels-only change: keep command
 ids, keep the old label as a hidden search alias, translate the new label, and update `docs/43-ui-parity.md` section 6 statuses
 once the owner agrees.
+
+## 7. Status of the renames (2026-11-25)
+
+The eight "replace" rows of section 4 are applied to the text people see, as one labels-only change. The decisions stay provisional
+(section 5: EUIPO, TMview and WIPO were not searched); a Craft owner still has to review the "unclear" rows.
+
+| Old label | New label | Where changed |
+|---|---|---|
+| Shape Sheet / ShapeSheet | Shape Formulas | `web/shell.html` (pane checkbox, tooltip, heading), `web/shell.js` (heading, empty message) |
+| AutoConnect | Add and Connect Arrows | `web/shell.html` (checkbox, tooltip), `web/shell.js` (status messages, arrow tooltips), `web/engine.js` (error text) |
+| Shape Data / Shape data | Shape Fields / Shape fields | `web/shell.html` (button, dialog, report note), `web/shell.js` (error messages), `web/contextmenu.js` |
+| Format Painter / Format painter | Copy Format / Copy format | `rust/layoutcraft-app/src/ribbon.rs`, `web/shell.html` (tooltip, aria-label) |
+| Check Diagram | Check Drawing | `rust/layoutcraft-app/src/ribbon.rs`, `rust/layoutcraft-app/src/main.rs` (window title), `web/shell.html` (button, dialog) |
+| Quick Access Toolbar | Favourite Commands Bar | `web/qat.js` (menu items, aria-label), `web/ribbon.js` (aria-label) |
+| Task panes | Side panels | `web/shell.html` (tooltips) |
+| Pan & Zoom | Page Overview | `web/shell.html` (pane checkbox, tooltip, heading) |
+
+Not changed, on purpose:
+
+- Command ids, element ids, function names, storage keys and comments keep the old words (rule 6 of the naming policy); the engine's
+  internal error texts ("shape data: ...") and the stored Visio names are untouched.
+- The Check Drawing result line "(Shape data > Alt text)" in `web/checkdiagram.js` and `layoutcraft-engine/src/check.rs`: the private
+  oracle `tests/oracle/check-oracle.json` records that text. A maintainer has to change both places and regenerate the oracle with
+  `visio-test-harness/dump-check-oracle.mjs` in one step.
+- MCP tool descriptions (`rust/layoutcraft-mcp/tests/oracle/tools-list.json` is a recorded list) still use the old words.
+- No hidden search alias for the old labels: LayoutCraft has no command search yet. Add the aliases when it has one.
+- No translation of the new labels: the shell has no translation files.
+- "Visual Aids" and "stencil / master" (owner decision) and the "keep" rows.
+
+## 8. Review by the naming owner: what has to be decided
+
+Sections 3 to 7 are provisional. This list is what a Craft owner has to settle before the names count as final. It adds no new
+finding; everything in it comes from sections 1 to 7. Nothing below is legal advice.
+
+### 8.1 Decisions on the labels that ship now
+
+For each row: **approve**, **shorten or change** (write the new label), or **go back to the old label**. The old label can only come
+back when the missing searches (8.2) and the three-product evidence (8.3) are in.
+
+| # | Label now shipped | Record's own doubt | Decision | Initials / date |
+|---|---|---|---|---|
+| 1 | Shape Formulas (was Shape Sheet) | none beyond the missing register searches | | |
+| 2 | Add and Connect Arrows (was AutoConnect) | long; "owner may shorten"; `Connect Arrows` had no USPTO hit | | |
+| 3 | Shape Fields (was Shape Data) | replaced as "unclear" (rule 5), not because of a found mark | | |
+| 4 | Copy Format (was Format Painter) | marked **interim**: two unrelated products use Format Painter, not three | | |
+| 5 | Check Drawing (was Check Diagram) | the record's reason is that it is "Visio's wording as far as known" (docs/43 S4) and says the check "did not settle it". Confirm the reason or pick a different word | | |
+| 6 | Favourite Commands Bar (was Quick Access Toolbar) | owner "may prefer a shorter name, e.g. Pinned Commands" | | |
+| 7 | Side panels (was Task panes) | USPTO not checked; common-use evidence not collected | | |
+| 8 | Page Overview (was Pan & Zoom) | none beyond the missing register searches | | |
+
+### 8.2 Searches nobody has run
+
+EUIPO eSearch, TMview and the WIPO Global Brand Database were not reachable by our tools (section 5), and we do not bypass the bot
+check. A person with a browser has to run them. Search each string below as a word mark, with the owner **Microsoft Corporation** in
+mind, and note the classes found (software is class 9, services class 42; section 3 lists the USPTO results already read).
+
+- The eight new labels: `Shape Formulas`, `Add and Connect Arrows` (also `Connect Arrows`), `Shape Fields`, `Copy Format`, `Check Drawing`,
+  `Favourite Commands Bar` (also `Pinned Commands`), `Side panels`, `Page Overview`.
+- The old names, to see who else holds them: `ShapeSheet`, `AutoConnect`, `Format Painter`, `Quick Access Toolbar`.
+- Names for features not built yet (section 4, last row), so the choice is made before they ship: `Frequent Shapes`,
+  `Live Alignment Guides`, `Data Visuals`, `Key hints`, `Command Search`, `Floating Toolbar`, `Snap and Attach`, `Rearrange Page`,
+  `Tidy Alignment and Spacing`, `Guides and Aids`.
+
+### 8.3 Evidence still missing
+
+- A third unrelated product that calls the feature by the same words: Format Painter has two, Quick Access Toolbar one copy, the rest none
+  (section 5).
+- A ™ or ® check per feature name in Microsoft's own documentation (section 1: not established).
+- The USPTO reading covered only the first results page of a fuzzy search, and no design marks. Replacement names marked "not checked"
+  in section 3 were not searched at all.
+
+### 8.4 Open rows from section 4
+
+- **Visual Aids** (ribbon group) to `Guides and Aids`, and **stencil / master** where used as our own feature label to
+  `shape library` / `library shape`: both are "unclear, owner decision".
+- The check message "(Shape data > Alt text)" and the MCP tool descriptions still use the old words (section 7): decide whether they
+  follow the new label, then have a maintainer change them together with the recorded oracle files.

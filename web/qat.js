@@ -66,7 +66,7 @@ function openMenu(x, y, items, from = null) {
   opener = from;
   menu = document.createElement('div');
   menu.id = 'ctxmenu'; menu.className = 'qatmenu';
-  menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', 'Quick access toolbar');
+  menu.setAttribute('role', 'menu'); menu.setAttribute('aria-label', 'Favourite commands bar');
   for (const [text, run] of items) {
     const b = document.createElement('button');
     b.type = 'button'; b.setAttribute('role', 'menuitem'); b.textContent = text;
@@ -98,9 +98,9 @@ function menuFor(button, x, y, fromKeyboard) {
   const id = proxy ? button.dataset.for : button.id;
   if (!id || FIXED.has(id) || (!proxy && button.closest('#qat'))) return false; // the fixed four and the tab strip have no menu of ours
   const items = [];
-  if (ids.includes(id)) items.push(['Remove from Quick Access Toolbar', () => api.remove(id)]);
-  else items.push(['Add to Quick Access Toolbar', () => api.add(id)]);
-  if (ids.length) items.push(['Reset Quick Access Toolbar', () => api.reset()]);
+  if (ids.includes(id)) items.push(['Remove from Favourite Commands Bar', () => api.remove(id)]);
+  else items.push(['Add to Favourite Commands Bar', () => api.add(id)]);
+  if (ids.length) items.push(['Reset Favourite Commands Bar', () => api.reset()]);
   openMenu(x, y, items, fromKeyboard ? button : null);
   return true;
 }
