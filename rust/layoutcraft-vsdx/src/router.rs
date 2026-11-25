@@ -44,8 +44,12 @@ pub struct Site {
 
 const DIRS: [(i8, i8); 4] = [(1, 0), (-1, 0), (0, 1), (0, -1)];
 
+/// Coordinates are clamped to this many inches: a hostile file can put a shape anywhere, and the integer grid must not overflow.
+const MAX_COORD_IN: f64 = 100_000.0;
+
 fn unit(value: f64) -> i64 {
-    (value * UNITS).round() as i64
+    // NaN clamps to NaN and rounds to 0 in the cast.
+    (value.clamp(-MAX_COORD_IN, MAX_COORD_IN) * UNITS).round() as i64
 }
 
 fn dir_index(dir: (i8, i8)) -> usize {

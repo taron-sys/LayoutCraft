@@ -28,6 +28,8 @@ pub struct EmfSvg {
 
 const SIGNATURE: u32 = 0x464D_4520; // " EMF"
 const MAX_RECORDS: usize = 2_000_000;
+/// Device coordinates are clamped to this magnitude (the picture itself may not be wider than 1e7 either, see `emf_to_svg_at`).
+const MAX_DEVICE: f64 = 1e7;
 
 fn u32_at(b: &[u8], o: usize) -> Option<u32> {
     Some(u32::from_le_bytes(b.get(o..o + 4)?.try_into().ok()?))
@@ -173,8 +175,15 @@ struct Converter {
 }
 
 impl Converter {
-    /// Logical point to device pixels.
+    /// Logical point to device pixels, kept within `MAX_DEVICE` (a record can name any 32-bit coordinate, and a path that far out
+    /// makes the rasteriser panic).
     fn map(&self, x: f64, y: f64) -> (f64, f64) {
+        let (x, y) = self.map_unbounded(x, y);
+        let bound = |v: f64| if v.is_finite() { v.clamp(-MAX_DEVICE, MAX_DEVICE) } else { 0.0 };
+        (bound(x), bound(y))
+    }
+
+    fn map_unbounded(&self, x: f64, y: f64) -> (f64, f64) {
         let (x, y) = self.dc.world.apply(x, y);
         let dc = &self.dc;
         match dc.map_mode {
