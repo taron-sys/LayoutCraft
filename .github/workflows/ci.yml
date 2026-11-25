@@ -105,6 +105,15 @@ jobs:
         env:
           CARGO_TOOLCHAIN: '' # the script pins a toolchain for the maintainers' machine; on the runner the default one is used
         run: sh tools/build-web-wasm.sh public
+      - name: The wasm loads through the shell's loader
+        # A dependency update can add imports the shell does not provide (wasm-bindgen glue pulled in through getrandom): the build still
+        # succeeds, but the page cannot start. Load the module the way the page does; the release pipeline makes the same check.
+        run: |
+          node --input-type=module -e "
+            import { loadEngine } from './web/engine.js'
+            import { readFileSync } from 'node:fs'
+            const engine = await loadEngine(readFileSync('web/layoutcraft.wasm'))
+            if (typeof engine.import !== 'function') throw new Error('the engine has no import()')"
       - name: Third-party notices are current
         working-directory: rust
         env:
