@@ -10,29 +10,72 @@ struct Fonts {
     sans: Option<String>,
 }
 
+/// The system fonts, with each generic family (sans-serif, serif, monospace) pointed at an installed face, and the name of the sans face.
+fn system_database() -> (Database, Option<String>) {
+    let mut database = Database::new();
+    database.load_system_fonts();
+    // fontdb's generic families default to Arial, Times New Roman and Courier New; where those are not installed (Linux) nothing would
+    // match and no text would be drawn, so point each generic family at an installed face.
+    let installed = |name: &str| has_family(&database, name);
+    let first = |names: &[&str]| names.iter().find(|name| installed(name)).map(|name| name.to_string());
+    let sans = first(&["Arial", "Liberation Sans", "Carlito", "Noto Sans", "DejaVu Sans", "Adwaita Sans", "Cantarell", "Helvetica"]);
+    let serif = first(&["Times New Roman", "Liberation Serif", "Caladea", "Noto Serif", "DejaVu Serif"]);
+    let mono = first(&["Courier New", "Liberation Mono", "Noto Sans Mono", "DejaVu Sans Mono"]);
+    if let Some(name) = sans.clone() {
+        database.set_sans_serif_family(name);
+    }
+    if let Some(name) = serif {
+        database.set_serif_family(name);
+    }
+    if let Some(name) = mono {
+        database.set_monospace_family(name);
+    }
+    (database, sans)
+}
+
 fn fonts() -> &'static Fonts {
     static FONTS: OnceLock<Fonts> = OnceLock::new();
     FONTS.get_or_init(|| {
-        let mut database = Database::new();
-        database.load_system_fonts();
-        // fontdb's generic families default to Arial, Times New Roman and Courier New; where those are not installed (Linux) nothing would
-        // match and no text would be drawn, so point each generic family at an installed face.
-        let installed = |name: &str| has_family(&database, name);
-        let first = |names: &[&str]| names.iter().find(|name| installed(name)).map(|name| name.to_string());
-        let sans = first(&["Arial", "Liberation Sans", "Carlito", "Noto Sans", "DejaVu Sans", "Adwaita Sans", "Cantarell", "Helvetica"]);
-        let serif = first(&["Times New Roman", "Liberation Serif", "Caladea", "Noto Serif", "DejaVu Serif"]);
-        let mono = first(&["Courier New", "Liberation Mono", "Noto Sans Mono", "DejaVu Sans Mono"]);
-        if let Some(name) = sans.clone() {
-            database.set_sans_serif_family(name);
-        }
-        if let Some(name) = serif {
-            database.set_serif_family(name);
-        }
-        if let Some(name) = mono {
-            database.set_monospace_family(name);
-        }
-        Fonts { database: Arc::new(database), sans }
+        let (database, sans) = system_database();
+        Fonts { database: Arc::new(share_font_files(database)), sans }
     })
+}
+
+/// A font file whose bytes are read the first time a face needs them and stay in memory after that.
+struct LazyFontFile {
+    path: std::path::PathBuf,
+    data: OnceLock<Vec<u8>>,
+}
+
+impl AsRef<[u8]> for LazyFontFile {
+    fn as_ref(&self) -> &[u8] {
+        // An unreadable file gives no bytes, so no face can be parsed from it: the same outcome as fontdb failing to read it itself.
+        self.data.get_or_init(|| std::fs::read(&self.path).unwrap_or_default())
+    }
+}
+
+/// The same faces with their files shared in memory. A face that points at a file path makes fontdb open and map the file on every use, and the
+/// SVG text code asks for the font data several times per character (has the face this char, shape, outline the glyph): on Windows that is the
+/// bulk of the time spent parsing a page with text. Each file is read once, on first use (a file with several faces is shared by all of them),
+/// so memory grows only by the fonts a drawing actually uses. Faces keep their order, so every query finds the face it found before.
+fn share_font_files(source: Database) -> Database {
+    use resvg::usvg::fontdb::{Family, Source};
+    let mut shared = Database::new();
+    shared.set_serif_family(source.family_name(&Family::Serif).to_string());
+    shared.set_sans_serif_family(source.family_name(&Family::SansSerif).to_string());
+    shared.set_cursive_family(source.family_name(&Family::Cursive).to_string());
+    shared.set_fantasy_family(source.family_name(&Family::Fantasy).to_string());
+    shared.set_monospace_family(source.family_name(&Family::Monospace).to_string());
+    let mut files: std::collections::HashMap<std::path::PathBuf, Arc<LazyFontFile>> = std::collections::HashMap::new();
+    for face in source.faces() {
+        let mut face = face.clone();
+        if let Source::File(path) = &face.source {
+            let file = files.entry(path.clone()).or_insert_with(|| Arc::new(LazyFontFile { path: path.clone(), data: OnceLock::new() })).clone();
+            face.source = Source::Binary(file);
+        }
+        shared.push_face_info(face);
+    }
+    shared
 }
 
 fn has_family(database: &Database, name: &str) -> bool {
@@ -100,6 +143,33 @@ mod tests {
         assert_eq!(found.requested, "No Such Face 7");
         assert!(!found.used.is_empty());
         assert_eq!(font_substitution("sans-serif"), None);
+    }
+
+    /// Sharing the font files in memory is a speed change only: text must come out with the same pixels as with the database fontdb loaded.
+    #[test]
+    fn sharing_font_files_does_not_change_what_text_looks_like() {
+        // the production setup, so the generic families resolve on a machine without Arial (a Linux CI runner)
+        let (plain, _) = system_database();
+        let shared = share_font_files(plain.clone());
+        assert_eq!(plain.len(), shared.len());
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="360" height="120">
+            <text x="4" y="22" font-size="20" font-family="Arial, sans-serif">Hello Node 12 Wg</text>
+            <text x="4" y="52" font-size="18" font-family="Times New Roman, serif" font-style="italic">Hello Node 12 Wg</text>
+            <text x="4" y="82" font-size="16" font-family="Courier New, monospace" font-weight="bold">Hello Node 12 Wg</text>
+            <text x="4" y="110" font-size="14" font-family="No Such Face 7">Hello Node 12 Wg</text></svg>"#;
+        let draw = |database: Database| {
+            let mut options = resvg::usvg::Options::default();
+            options.fontdb = Arc::new(database);
+            let tree = resvg::usvg::Tree::from_str(svg, &options).unwrap();
+            let mut pixmap = resvg::tiny_skia::Pixmap::new(360, 120).unwrap();
+            resvg::render(&tree, resvg::tiny_skia::Transform::default(), &mut pixmap.as_mut());
+            pixmap.take()
+        };
+        let (a, b) = (draw(plain.clone()), draw(shared));
+        assert!(a == b, "text pixels changed");
+        if !plain.is_empty() {
+            assert!(a.chunks(4).any(|px| px[3] > 0), "the reference drew no text, so the comparison proves nothing");
+        }
     }
 
     #[test]

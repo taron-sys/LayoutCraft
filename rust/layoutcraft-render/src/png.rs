@@ -72,7 +72,13 @@ fn shared_options() -> resvg::usvg::Options<'static> {
     options
 }
 
-pub fn render_png(scene: &Scene, scale: f64) -> Result<Vec<u8>, String> {
+/// The usvg options every raster uses (shared system fonts, Windows font substitutes). Public so a benchmark can time the SVG parse on its own.
+pub fn usvg_options() -> resvg::usvg::Options<'static> {
+    shared_options()
+}
+
+/// Draw the whole page at `scale` into a premultiplied pixmap (the one place that parses the SVG and runs the rasterizer).
+fn render_pixmap(scene: &Scene, scale: f64) -> Result<resvg::tiny_skia::Pixmap, String> {
     if !scale.is_finite() || scale <= 0.0 {
         return Err("scale must be a positive finite number".to_string());
     }
@@ -90,9 +96,32 @@ pub fn render_png(scene: &Scene, scale: f64) -> Result<Vec<u8>, String> {
         resvg::tiny_skia::Transform::from_scale(scale as f32, scale as f32),
         &mut pixmap.as_mut(),
     );
-    pixmap
+    Ok(pixmap)
+}
+
+/// Straight (not premultiplied) RGBA bytes of a pixmap, row by row. The same per-pixel conversion `Pixmap::encode_png` applies, so this is
+/// byte for byte what a PNG round trip returns, without the encode, the decode or the extra copy.
+pub(crate) fn straight_rgba(pixmap: &resvg::tiny_skia::Pixmap) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(pixmap.pixels().len() * 4);
+    for px in pixmap.pixels() {
+        let c = px.demultiply();
+        rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
+    }
+    rgba
+}
+
+pub fn render_png(scene: &Scene, scale: f64) -> Result<Vec<u8>, String> {
+    render_pixmap(scene, scale)?
         .encode_png()
         .map_err(|error| format!("PNG encode failed: {error}"))
+}
+
+/// Rasterize the whole page at `scale` device pixels per scene pixel. Returns (width, height, RGBA bytes, straight alpha, not premultiplied): the
+/// layout `egui::ColorImage::from_rgba_unmultiplied` and the PNG format take. This is exactly what `render_png` followed by a PNG decode gives
+/// (the pixels are the same bytes), without the encode and decode.
+pub fn render_rgba(scene: &Scene, scale: f64) -> Result<(u32, u32, Vec<u8>), String> {
+    let pixmap = render_pixmap(scene, scale)?;
+    Ok((pixmap.width(), pixmap.height(), straight_rgba(&pixmap)))
 }
 
 /// Rasterize one window of the page at `scale` device pixels per scene pixel: `region` is (x, y, width, height) in scene pixels counted from the
@@ -113,27 +142,13 @@ pub fn render_region_rgba(scene: &Scene, scale: f64, region: [f64; 4]) -> Result
     let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height).ok_or_else(|| "could not allocate raster pixmap".to_string())?;
     let transform = resvg::tiny_skia::Transform::from_row(scale as f32, 0.0, 0.0, scale as f32, (-region[0] * scale) as f32, (-region[1] * scale) as f32);
     resvg::render(&tree, transform, &mut pixmap.as_mut());
-    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
-    for px in pixmap.pixels() {
-        let c = px.demultiply();
-        rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
-    }
-    Ok((width, height, rgba))
+    Ok((width, height, straight_rgba(&pixmap)))
 }
 
 /// Rasterize a scene to 8 bit RGB rows (width, height, bytes) composited on the paper colour `paper` (the scene's own background is part of the picture).
 pub fn render_rgb(scene: &Scene, scale: f64, paper: [u8; 3]) -> Result<(u32, u32, Vec<u8>), String> {
-    if !scale.is_finite() || scale <= 0.0 {
-        return Err("scale must be a positive finite number".to_string());
-    }
-    let svg = to_svg_scaled(scene, scale);
-    let options = shared_options();
-    let tree = resvg::usvg::Tree::from_str(&svg, &options).map_err(|error| format!("SVG parse failed: {error}"))?;
-    let size = tree.size();
-    let width = ((size.width() as f64 * scale).round() as u32).max(1);
-    let height = ((size.height() as f64 * scale).round() as u32).max(1);
-    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height).ok_or_else(|| "could not allocate raster pixmap".to_string())?;
-    resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale as f32, scale as f32), &mut pixmap.as_mut());
+    let pixmap = render_pixmap(scene, scale)?;
+    let (width, height) = (pixmap.width(), pixmap.height());
     let mut rgb = Vec::with_capacity((width * height * 3) as usize);
     for px in pixmap.pixels() {
         // premultiplied colour over the paper: c + paper * (1 - alpha)
