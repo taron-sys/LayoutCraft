@@ -72,6 +72,11 @@ fn shared_options() -> resvg::usvg::Options<'static> {
     options
 }
 
+/// The usvg options every raster uses (shared system fonts, Windows font substitutes). Public so a benchmark can time the SVG parse on its own.
+pub fn usvg_options() -> resvg::usvg::Options<'static> {
+    shared_options()
+}
+
 pub fn render_png(scene: &Scene, scale: f64) -> Result<Vec<u8>, String> {
     if !scale.is_finite() || scale <= 0.0 {
         return Err("scale must be a positive finite number".to_string());
