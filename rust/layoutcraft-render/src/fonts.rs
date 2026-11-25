@@ -10,27 +10,33 @@ struct Fonts {
     sans: Option<String>,
 }
 
+/// The system fonts, with each generic family (sans-serif, serif, monospace) pointed at an installed face, and the name of the sans face.
+fn system_database() -> (Database, Option<String>) {
+    let mut database = Database::new();
+    database.load_system_fonts();
+    // fontdb's generic families default to Arial, Times New Roman and Courier New; where those are not installed (Linux) nothing would
+    // match and no text would be drawn, so point each generic family at an installed face.
+    let installed = |name: &str| has_family(&database, name);
+    let first = |names: &[&str]| names.iter().find(|name| installed(name)).map(|name| name.to_string());
+    let sans = first(&["Arial", "Liberation Sans", "Carlito", "Noto Sans", "DejaVu Sans", "Adwaita Sans", "Cantarell", "Helvetica"]);
+    let serif = first(&["Times New Roman", "Liberation Serif", "Caladea", "Noto Serif", "DejaVu Serif"]);
+    let mono = first(&["Courier New", "Liberation Mono", "Noto Sans Mono", "DejaVu Sans Mono"]);
+    if let Some(name) = sans.clone() {
+        database.set_sans_serif_family(name);
+    }
+    if let Some(name) = serif {
+        database.set_serif_family(name);
+    }
+    if let Some(name) = mono {
+        database.set_monospace_family(name);
+    }
+    (database, sans)
+}
+
 fn fonts() -> &'static Fonts {
     static FONTS: OnceLock<Fonts> = OnceLock::new();
     FONTS.get_or_init(|| {
-        let mut database = Database::new();
-        database.load_system_fonts();
-        // fontdb's generic families default to Arial, Times New Roman and Courier New; where those are not installed (Linux) nothing would
-        // match and no text would be drawn, so point each generic family at an installed face.
-        let installed = |name: &str| has_family(&database, name);
-        let first = |names: &[&str]| names.iter().find(|name| installed(name)).map(|name| name.to_string());
-        let sans = first(&["Arial", "Liberation Sans", "Carlito", "Noto Sans", "DejaVu Sans", "Adwaita Sans", "Cantarell", "Helvetica"]);
-        let serif = first(&["Times New Roman", "Liberation Serif", "Caladea", "Noto Serif", "DejaVu Serif"]);
-        let mono = first(&["Courier New", "Liberation Mono", "Noto Sans Mono", "DejaVu Sans Mono"]);
-        if let Some(name) = sans.clone() {
-            database.set_sans_serif_family(name);
-        }
-        if let Some(name) = serif {
-            database.set_serif_family(name);
-        }
-        if let Some(name) = mono {
-            database.set_monospace_family(name);
-        }
+        let (database, sans) = system_database();
         Fonts { database: Arc::new(share_font_files(database)), sans }
     })
 }
@@ -142,8 +148,8 @@ mod tests {
     /// Sharing the font files in memory is a speed change only: text must come out with the same pixels as with the database fontdb loaded.
     #[test]
     fn sharing_font_files_does_not_change_what_text_looks_like() {
-        let mut plain = Database::new();
-        plain.load_system_fonts();
+        // the production setup, so the generic families resolve on a machine without Arial (a Linux CI runner)
+        let (plain, _) = system_database();
         let shared = share_font_files(plain.clone());
         assert_eq!(plain.len(), shared.len());
         let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="360" height="120">
