@@ -1127,7 +1127,7 @@ impl LayoutCraftApp {
             comment_text: String::new(),
             help_about_open: false,
             mcp_open: false,
-            mcp_server: "/path/to/LayoutCraft/mcp/server.mjs".to_string(),
+            mcp_server: mcpinfo::server_placeholder().to_string(),
             mcp_root: "/path/to/your/drawings".to_string(),
             mcp_message: String::new(),
             ribbon_textures: BTreeMap::new(),
@@ -4797,7 +4797,7 @@ impl eframe::App for LayoutCraftApp {
                 }
                 egui::Grid::new("mcp-inputs").num_columns(2).show(ui, |ui| {
                     if bundled.is_none() {
-                        ui.label("Server file (mcp/server.mjs)");
+                        ui.label(format!("Server program ({})", mcpinfo::server_file_name()));
                         ui.add(egui::TextEdit::singleline(&mut self.mcp_server).desired_width(360.0));
                         ui.end_row();
                     }
@@ -4805,10 +4805,11 @@ impl eframe::App for LayoutCraftApp {
                     ui.add(egui::TextEdit::singleline(&mut self.mcp_root).desired_width(360.0));
                     ui.end_row();
                 });
-                let config = match &bundled {
-                    Some(exe) => mcpinfo::native_config(&exe.to_string_lossy(), self.mcp_root.trim(), "layoutcraft"),
-                    None => mcpinfo::mcp_config("node", None, self.mcp_server.trim(), self.mcp_root.trim(), "layoutcraft"),
+                let server = match &bundled {
+                    Some(exe) => exe.to_string_lossy().into_owned(),
+                    None => self.mcp_server.trim().to_string(),
                 };
+                let config = mcpinfo::mcp_config(&server, self.mcp_root.trim(), "layoutcraft");
                 ui.label("Configuration for Claude Desktop and other clients that read a JSON file:");
                 let mut json = config.json.clone();
                 ui.add(egui::TextEdit::multiline(&mut json).font(egui::TextStyle::Monospace).desired_rows(9).desired_width(500.0).interactive(false));

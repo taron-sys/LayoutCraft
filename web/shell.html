@@ -258,7 +258,7 @@
   <b>AI assistant (MCP)</b>
   <p>An AI assistant can draw with LayoutCraft through its <b>Model Context Protocol (MCP) server</b>. The server is a separate program: the assistant (the MCP client) starts it and talks to it over standard input and output, nothing is sent over the network. It can read and write files only below the drawings folder you give it.</p>
   <p id="mcpDesktop" hidden>This build includes the server; the program path is filled in.</p>
-  <label>Server file (<code>mcp/server.mjs</code> in the LayoutCraft folder; needs Node.js 20 or newer) <input id="mcpServer" type="text" size="60" placeholder="C:/path/to/LayoutCraft/mcp/server.mjs" autocomplete="off"></label>
+  <label>Server program (<code>layoutcraft-mcp</code>, shipped next to the LayoutCraft app) <input id="mcpServer" type="text" size="60" placeholder="C:/path/to/LayoutCraft/layoutcraft-mcp.exe" autocomplete="off"></label>
   <label>Drawings folder <input id="mcpRoot" type="text" size="60" placeholder="C:/path/to/your/drawings" autocomplete="off"></label>
   <h3>Claude Desktop and other clients that read a JSON configuration</h3>
   <textarea id="mcpJson" readonly rows="10" cols="70" aria-label="MCP server configuration (JSON)"></textarea>
