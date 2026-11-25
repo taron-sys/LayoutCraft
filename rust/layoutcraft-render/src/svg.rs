@@ -1534,8 +1534,12 @@ fn paragraph_geometry(paragraph: &SceneParagraph, text: &SceneText) -> Option<Pa
 
 fn wrap_paragraph(paragraph: &SceneParagraph, text: &SceneText) -> Vec<Vec<SceneRun>> {
     let geometry = paragraph_geometry(paragraph, text);
-    let rest_width = (text.w - paragraph.indent).max(10.0);
-    let mut max_width = geometry.as_ref().map_or(rest_width, |g| (text.w - g.first_x).max(10.0));
+    let rest_width = if text.fit_line { f64::INFINITY } else { (text.w - paragraph.indent).max(10.0) };
+    let mut max_width = if text.fit_line {
+        f64::INFINITY
+    } else {
+        geometry.as_ref().map_or(rest_width, |g| (text.w - g.first_x).max(10.0))
+    };
     let mut lines: Vec<Vec<SceneRun>> = Vec::new();
     let mut current: Vec<SceneRun> = Vec::new();
     let mut width = 0.0;

@@ -95,6 +95,32 @@ pub fn render_png(scene: &Scene, scale: f64) -> Result<Vec<u8>, String> {
         .map_err(|error| format!("PNG encode failed: {error}"))
 }
 
+/// Rasterize one window of the page at `scale` device pixels per scene pixel: `region` is (x, y, width, height) in scene pixels counted from the
+/// top-left corner of the page picture. Returns (width, height, RGBA bytes, not premultiplied). Only the window gets pixels, so a tiny shape
+/// can be drawn sharp at a zoom where the whole page would exceed the raster size limit.
+pub fn render_region_rgba(scene: &Scene, scale: f64, region: [f64; 4]) -> Result<(u32, u32, Vec<u8>), String> {
+    if !scale.is_finite() || scale <= 0.0 || region.iter().any(|v| !v.is_finite()) || region[2] <= 0.0 || region[3] <= 0.0 {
+        return Err("scale and region must be positive finite numbers".to_string());
+    }
+    let svg = to_svg_scaled(scene, scale);
+    let options = shared_options();
+    let tree = resvg::usvg::Tree::from_str(&svg, &options).map_err(|error| format!("SVG parse failed: {error}"))?;
+    let width = ((region[2] * scale).round() as u32).max(1);
+    let height = ((region[3] * scale).round() as u32).max(1);
+    if u64::from(width) * u64::from(height) > 64_000_000 {
+        return Err("the window is too large to draw".to_string());
+    }
+    let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height).ok_or_else(|| "could not allocate raster pixmap".to_string())?;
+    let transform = resvg::tiny_skia::Transform::from_row(scale as f32, 0.0, 0.0, scale as f32, (-region[0] * scale) as f32, (-region[1] * scale) as f32);
+    resvg::render(&tree, transform, &mut pixmap.as_mut());
+    let mut rgba = Vec::with_capacity((width * height * 4) as usize);
+    for px in pixmap.pixels() {
+        let c = px.demultiply();
+        rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
+    }
+    Ok((width, height, rgba))
+}
+
 /// Rasterize a scene to 8 bit RGB rows (width, height, bytes) composited on the paper colour `paper` (the scene's own background is part of the picture).
 pub fn render_rgb(scene: &Scene, scale: f64, paper: [u8; 3]) -> Result<(u32, u32, Vec<u8>), String> {
     if !scale.is_finite() || scale <= 0.0 {
@@ -135,5 +161,17 @@ mod tests {
     fn text_in_an_uninstalled_font_is_still_drawn() {
         assert!(inked_pixels("'No Such Face 7'") > 0);
         assert!(inked_pixels("Calibri") > 0);
+    }
+
+    /// A window of the page drawn at a large scale shows the same picture as that part of the whole page, and keeps detail the whole-page raster lacks.
+    #[test]
+    fn a_region_is_the_matching_part_of_the_page_at_the_same_scale() {
+        use crate::scene::Scene;
+        let scene = Scene { fit_text: false, title: "t".into(), min_x: 0.0, min_y: 0.0, width: 100.0, height: 50.0, background: "#ffffff".into(), items: vec![] };
+        let (w, h, rgba) = super::render_region_rgba(&scene, 4.0, [10.0, 5.0, 20.0, 10.0]).unwrap();
+        assert_eq!((w, h), (80, 40));
+        assert_eq!(rgba.len(), 80 * 40 * 4);
+        assert!(rgba.chunks(4).all(|px| px == [255, 255, 255, 255]));
+        assert!(super::render_region_rgba(&scene, 4.0, [0.0, 0.0, 0.0, 10.0]).is_err());
     }
 }

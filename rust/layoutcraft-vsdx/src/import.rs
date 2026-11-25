@@ -1924,6 +1924,23 @@ fn text_block(node: &ResolvedShape, styles: &DocumentStyles, w_px: f64, h_px: f6
     json!({ "x": bx, "y": by, "w": bw, "h": bh })
 }
 
+/// A `TxtWidth` formula that makes the block exactly as wide as its text (`TEXTWIDTH(TheText)`, `MAX(TEXTWIDTH(TheText),Width)`). A `MIN(...)` cap
+/// (`MIN(Width*2.5,TEXTWIDTH(TheText))`) can make the block narrower than the text, and Visio then wraps it (its saved `TxtHeight` is two lines).
+pub(crate) fn formula_fits_text_line(formula: &str) -> bool {
+    let upper = formula.to_ascii_uppercase();
+    upper.contains("TEXTWIDTH(") && !upper.contains("MIN(")
+}
+
+/// `TxtWidth` is `TEXTWIDTH(...)`, written on the shape or (a saved instance says only `Inh`) on its master shape.
+fn text_width_fits_line(node: &ResolvedShape) -> bool {
+    let own = node.cells.get("TxtWidth").and_then(|cell| cell.formula.as_deref());
+    let formula = match own {
+        Some("Inh") | None => node.master_text_formulas.get("TxtWidth").map(String::as_str),
+        other => other,
+    };
+    formula.is_some_and(formula_fits_text_line)
+}
+
 fn text_fit(node: &ResolvedShape) -> Option<Value> {
     let has = |name: &str, function: &str| {
         node.cells
@@ -2660,6 +2677,7 @@ fn convert_shape(
         hyperlinks: Vec::new(),
         alt_text: instance_user_value(node, "visAltDescription").filter(|text| !text.trim().is_empty()),
         text_fit,
+        text_fits_line: text_width_fits_line(node),
         callout: None,
         native_data_graphic: None,
         layers: layer_members(node),
@@ -4309,4 +4327,17 @@ fn row_cell_num(row: &crate::shapes::SectionRow, name: &str) -> Option<f64> {
         .get(name)
         .and_then(|c| c.value.as_deref())
         .and_then(|v| v.parse().ok())
+}
+
+#[cfg(test)]
+mod fit_line_tests {
+    use super::formula_fits_text_line;
+
+    #[test]
+    fn only_a_block_that_cannot_be_narrower_than_its_text_stays_on_one_line() {
+        assert!(formula_fits_text_line("TEXTWIDTH(TheText)"));
+        assert!(formula_fits_text_line("MAX(TEXTWIDTH(TheText),Width)"));
+        assert!(!formula_fits_text_line("GUARD(MIN(Width*2.5,TEXTWIDTH(TheText)))"), "a capped block wraps");
+        assert!(!formula_fits_text_line("Width*1.5"));
+    }
 }

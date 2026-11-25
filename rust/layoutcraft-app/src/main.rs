@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use eframe::egui;
 use layoutcraft_engine::Engine;
 use layoutcraft_model::{Document, Shape};
-use layoutcraft_render::{first_font_name, font_substitution, installed_font_families, render_png, scene_font_substitutions, scene_from_document_with_media, FontSubstitution, Scene, SceneItem, SceneShape};
+use layoutcraft_render::{first_font_name, font_substitution, installed_font_families, render_png, render_region_rgba, scene_font_substitutions, scene_from_document_with_media, FontSubstitution, Scene, SceneItem, SceneShape};
 use layoutcraft_vsdx::{
     patch_page_cells, ShapeCellPatch,
 };
@@ -282,12 +282,79 @@ mod link_tests {
     }
 }
 
+/// The window picture of `App::detail`: the texture, the scene-px window it shows and its device pixels per scene pixel.
+struct Detail {
+    texture: egui::TextureHandle,
+    region: [f64; 4],
+    scale: f32,
+}
+
+/// The part of the page (x, y, w, h in scene px) that `viewport` shows when the page's top-left corner is at `image_min` and a scene pixel is
+/// `view` points wide, grown by `pad` of its size on every side, kept on the page and at most 8192 device pixels (`device_scale` per scene px) wide.
+fn detail_window(image_min: egui::Pos2, viewport: egui::Rect, view: f32, page: (f64, f64), device_scale: f32, pad: f64) -> Option<[f64; 4]> {
+    if !(view > 0.0) || !(device_scale > 0.0) {
+        return None;
+    }
+    let x0 = f64::from((viewport.min.x - image_min.x) / view);
+    let x1 = f64::from((viewport.max.x - image_min.x) / view);
+    let y0 = f64::from((viewport.min.y - image_min.y) / view);
+    let y1 = f64::from((viewport.max.y - image_min.y) / view);
+    let limit = 8192.0 / f64::from(device_scale);
+    let span = |a: f64, b: f64, total: f64| {
+        let (a, b) = (a.max(0.0), b.min(total));
+        if b <= a {
+            return None;
+        }
+        let grow = (b - a) * pad;
+        let (mut a, mut b) = ((a - grow).max(0.0), (b + grow).min(total));
+        if b - a > limit {
+            let mid = (a + b) / 2.0;
+            a = (mid - limit / 2.0).max(0.0);
+            b = (a + limit).min(total);
+        }
+        Some((a, b))
+    };
+    let (ax, bx) = span(x0, x1, page.0)?;
+    let (ay, by) = span(y0, y1, page.1)?;
+    Some([ax, ay, bx - ax, by - ay])
+}
+
+#[cfg(test)]
+mod detail_window_tests {
+    use super::*;
+
+    #[test]
+    fn the_window_covers_what_is_visible_and_stays_on_the_page() {
+        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1000.0, 800.0));
+        // a 5000 x 4000 scene px page at 8 points per scene px, its corner far off to the left: the viewport shows scene x 250..375
+        let image_min = egui::pos2(-2000.0, -1000.0);
+        let visible = detail_window(image_min, viewport, 8.0, (5000.0, 4000.0), 8.0, 0.0).unwrap();
+        assert!((visible[0] - 250.0).abs() < 1e-6 && (visible[2] - 125.0).abs() < 1e-6, "{visible:?}");
+        let padded = detail_window(image_min, viewport, 8.0, (5000.0, 4000.0), 8.0, 0.25).unwrap();
+        assert!(padded[0] < visible[0] && padded[0] + padded[2] > visible[0] + visible[2], "padded {padded:?} contains {visible:?}");
+        // a page smaller than the view: the window ends at the page edge
+        let small = detail_window(egui::pos2(100.0, 100.0), viewport, 8.0, (50.0, 40.0), 8.0, 0.25).unwrap();
+        assert!(small[0] >= 0.0 && small[0] + small[2] <= 50.0 && small[1] + small[3] <= 40.0, "{small:?}");
+        // a page entirely off screen has no window
+        assert!(detail_window(egui::pos2(2000.0, 0.0), viewport, 8.0, (50.0, 40.0), 8.0, 0.25).is_none());
+    }
+
+    #[test]
+    fn a_window_never_asks_for_more_than_8192_device_pixels() {
+        let viewport = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(6000.0, 6000.0));
+        let window = detail_window(egui::pos2(0.0, 0.0), viewport, 4.0, (4000.0, 4000.0), 4.0, 0.25).unwrap();
+        assert!(window[2] * 4.0 <= 8192.0 + 1e-6 && window[3] * 4.0 <= 8192.0 + 1e-6, "{window:?}");
+    }
+}
+
 /// A page to draw on the raster thread (the picture of the page is the slow part of an edit: 80-200 ms on a real drawing).
 struct RasterJob {
     ticket: u64,
     scene: Scene,
     scale: f64,
     keep_view: bool,
+    /// Draw only this window (x, y, width, height in scene px from the page's top-left corner) instead of the whole page.
+    region: Option<[f64; 4]>,
     ctx: egui::Context,
 }
 
@@ -296,6 +363,7 @@ struct RasterDone {
     ticket: u64,
     scale: f64,
     keep_view: bool,
+    region: Option<[f64; 4]>,
     result: Result<([usize; 2], Vec<u8>), String>,
 }
 
@@ -311,12 +379,15 @@ fn spawn_raster_thread() -> (std::sync::mpsc::Sender<RasterJob>, std::sync::mpsc
                     job = newer;
                 }
                 let timer = Timer::new("  raster thread (render + decode)", 0.0);
-                let result = render_png(&job.scene, job.scale).and_then(|png| {
-                    let image = image::load_from_memory_with_format(&png, image::ImageFormat::Png).map_err(|e| e.to_string())?.to_rgba8();
-                    Ok(([image.width() as usize, image.height() as usize], image.into_raw()))
-                });
+                let result = match job.region {
+                    Some(region) => render_region_rgba(&job.scene, job.scale, region).map(|(w, h, rgba)| ([w as usize, h as usize], rgba)),
+                    None => render_png(&job.scene, job.scale).and_then(|png| {
+                        let image = image::load_from_memory_with_format(&png, image::ImageFormat::Png).map_err(|e| e.to_string())?.to_rgba8();
+                        Ok(([image.width() as usize, image.height() as usize], image.into_raw()))
+                    }),
+                };
                 drop(timer);
-                let _ = done_tx.send(RasterDone { ticket: job.ticket, scale: job.scale, keep_view: job.keep_view, result });
+                let _ = done_tx.send(RasterDone { ticket: job.ticket, scale: job.scale, keep_view: job.keep_view, region: job.region, result });
                 job.ctx.request_repaint();
             }
         })
@@ -861,6 +932,13 @@ struct LayoutCraftApp {
     raster_rx: std::sync::mpsc::Receiver<RasterDone>,
     raster_ticket: u64,
     raster_inflight: bool,
+    /// A sharp picture of the visible window, drawn over the page picture when the page picture cannot reach the zoom (size cap): tiny shapes stay crisp.
+    detail: Option<Detail>,
+    detail_tx: std::sync::mpsc::Sender<RasterJob>,
+    detail_rx: std::sync::mpsc::Receiver<RasterDone>,
+    detail_ticket: u64,
+    detail_inflight: bool,
+    last_viewport: egui::Rect,
     last_view_px: f32,
     zoom_changed_at: std::time::Instant,
     zoom: f32,
@@ -952,11 +1030,18 @@ struct LayoutCraftApp {
 impl LayoutCraftApp {
     fn new(cc: &eframe::CreationContext<'_>, initial: Option<String>) -> Self {
         let (raster_tx, raster_rx) = spawn_raster_thread();
+        let (detail_tx, detail_rx) = spawn_raster_thread();
         let mut app = Self {
             raster_tx,
             raster_rx,
             raster_ticket: 0,
             raster_inflight: false,
+            detail: None,
+            detail_tx,
+            detail_rx,
+            detail_ticket: 0,
+            detail_inflight: false,
+            last_viewport: egui::Rect::NOTHING,
             path_input: initial.clone().unwrap_or_default(),
             loaded_path: None,
             engine: Engine::new(),
@@ -1202,6 +1287,7 @@ impl LayoutCraftApp {
         self.scene = Some(scene);
         if keep_view && self.texture.is_some() {
             // an edit: the old picture stays on screen until the new one is drawn on the raster thread
+            self.clear_detail();
             self.start_raster(ctx);
         } else if !self.raster_scene(ctx, keep_view) {
             return;
@@ -1231,6 +1317,7 @@ impl LayoutCraftApp {
         };
         self.raster_ticket += 1;
         self.raster_inflight = false;
+        self.clear_detail();
         let (width, height) = scene.raster_size();
         let raster_scale = Self::raster_scale_for(width as f64, height as f64, self.wanted_raster);
         let render_timer = Timer::new("  render_png", 0.0);
@@ -1278,11 +1365,66 @@ impl LayoutCraftApp {
         let scale = Self::raster_scale_for(width as f64, height as f64, self.wanted_raster);
         self.raster_ticket += 1;
         self.raster_inflight = true;
-        let _ = self.raster_tx.send(RasterJob { ticket: self.raster_ticket, scene, scale, keep_view: true, ctx: ctx.clone() });
+        let _ = self.raster_tx.send(RasterJob { ticket: self.raster_ticket, scene, scale, keep_view: true, region: None, ctx: ctx.clone() });
+    }
+
+    /// The window picture belongs to the old scene: drop it (and any one being drawn).
+    fn clear_detail(&mut self) {
+        self.detail = None;
+        self.detail_ticket += 1;
+        self.detail_inflight = false;
+    }
+
+    /// Keep the sharp window picture in step with the view: needed only where the page picture is too coarse for the zoom (its size cap).
+    fn settle_detail(&mut self, ctx: &egui::Context, device_scale: f32) {
+        let have = self.raster_scale as f32;
+        if device_scale <= have * 1.2 {
+            if self.detail.is_some() {
+                self.clear_detail();
+            }
+            return;
+        }
+        if self.detail_inflight || self.drag.is_some() || self.last_viewport == egui::Rect::NOTHING {
+            return;
+        }
+        let Some(scene) = self.scene.clone() else {
+            return;
+        };
+        let (width, height) = scene.raster_size();
+        let page = (f64::from(width), f64::from(height));
+        let image_min = self.image_rect(self.last_viewport).min;
+        let view = self.view_scale();
+        let Some(visible) = detail_window(image_min, self.last_viewport, view, page, device_scale, 0.0) else {
+            return;
+        };
+        if let Some(detail) = &self.detail {
+            let r = detail.region;
+            let covers = r[0] <= visible[0] + 1e-6 && r[1] <= visible[1] + 1e-6 && r[0] + r[2] >= visible[0] + visible[2] - 1e-6 && r[1] + r[3] >= visible[1] + visible[3] - 1e-6;
+            if covers && (detail.scale - device_scale).abs() <= detail.scale * 0.2 {
+                return;
+            }
+        }
+        let Some(region) = detail_window(image_min, self.last_viewport, view, page, device_scale, 0.25) else {
+            return;
+        };
+        self.detail_ticket += 1;
+        self.detail_inflight = true;
+        let _ = self.detail_tx.send(RasterJob { ticket: self.detail_ticket, scene, scale: f64::from(device_scale), keep_view: false, region: Some(region), ctx: ctx.clone() });
     }
 
     /// Take the finished pictures of the raster thread (only the newest job counts; an older one is dropped).
     fn apply_raster(&mut self, ctx: &egui::Context) {
+        while let Ok(done) = self.detail_rx.try_recv() {
+            if done.ticket != self.detail_ticket {
+                continue;
+            }
+            self.detail_inflight = false;
+            if let (Ok((size, rgba)), Some(region)) = (done.result, done.region) {
+                let pixels = egui::ColorImage::from_rgba_unmultiplied(size, &rgba);
+                let texture = ctx.load_texture("layoutcraft-detail", pixels, egui::TextureOptions::LINEAR);
+                self.detail = Some(Detail { texture, region, scale: done.scale as f32 });
+            }
+        }
         while let Ok(done) = self.raster_rx.try_recv() {
             if done.ticket != self.raster_ticket {
                 continue;
@@ -1322,6 +1464,7 @@ impl LayoutCraftApp {
             ctx.request_repaint_after(settle - waited + std::time::Duration::from_millis(10));
             return;
         }
+        self.settle_detail(ctx, device_scale);
         let have = self.raster_scale as f32;
         if self.drag.is_some() || self.raster_inflight || (device_scale <= have * 1.2 && device_scale >= have * 0.6) {
             return;
@@ -3813,6 +3956,7 @@ impl eframe::App for LayoutCraftApp {
                         }
                     }
                 }
+                self.last_viewport = viewport;
                 let image_rect = self.image_rect(viewport);
                 painter.image(
                     texture_id,
@@ -3820,6 +3964,15 @@ impl eframe::App for LayoutCraftApp {
                     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                     egui::Color32::WHITE,
                 );
+                if let Some(detail) = &self.detail {
+                    let view = self.view_scale();
+                    let r = detail.region;
+                    let rect = egui::Rect::from_min_size(
+                        image_rect.min + egui::vec2(r[0] as f32, r[1] as f32) * view,
+                        egui::vec2(r[2] as f32, r[3] as f32) * view,
+                    );
+                    painter.image(detail.texture.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                }
 
                 if response.drag_started_by(egui::PointerButton::Primary) {
                     self.panning = false;

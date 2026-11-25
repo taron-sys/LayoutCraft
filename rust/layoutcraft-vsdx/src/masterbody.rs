@@ -783,6 +783,13 @@ pub fn body_parts(
                 let (margin_left, margin_right) = (margin("LeftMargin"), margin("RightMargin"));
                 let x = x + margin_left;
                 let txt_w = (txt_w - margin_left - margin_right).max(0.0);
+                // a saved instance says only `Inh`: the formula is the master child's
+                let fit_line = page_child
+                    .and_then(|page| page.cells.get("TxtWidth"))
+                    .and_then(|cell| cell.formula.as_deref())
+                    .filter(|formula| *formula != "Inh")
+                    .or_else(|| child.cells.get("TxtWidth").and_then(|cell| cell.formula.as_deref()))
+                    .is_some_and(crate::import::formula_fits_text_line);
                 texts.push(SubText {
                     x: x * DPI,
                     y: y * DPI,
@@ -800,6 +807,7 @@ pub fn body_parts(
                     indent: sub_text_indent(page_child, child, styles),
                     pad: parts.len() == parts_before,
                     text_rot,
+                    fit_line,
                 });
             }
         }

@@ -256,6 +256,10 @@ pub struct SceneText {
     pub pad: bool,
     /// The block's centre lies outside its shape's box (a label below or above an icon).
     pub outside: bool,
+    /// The block's width is `TEXTWIDTH(TheText)` (or a `MAX` of it): the block is as wide as the text on one line by definition,
+    /// so lines break only at hard line breaks. Our font metrics may measure a face Visio had (Kalinga) wider than Visio did,
+    /// and a wrap there puts a second line on the artwork (HPE Aruba SFP modules).
+    pub fit_line: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -850,6 +854,7 @@ fn scene_shape(
             rot: sub.text_rot,
             pad: sub.pad,
             outside: sub.h <= sub.font_size * 1.8,
+            fit_line: sub.fit_line,
         })
         .collect();
     // A group's label and a child that draws the very same text (a DefaultLabel group: its placeholder text became the
@@ -1555,6 +1560,7 @@ fn text_scene_with_paragraphs(shape: &Shape, paragraphs: Vec<SceneParagraph>) ->
         rot: 0.0,
         pad: false,
         outside: block_outside(shape, x + w / 2.0, y + h / 2.0),
+        fit_line: shape.text_fits_line,
     }
 }
 

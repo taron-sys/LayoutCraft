@@ -575,6 +575,11 @@ pub fn emf_to_svg_at(bytes: &[u8], display_width_px: Option<f64>) -> Option<EmfS
     } else {
         right += 1.0;
         bottom += 1.0;
+        // The picture starts at the frame's corner, not at the corner of what it draws (a 15 px wide drawing that starts at pixel 1 keeps that pixel of margin).
+        if frame.2 > frame.0 && frame.3 > frame.1 {
+            left = left.min(frame.0 / 100.0 * px_per_mm.0);
+            top = top.min(frame.1 / 100.0 * px_per_mm.1);
+        }
     }
     let (vw, vh) = (right - left, bottom - top);
     if !(vw > 0.0 && vh > 0.0) || vw > 1e7 || vh > 1e7 {
@@ -1795,5 +1800,16 @@ mod tests {
         data.extend(polygon16(&[(0, 0), (5, 0), (5, 5)]));
         let svg = emf_to_svg(&data).unwrap();
         assert!(svg.svg.contains("stroke=\"#000000\""), "{}", svg.svg);
+    }
+
+    #[test]
+    fn a_drawing_that_starts_at_pixel_one_keeps_the_margin_to_the_frame_corner() {
+        let mut data = header(16, 10);
+        data[8..12].copy_from_slice(&1i32.to_le_bytes()); // bounds left
+        data[12..16].copy_from_slice(&1i32.to_le_bytes()); // bounds top
+        data.extend(polygon16(&[(1, 1), (6, 1), (6, 6)]));
+        data.extend(rec(14, &[0u8; 12]));
+        let svg = emf_to_svg(&data).unwrap().svg;
+        assert!(svg.contains("viewBox=\"0.00 0.00 "), "the view box starts at the frame corner: {svg}");
     }
 }

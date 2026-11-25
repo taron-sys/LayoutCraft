@@ -377,6 +377,10 @@ pub struct Shape {
     /// stays as it was; the renderer reads the in-memory model.
     #[serde(default, skip_serializing)]
     pub paragraph_spacing: Vec<[f64; 4]>,
+    /// The text block's width is `TEXTWIDTH(TheText)` (own or inherited from the master: a saved instance carries only `Inh`), so the text is one
+    /// line wide by definition and the renderer never wraps it. NOT serialized: `text_fit` is compared with the golden models and keeps its meaning.
+    #[serde(default, skip_serializing)]
+    pub text_fits_line: bool,
     /// The first `front_parts` entries of `parts` are a group's OWN geometry that Visio draws IN FRONT of the members' parts that follow
     /// (the group's `DisplayMode` cell is absent or 2; step 219). NOT serialized: the golden models keep the order they have, the renderer
     /// draws these parts last.
@@ -448,6 +452,10 @@ pub struct SubText {
     /// direction (clockwise positive), about the block centre.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub text_rot: f64,
+    /// The block's width is `TEXTWIDTH(TheText)` (own or the master child's): one line wide by definition, never wrapped by the renderer.
+    /// NOT serialized: the golden model JSON stays as it was.
+    #[serde(default, skip_serializing)]
+    pub fit_line: bool,
 }
 
 fn is_zero(value: &f64) -> bool {

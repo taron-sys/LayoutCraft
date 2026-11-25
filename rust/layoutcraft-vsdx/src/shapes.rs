@@ -154,6 +154,8 @@ pub struct ResolvedShape {
     pub master_top_user: BTreeMap<String, f64>,
     pub master_width: Option<f64>,
     pub master_height: Option<f64>,
+    /// Formulas of the master shape's `TxtWidth` / `TxtHeight`: an instance Visio saved carries only `Inh` for them.
+    pub master_text_formulas: BTreeMap<String, String>,
     pub foreign: Option<ForeignData>,
     pub has_text: bool,
     pub text: Option<String>,
@@ -788,6 +790,10 @@ fn resolve_node(
         .and_then(|cell| cell.value.as_deref())
         .and_then(|value| value.parse::<f64>().ok());
     let mut cells = selected.map(|s| s.cells.clone()).unwrap_or_default();
+    let master_text_formulas: BTreeMap<String, String> = ["TxtWidth", "TxtHeight"]
+        .into_iter()
+        .filter_map(|name| Some((name.to_string(), cells.get(name)?.formula.clone()?)))
+        .collect();
     for (name, cell) in &node.cells {
         cells.insert(name.clone(), cell.clone());
     }
@@ -941,6 +947,7 @@ fn resolve_node(
         master_top_user,
         master_width,
         master_height,
+        master_text_formulas,
         foreign,
         has_text,
         text,
