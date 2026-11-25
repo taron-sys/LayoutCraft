@@ -3,9 +3,13 @@
 use std::collections::HashMap;
 
 use layoutcraft_formula::{
-    evaluate_str, CellRef, Env, ErrorValue, FormulaKind, Quantity, Rgb, Services, ThemeKey, Value,
+    evaluate_str, CellRef, Dim, Env, ErrorValue, FormulaKind, NoServices, Quantity, Rgb, Services,
+    ThemeKey, Value,
 };
 
+pub use crate::cases::X;
+
+/// Services of a test shape: id 7, named `Box.7`, themed, with a small palette.
 #[derive(Default)]
 pub struct TestServices {
     pub palette: Vec<(i64, Rgb)>,
@@ -43,8 +47,20 @@ impl Services for TestServices {
         Some("Box.7".to_string())
     }
 
+    fn page_name(&self) -> Option<String> {
+        Some("Page-1".to_string())
+    }
+
     fn master_name(&self) -> Option<Option<String>> {
         Some(None)
+    }
+
+    fn is_1d(&self) -> Option<bool> {
+        Some(false)
+    }
+
+    fn random(&self) -> Option<f64> {
+        Some(0.25)
     }
 
     fn text_size(&self, text: &str, max_width: Option<f64>) -> Option<(f64, f64)> {
@@ -59,6 +75,7 @@ pub struct TestEnv {
     cells: HashMap<String, Value>,
     local: HashMap<String, FormulaKind>,
     services: TestServices,
+    with_services: bool,
 }
 
 impl TestEnv {
@@ -66,19 +83,53 @@ impl TestEnv {
         let mut env = TestEnv {
             cells: HashMap::new(),
             local: HashMap::new(),
-            services: TestServices::default(),
+            services: TestServices {
+                // A palette in the spirit of the colour pages: magenta, cyan, dark red, dark
+                // yellow, dark cyan and dark gray at the indexes their examples use.
+                palette: vec![
+                    (6, Rgb::new(0xff, 0x00, 0xff)),
+                    (7, Rgb::new(0x00, 0xff, 0xff)),
+                    (8, Rgb::new(0x80, 0x00, 0x00)),
+                    (11, Rgb::new(0x80, 0x80, 0x00)),
+                    (13, Rgb::new(0x00, 0x80, 0x80)),
+                    (22, Rgb::new(0x33, 0x33, 0x33)),
+                ],
+            },
+            with_services: true,
         };
         env.set("Width", Value::length(4.0));
         env.set("Height", Value::length(2.0));
         env.set("Angle", Value::angle(std::f64::consts::FRAC_PI_2));
         env.set("Zero", Value::number(0.0));
         env.set("Name", Value::string("box"));
+        env.set("TheText", Value::string("Hello"));
+        env.set("Messy", Value::string("a\t b\r\n c   d"));
+        env.set(
+            "Quotes",
+            Value::string("\u{2018}x\u{2019} \u{201c}y\u{201d}"),
+        );
+        env.set_formula_kind("Width", FormulaKind::Local);
+        env.set_formula_kind("Height", FormulaKind::Inherited);
         env.set("Sheet.5!Width", Value::length(10.0));
         env
     }
 
+    /// The same cells, but a host that provides no services at all.
+    pub fn without_services() -> Self {
+        TestEnv {
+            with_services: false,
+            ..TestEnv::new()
+        }
+    }
+
     pub fn set(&mut self, name: &str, value: Value) -> &mut Self {
         self.cells.insert(name.to_ascii_lowercase(), value);
+        self
+    }
+
+    /// Marks a cell as holding a formula of the given kind (for `FORMULAEXISTS`).
+    pub fn set_formula_kind(&mut self, name: &str, kind: FormulaKind) -> &mut Self {
+        self.local.insert(name.to_ascii_lowercase(), kind);
         self
     }
 }
@@ -101,7 +152,11 @@ impl Env for TestEnv {
     }
 
     fn services(&self) -> &dyn Services {
-        &self.services
+        if self.with_services {
+            &self.services
+        } else {
+            &NoServices
+        }
     }
 }
 
@@ -155,4 +210,49 @@ pub fn boolean(source: &str) -> bool {
 
 pub fn close(actual: f64, expected: f64) -> bool {
     (actual - expected).abs() <= 1e-9 * expected.abs().max(1.0)
+}
+
+/// Whether a value is what a case expects (numbers compared with a small tolerance).
+pub fn matches(actual: &Value, expected: &X) -> bool {
+    let number = |value: f64, dim: Dim, tolerance: f64| match actual {
+        Value::Number(q) => {
+            q.dim == dim && (q.value - value).abs() <= tolerance * value.abs().max(1.0)
+        }
+        _ => false,
+    };
+    match expected {
+        X::N(v) => number(*v, Dim::NONE, 1e-9),
+        X::L(v) => number(*v, Dim::LENGTH, 1e-9),
+        X::A(v) => number(*v, Dim::ANGLE, 1e-9),
+        X::D(v) => number(*v, Dim::DURATION, 1e-9),
+        X::Sq(v) => number(*v, Dim::AREA, 1e-9),
+        // The reference pages print four decimals.
+        X::Near(v) => number(*v, Dim::NONE, 5e-5),
+        X::NearA(v) => number(*v, Dim::ANGLE, 5e-5),
+        X::NearDeg(v) => number(v.to_radians(), Dim::ANGLE, 5e-5),
+        X::S(text) => matches!(actual, Value::Str(s) if s == text),
+        X::B(flag) => matches!(actual, Value::Bool(b) if b == flag),
+        X::E(error) => matches!(actual, Value::Error(e) if e == error),
+        X::C(hex) => matches!(actual, Value::Color(c) if c.to_hex() == *hex),
+    }
+}
+
+/// Evaluates every formula in the default environment and fails once, listing all mismatches.
+pub fn check(cases: &[(&str, X)]) {
+    check_in(&TestEnv::new(), cases);
+}
+
+pub fn check_in(env: &TestEnv, cases: &[(&str, X)]) {
+    let mut failures = Vec::new();
+    for (source, expected) in cases {
+        match evaluate_str(source, env) {
+            Ok(evaluation) if matches(&evaluation.value, expected) => {}
+            Ok(evaluation) => failures.push(format!(
+                "{source:?}: expected {expected:?}, got {:?}",
+                evaluation.value
+            )),
+            Err(error) => failures.push(format!("{source:?}: does not parse: {error}")),
+        }
+    }
+    assert!(failures.is_empty(), "\n{}", failures.join("\n"));
 }

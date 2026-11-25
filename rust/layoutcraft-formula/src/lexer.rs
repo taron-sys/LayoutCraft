@@ -270,9 +270,13 @@ impl<'a> Lexer<'a> {
         if !value.is_finite() {
             return Err(self.err(ParseErrorKind::BadNumber, start));
         }
+        // The units page writes the implicit form as `number [unit, flag]`, with or without a gap.
+        let number_end = self.pos;
+        self.take_while(char::is_whitespace);
         let unit = if self.peek() == Some('[') {
             Some(self.implicit_unit(start)?)
         } else {
+            self.pos = number_end;
             self.unit_suffix()?
         };
         Ok(Tok::Number { value, unit })
@@ -324,18 +328,14 @@ impl<'a> Lexer<'a> {
             self.pos = number_end;
             return Ok(None);
         }
-        let with_dot = self.peek() == Some('.') && !self.peek_second().is_some_and(is_word_char);
-        let name = if with_dot {
-            format!("{run}.")
-        } else {
-            run.to_string()
-        };
+        if run.eq_ignore_ascii_case("sq") {
+            return self.square_prefix(number_end, name_start, spaced);
+        }
+        let name = self.dotted(run);
         match Unit::parse(&name) {
             Some(unit) => {
-                if with_dot {
-                    self.bump();
-                }
-                Ok(Some(unit))
+                self.consume_dot(&name);
+                Ok(Some(self.area_suffix(unit)))
             }
             None if !spaced => {
                 Err(self.err(ParseErrorKind::UnknownUnit(run.to_string()), name_start))
@@ -346,6 +346,67 @@ impl<'a> Lexer<'a> {
                 Ok(None)
             }
         }
+    }
+
+    /// `run` with the dot that directly follows it, when that dot ends the unit (`pt.`).
+    fn dotted(&self, run: &str) -> String {
+        let with_dot = self.peek() == Some('.') && !self.peek_second().is_some_and(is_word_char);
+        if with_dot {
+            format!("{run}.")
+        } else {
+            run.to_string()
+        }
+    }
+
+    fn consume_dot(&mut self, name: &str) {
+        if name.ends_with('.') {
+            self.bump();
+        }
+    }
+
+    /// `SQ FT`, `SQ. FT.`: the area form of a length unit, from the "Multidimensional units of
+    /// measure" table.
+    fn square_prefix(
+        &mut self,
+        number_end: usize,
+        name_start: usize,
+        spaced: bool,
+    ) -> Result<Option<Unit>, ParseError> {
+        self.eat('.');
+        self.take_while(char::is_whitespace);
+        let run = self.take_while(|c| c.is_ascii_alphabetic() || c == '_');
+        let name = self.dotted(run);
+        match Unit::parse(&name).and_then(Unit::squared) {
+            Some(unit) => {
+                self.consume_dot(&name);
+                Ok(Some(unit))
+            }
+            None if !spaced => {
+                Err(self.err(ParseErrorKind::UnknownUnit(format!("sq {run}")), name_start))
+            }
+            None => {
+                self.pos = number_end;
+                Ok(None)
+            }
+        }
+    }
+
+    /// `FT^2`, `M ^2`: a length unit followed by the exponent 2 is the area unit (units page,
+    /// "Multidimensional units of measure"). Any other exponent stays a power of the quantity.
+    fn area_suffix(&mut self, unit: Unit) -> Unit {
+        let Some(area) = unit.squared() else {
+            return unit;
+        };
+        let saved = self.pos;
+        self.take_while(char::is_whitespace);
+        if self.eat('^') {
+            self.take_while(char::is_whitespace);
+            if self.eat('2') && !self.peek().is_some_and(|c| c.is_ascii_digit() || c == '.') {
+                return area;
+            }
+        }
+        self.pos = saved;
+        unit
     }
 }
 

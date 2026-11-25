@@ -151,13 +151,9 @@ impl Parser {
     /// The word forms of the comparison operators, when the next token is one.
     fn word_operator(&self, names: [&str; 2]) -> Option<usize> {
         match self.peek() {
-            Tok::Word(word)
-                if !matches!(self.peek_at(1), Tok::LParen | Tok::Bang | Tok::Bracketed(_)) =>
-            {
-                names
-                    .iter()
-                    .position(|name| word.eq_ignore_ascii_case(name))
-            }
+            Tok::Word(word) if !matches!(self.peek_at(1), Tok::Bang | Tok::Bracketed(_)) => names
+                .iter()
+                .position(|name| word.eq_ignore_ascii_case(name)),
             _ => None,
         }
     }
@@ -352,8 +348,9 @@ impl Parser {
                 self.advance();
                 return Ok(node(ExprKind::Bool(false), span, 1));
             }
-            // Kept from the earlier evaluator: a bare `PI` means `PI()`.
-            if word.eq_ignore_ascii_case("PI") {
+            // A bare `PI` means `PI()` (the earlier evaluator accepted it) and a bare `ISTHEMED`
+            // means `ISTHEMED()` (the ISTHEMED page writes its second example that way).
+            if word.eq_ignore_ascii_case("PI") || word.eq_ignore_ascii_case("ISTHEMED") {
                 self.advance();
                 return Ok(node(
                     ExprKind::Call {

@@ -145,9 +145,15 @@ pub(crate) fn guard(call: &mut Call<'_>) -> Outcome {
     Ok(call.value(0)?.clone())
 }
 
-/// `BOUND(value, ...)` evaluates to `value`; the clamping happens when the host writes the cell.
+/// `BOUND(value, type, ignore, low, high, [ignore, low, high]...)` evaluates to `value`; the
+/// clamping happens when the host writes the cell. The arguments after the first two come in
+/// threes, so any other count is `#VALUE!`. An omitted `value` (the page's own example leaves it
+/// out) counts as 0.
 pub(crate) fn bound(call: &mut Call<'_>) -> Outcome {
-    Ok(call.value(0)?.clone())
+    if call.len() < 5 || (call.len() - 2) % 3 != 0 {
+        return Err(ErrorValue::Value);
+    }
+    Ok(call.get(0).cloned().unwrap_or_else(|| Value::number(0.0)))
 }
 
 /// `SETATREF(reference, [set_expression], [ignore_eval])`: the value of `reference`, or 0 when

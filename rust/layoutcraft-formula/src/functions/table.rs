@@ -13,6 +13,9 @@ const GEOMETRY: &str = "geometry or path computation that needs shape transforms
 const FORMAT: &str = "format pictures, currency and text widening are not implemented";
 const CUSTOM: &str = "calls a custom function or evaluates text as a formula; not implemented";
 const LOCALE: &str = "depends on the user's locale settings; not implemented";
+const OPERATOR: &str = "named in the [MS-VSDX] grammar (2.5.1) but no public page defines it; evaluates like the operator of the same name";
+const LANGUAGE_ARG: &str =
+    "the language argument (0 local, 750 universal) is ignored: the host supplies one name";
 const GRAMMAR_ONLY: &str =
     "named in the [MS-VSDX] formula grammar (2.5.1) but no public source defines its behaviour";
 
@@ -84,13 +87,13 @@ const LEGACY: &str =
 static TABLE: &[FuncInfo] = &[
     // Arithmetic and rounding.
     eager("ABS", 1, 1, math::abs),
-    eager("ADD", 2, 2, math::add),
-    eager("SUB", 2, 2, math::sub),
-    eager("MUL", 2, 2, math::mul),
-    eager("DIV", 2, 2, math::div),
-    eager("UMINUS", 1, 1, math::uminus),
-    eager("UPLUS", 1, 1, math::uplus),
-    eager("PCT", 1, 1, math::pct),
+    partial("ADD", 2, 2, math::add, OPERATOR),
+    partial("SUB", 2, 2, math::sub, OPERATOR),
+    partial("MUL", 2, 2, math::mul, OPERATOR),
+    partial("DIV", 2, 2, math::div, OPERATOR),
+    partial("UMINUS", 1, 1, math::uminus, OPERATOR),
+    partial("UPLUS", 1, 1, math::uplus, OPERATOR),
+    partial("PCT", 1, 1, math::pct, OPERATOR),
     eager("CEILING", 1, 2, math::ceiling),
     eager("FLOOR", 1, 2, math::floor),
     eager("INT", 1, 1, math::int),
@@ -242,7 +245,13 @@ static TABLE: &[FuncInfo] = &[
         text::str_same_ex,
         "only the ignore-case flag (1) is modelled; the locale is ignored",
     ),
-    eager("SHAPETEXT", 1, 2, text::shape_text),
+    partial(
+        "SHAPETEXT",
+        1,
+        2,
+        text::shape_text,
+        "flags 4, 16, 32 and 64 are modelled; 1, 2 and 8 need field and hyphenation data and give the unsupported error",
+    ),
     eager("TEXTWIDTH", 1, 2, text::text_width),
     eager("TEXTHEIGHT", 1, 2, text::text_height),
     // Colour and theme.
@@ -282,9 +291,9 @@ static TABLE: &[FuncInfo] = &[
     ),
     // The shape being evaluated.
     eager("ID", 0, 0, host::id),
-    eager("NAME", 0, 1, host::name),
-    eager("PAGENAME", 0, 1, host::page_name),
-    eager("MASTERNAME", 0, 1, host::master_name),
+    partial("NAME", 0, 1, host::name, LANGUAGE_ARG),
+    partial("PAGENAME", 0, 1, host::page_name, LANGUAGE_ARG),
+    partial("MASTERNAME", 0, 1, host::master_name, LANGUAGE_ARG),
     eager("IS1D", 0, 0, host::is_1d),
     eager("RAND", 0, 0, host::rand),
     // Not evaluated.

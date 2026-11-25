@@ -281,9 +281,47 @@ pub(crate) fn str_same_ex(call: &mut Call<'_>) -> Outcome {
     boolean(same(&call.text(0)?, &call.text(1)?, flags & 1 == 1))
 }
 
-/// `SHAPETEXT(TheText)`: the text the host reports for the referenced `TheText` cell.
+/// `SHAPETEXT(TheText, [flags])`: the text the host reports for the referenced `TheText` cell,
+/// with the flags of the function page that need no field or hyphenation data: 4 (tab to one
+/// space), 16 (carriage return and line feed to a space each), 32 (typographer quotes to plain
+/// quotes) and 64 (adjacent white space to one space). Flags 1, 2 and 8 are
+/// [`ErrorValue::Unsupported`]; a flag outside 0..=127 is `#VALUE!`.
 pub(crate) fn shape_text(call: &mut Call<'_>) -> Outcome {
-    Ok(Value::Str(call.text(0)?))
+    let text = call.text(0)?;
+    let flags = call.whole_opt(1)?.unwrap_or(0);
+    if !(0..=127).contains(&flags) {
+        return Err(ErrorValue::Value);
+    }
+    if flags & (1 | 2 | 8) != 0 {
+        return Err(ErrorValue::Unsupported);
+    }
+    let mut out: String = text
+        .chars()
+        .map(|c| match c {
+            '\t' if flags & 4 != 0 => ' ',
+            '\r' | '\n' if flags & 16 != 0 => ' ',
+            '\u{2018}' | '\u{2019}' if flags & 32 != 0 => '\'',
+            '\u{201c}' | '\u{201d}' if flags & 32 != 0 => '"',
+            other => other,
+        })
+        .collect();
+    if flags & 64 != 0 {
+        let mut collapsed = String::with_capacity(out.len());
+        let mut in_space = false;
+        for c in out.chars() {
+            if c.is_whitespace() {
+                if !in_space {
+                    collapsed.push(' ');
+                }
+                in_space = true;
+            } else {
+                collapsed.push(c);
+                in_space = false;
+            }
+        }
+        out = collapsed;
+    }
+    Ok(Value::Str(out))
 }
 
 fn text_extent(call: &Call<'_>, height: bool) -> Outcome {

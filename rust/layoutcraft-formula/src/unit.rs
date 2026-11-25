@@ -104,6 +104,17 @@ pub enum Unit {
     ElapsedSecond,
     Acre,
     Hectare,
+    /// `SQ IN`, `IN^2`: square inches. The area units below follow the "Multidimensional units
+    /// of measure" table of the units page (inches, feet, yards, miles, millimetres,
+    /// centimetres, metres, kilometres).
+    SqInch,
+    SqFoot,
+    SqYard,
+    SqMile,
+    SqMillimeter,
+    SqCentimeter,
+    SqMeter,
+    SqKilometer,
 }
 
 /// Metres per inch (exact by definition of the international inch).
@@ -116,7 +127,8 @@ impl Unit {
         match self {
             Inch | Foot | Yard | Mile | NauticalMile | Millimeter | Centimeter | Meter
             | Kilometer | Point | Pica | Didot | Cicero => Dim::LENGTH,
-            Acre | Hectare => Dim::AREA,
+            Acre | Hectare | SqInch | SqFoot | SqYard | SqMile | SqMillimeter | SqCentimeter
+            | SqMeter | SqKilometer => Dim::AREA,
             Degree | Radian | ArcMinute | ArcSecond => Dim::ANGLE,
             ElapsedWeek | ElapsedDay | ElapsedHour | ElapsedMinute | ElapsedSecond => Dim::DURATION,
         }
@@ -154,40 +166,68 @@ impl Unit {
             // 1 acre = 43 560 square feet.
             Acre => 43_560.0 * 144.0,
             Hectare => 10_000.0 / (METERS_PER_INCH * METERS_PER_INCH),
+            SqInch => 1.0,
+            SqFoot => 144.0,
+            SqYard => 1296.0,
+            SqMile => 63_360.0 * 63_360.0,
+            SqMillimeter => Millimeter.factor() * Millimeter.factor(),
+            SqCentimeter => Centimeter.factor() * Centimeter.factor(),
+            SqMeter => Meter.factor() * Meter.factor(),
+            SqKilometer => Kilometer.factor() * Kilometer.factor(),
         }
     }
 
-    /// Looks up a unit by its abbreviation or spelled-out name, ignoring ASCII case.
+    /// The area unit written `SQ <unit>` or `<unit>^2`, for the length units that the units page
+    /// lists with an area form.
+    pub fn squared(self) -> Option<Unit> {
+        use Unit::*;
+        Some(match self {
+            Inch => SqInch,
+            Foot => SqFoot,
+            Yard => SqYard,
+            Mile => SqMile,
+            Millimeter => SqMillimeter,
+            Centimeter => SqCentimeter,
+            Meter => SqMeter,
+            Kilometer => SqKilometer,
+            _ => return None,
+        })
+    }
+
+    /// Looks up a unit by its abbreviation, ignoring case and one trailing dot.
     ///
-    /// The implicit units `DL`, `DP`, `DT`, `DA`, `DE` ("internal units" for drawing, page, type,
-    /// angle and time) map to inches, radians and days.
+    /// Only spellings the public units pages list are accepted: the abbreviation table, the
+    /// universal strings, the duration spellings (`eday`, `ehour`, ...), `IN_F`, `MI_F`, `ACRES`
+    /// and `HECTARES`/`HECTARE`/`HA`. The implicit units `DL`, `DP`, `DT`, `DA`, `DE` ("internal
+    /// units" for drawing, page, type, angle and time) map to inches, radians and days. The
+    /// percent sign and the arc-minute and arc-second marks are handled by the lexer.
     pub fn parse(name: &str) -> Option<Unit> {
         use Unit::*;
         let lower = name.to_lowercase();
         let name = lower.strip_suffix('.').unwrap_or(&lower);
         Some(match name {
-            "in" | "inch" | "inches" | "in_f" | "dl" | "dp" | "dt" => Inch,
-            "ft" | "foot" | "feet" => Foot,
-            "yd" | "yard" | "yards" => Yard,
-            "mi" | "mile" | "miles" | "mi_f" => Mile,
+            "in" | "in_f" | "dl" | "dp" | "dt" => Inch,
+            "ft" => Foot,
+            "yd" => Yard,
+            "mi" | "mi_f" => Mile,
             "nm" => NauticalMile,
             "mm" => Millimeter,
             "cm" => Centimeter,
             "m" => Meter,
             "km" => Kilometer,
-            "pt" | "point" | "points" => Point,
-            "p" | "pica" | "picas" => Pica,
-            "d" | "didot" | "didots" => Didot,
-            "c" | "cicero" | "ciceros" => Cicero,
-            "deg" | "degree" | "degrees" | "\u{b0}" => Degree,
-            "rad" | "radian" | "radians" | "da" => Radian,
+            "pt" => Point,
+            "p" => Pica,
+            "d" => Didot,
+            "c" => Cicero,
+            "deg" | "\u{b0}" => Degree,
+            "rad" | "da" => Radian,
             "ew" | "eweek" => ElapsedWeek,
             "ed" | "eday" | "de" => ElapsedDay,
             "eh" | "ehour" => ElapsedHour,
             "em" | "eminute" => ElapsedMinute,
             "es" | "esecond" => ElapsedSecond,
-            "acre" | "acres" => Acre,
-            "hectare" | "hectares" | "ha" => Hectare,
+            "acres" => Acre,
+            "hectares" | "hectare" | "ha" => Hectare,
             _ => return None,
         })
     }
