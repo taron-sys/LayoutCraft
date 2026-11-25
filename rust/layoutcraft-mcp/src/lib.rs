@@ -157,7 +157,7 @@ impl Server {
             "initialize" => {
                 let want = params.get("protocolVersion").and_then(Value::as_str).unwrap_or("");
                 let version = if PROTOCOLS.contains(&want) { want } else { PROTOCOLS[0] };
-                ok(json!({ "protocolVersion": version, "capabilities": { "tools": { "listChanged": false }, "resources": { "listChanged": false } }, "serverInfo": { "name": "layoutcraft", "version": "0.1.0" }, "instructions": INSTRUCTIONS }))
+                ok(json!({ "protocolVersion": version, "capabilities": { "tools": { "listChanged": false }, "resources": { "listChanged": false } }, "serverInfo": { "name": "layoutcraft", "version": env!("CARGO_PKG_VERSION") }, "instructions": INSTRUCTIONS }))
             }
             "ping" => ok(json!({})),
             "tools/list" => ok(serde_json::from_str(TOOLS_LIST).expect("tools-list.json")),
