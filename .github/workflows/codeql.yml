@@ -1,0 +1,44 @@
+# Code scanning with CodeQL: the Rust crates and the JavaScript of the web shell. Results appear under Security > Code scanning.
+# Both languages are analysed without a build (build-mode: none), so this needs no Rust toolchain and no system libraries.
+# Every action is pinned to a commit SHA (the tag is in the comment); keep them current with Dependabot (github-actions).
+name: codeql
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'LICENSE*']
+  pull_request:
+    paths-ignore: ['**/*.md', 'LICENSE*']
+  schedule:
+    - cron: '23 4 * * 1' # Mondays, 04:23 UTC: new queries and new advisories apply to code that has not changed
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels the older run of the same PR (runs on main always finish).
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
+      security-events: write # upload the results; a pull request from a fork gets a read-only token, so its upload is skipped
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [rust, javascript-typescript]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
