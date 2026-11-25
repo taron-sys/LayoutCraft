@@ -36,6 +36,8 @@ is intended to be read before changing the importer or writer.
   self-authored set in `fixtures/public/`
 - [41 Legal-risk audit loop](41-legal-audit-loop.md) — the repeatable audit prompt
   and the residual owner/counsel questions
+- [43 UI parity with Visio](43-ui-parity.md) — layout and convention comparison, ribbon table, keys,
+  roadmap and naming proposals (planning document)
 - [Feature names](feature-names.md) — naming checks and the labels to ship (naming policy record, not legal advice)
 
 ## Quick start
