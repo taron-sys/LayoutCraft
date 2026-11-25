@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use eframe::egui;
 use layoutcraft_engine::Engine;
 use layoutcraft_model::{Document, Shape};
-use layoutcraft_render::{first_font_name, font_substitution, installed_font_families, render_png, render_region_rgba, scene_font_substitutions, scene_from_document_with_media, FontSubstitution, Scene, SceneItem, SceneShape};
+use layoutcraft_render::{first_font_name, font_substitution, installed_font_families, render_region_rgba, render_rgba, scene_font_substitutions, scene_from_document_with_media, FontSubstitution, Scene, SceneItem, SceneShape};
 use layoutcraft_vsdx::{
     patch_page_cells, ShapeCellPatch,
 };
@@ -378,13 +378,10 @@ fn spawn_raster_thread() -> (std::sync::mpsc::Sender<RasterJob>, std::sync::mpsc
                 while let Ok(newer) = job_rx.try_recv() {
                     job = newer;
                 }
-                let timer = Timer::new("  raster thread (render + decode)", 0.0);
+                let timer = Timer::new("  raster thread (render)", 0.0);
                 let result = match job.region {
                     Some(region) => render_region_rgba(&job.scene, job.scale, region).map(|(w, h, rgba)| ([w as usize, h as usize], rgba)),
-                    None => render_png(&job.scene, job.scale).and_then(|png| {
-                        let image = image::load_from_memory_with_format(&png, image::ImageFormat::Png).map_err(|e| e.to_string())?.to_rgba8();
-                        Ok(([image.width() as usize, image.height() as usize], image.into_raw()))
-                    }),
+                    None => render_rgba(&job.scene, job.scale).map(|(w, h, rgba)| ([w as usize, h as usize], rgba)),
                 };
                 drop(timer);
                 let _ = done_tx.send(RasterDone { ticket: job.ticket, scale: job.scale, keep_view: job.keep_view, region: job.region, result });
@@ -1320,31 +1317,20 @@ impl LayoutCraftApp {
         self.clear_detail();
         let (width, height) = scene.raster_size();
         let raster_scale = Self::raster_scale_for(width as f64, height as f64, self.wanted_raster);
-        let render_timer = Timer::new("  render_png", 0.0);
-        let rendered = render_png(&scene, raster_scale);
+        let render_timer = Timer::new("  render_rgba", 0.0);
+        let rendered = render_rgba(&scene, raster_scale);
         drop(render_timer);
-        let png = match rendered {
-            Ok(png) => png,
+        let (image_width, image_height, rgba) = match rendered {
+            Ok(image) => image,
             Err(error) => {
                 self.status = format!("Could not rasterize page: {error}");
                 self.scene = Some(scene);
                 return false;
             }
         };
-        let decode_timer = Timer::new("  png decode", 0.0);
-        let decoded = image::load_from_memory_with_format(&png, image::ImageFormat::Png);
-        drop(decode_timer);
-        let image = match decoded {
-            Ok(image) => image.to_rgba8(),
-            Err(error) => {
-                self.status = format!("Could not decode page image: {error}");
-                self.scene = Some(scene);
-                return false;
-            }
-        };
-        let size = [image.width() as usize, image.height() as usize];
+        let size = [image_width as usize, image_height as usize];
         let _upload_timer = Timer::new("  texture upload", 0.0);
-        let pixels = egui::ColorImage::from_rgba_unmultiplied(size, image.as_raw());
+        let pixels = egui::ColorImage::from_rgba_unmultiplied(size, &rgba);
         let texture = ctx.load_texture(format!("layoutcraft-page-{}", self.page_index), pixels, egui::TextureOptions::LINEAR);
         if keep_view && self.raster_scale > 0.0 && self.texture.is_some() {
             self.zoom = (f64::from(self.zoom) * self.raster_scale / raster_scale) as f32;

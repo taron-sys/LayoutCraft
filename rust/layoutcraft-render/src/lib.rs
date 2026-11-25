@@ -13,7 +13,7 @@ mod fonts;
 
 
 pub use fonts::{first_font_name, font_substitution, scene_font_substitutions, installed_font_families, FontSubstitution};
-pub use png::{render_png, render_region_rgba, render_rgb, usvg_options};
+pub use png::{render_png, render_region_rgba, render_rgb, render_rgba, usvg_options};
 pub use scene::{
     scene_from_document, scene_from_document_with_media, scene_from_document_with_options, shape_painted_bounds, SceneOptions, Point, Scene, SceneConnector, SceneImage,
     SceneHop, SceneItem, SceneParagraph, ScenePart, SceneRun, SceneShape, SceneText,

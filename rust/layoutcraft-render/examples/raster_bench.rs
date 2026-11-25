@@ -1,5 +1,5 @@
 //! Time every stage of drawing a page: scene build, SVG string, usvg parse, rasterize, PNG encode, PNG decode (the path `raster_scene` used to take),
-//! and the direct RGBA path, on every public fixture page and on a generated stress drawing, at 1x and 2x. Medians over several runs.
+//! and the direct RGBA path (`render_rgba`), on every public fixture page and on a generated stress drawing, at 1x and 2x. Medians over several runs.
 //!
 //! usage: cargo run --release -p layoutcraft-render --example raster_bench -- [--runs N] [--no-stress] [--only <substring of the page name>]
 //!
@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use layoutcraft_model::Document;
-use layoutcraft_render::{render_png, scene_from_document_with_media, to_svg_scaled, usvg_options, Scene};
+use layoutcraft_render::{render_png, render_rgba, scene_from_document_with_media, to_svg_scaled, usvg_options, Scene};
 use layoutcraft_vsdx::{import_document, media_bytes, Package};
 
 /// The app's `raster_scale_for` (rust/layoutcraft-app/src/main.rs): what scale a page of w x h scene px gets for a wanted scale.
@@ -187,9 +187,9 @@ fn measure(page: &Page, wanted: f64, runs: usize) -> Row {
     Row { page: page.name.clone(), scale, px: (pw, ph), items: scene.items.len(), scene: scene_ms, options: options_ms, svg: svg_ms, svg_bytes: svg.len(), parse: parse_ms, raster: raster_ms, encode: encode_ms, decode: decode_ms, png_bytes: png.len(), old_total, direct }
 }
 
-// DIRECT_PATH_MARKER (the direct RGBA path is timed here once the library has it)
-fn direct_ms(_scene: &Scene, _scale: f64, _runs: usize) -> f64 {
-    f64::NAN
+/// The whole direct path: parse, rasterize and convert to straight RGBA (what `raster_scene` runs now).
+fn direct_ms(scene: &Scene, scale: f64, runs: usize) -> f64 {
+    median_ms(runs, || render_rgba(scene, scale).expect("rgba"))
 }
 
 fn main() {
