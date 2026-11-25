@@ -48,6 +48,8 @@ struct Slot<K> {
     value: Value,
     /// Slots this cell reads, deduplicated.
     deps: Vec<usize>,
+    /// The slot was part of a circular reference at the last recalculation.
+    on_cycle: bool,
 }
 
 /// What one [`Engine::recalculate`] did.
@@ -197,6 +199,7 @@ impl<H: Host> Engine<H> {
             ast: None,
             value: Value::Error(ErrorValue::Na),
             deps: Vec::new(),
+            on_cycle: false,
         }));
         self.dependents.push(HashSet::new());
         self.dirty_flag.push(false);
@@ -234,7 +237,7 @@ impl<H: Host> Engine<H> {
     }
 
     /// Sets a cell's formula. A formula that does not parse is still stored: the cell becomes
-    /// `#VALUE!` and the parse error is returned.
+    /// `#VALUE!` (at the next recalculation) and the parse error is returned.
     pub fn set_formula(&mut self, key: H::Key, formula: &str) -> Result<(), ParseError> {
         let parsed = crate::parse(formula);
         let id = self.ensure(&key);
@@ -242,24 +245,18 @@ impl<H: Host> Engine<H> {
             return Ok(());
         };
         slot.source = Some(formula.to_string());
-        let mut newly_failed = false;
         let result = match parsed {
             Ok(ast) => {
                 slot.ast = Some(ast);
                 Ok(())
             }
             Err(error) => {
+                // The cell turns `#VALUE!` at the next recalculation, so that what its readers
+                // last saw is still what change detection compares against.
                 slot.ast = None;
-                if slot.value != Value::Error(ErrorValue::Value) {
-                    slot.value = Value::Error(ErrorValue::Value);
-                    newly_failed = true;
-                }
                 Err(error)
             }
         };
-        if newly_failed {
-            self.pending_changed.push(id);
-        }
         self.relink(id);
         self.mark_dirty(id);
         result
@@ -447,12 +444,15 @@ impl<H: Host> Engine<H> {
             for &id in component {
                 if let Some(slot) = self.slots.get_mut(id).and_then(Option::as_mut) {
                     keys.push(slot.key.clone());
+                    slot.on_cycle = true;
                     let circular = Value::Error(ErrorValue::Circular);
                     if slot.value != circular {
                         slot.value = circular;
                         report.changed.push(slot.key.clone());
-                        Self::wake(&self.dependents, id, needs);
                     }
+                    // Readers are woken even when the value was already #CIRC!: a reader that
+                    // was circular only through another cycle must be looked at again.
+                    Self::wake(&self.dependents, id, needs);
                 }
             }
             report.cycles.push(keys);
@@ -461,18 +461,32 @@ impl<H: Host> Engine<H> {
         let Some(&id) = component.first() else {
             return;
         };
-        if !needs.get(id).copied().unwrap_or(false) {
+        // A cell that was on a cycle and is not any more holds #CIRC! from the old state: it is
+        // evaluated again even when no input changed.
+        let was_on_cycle = match self.slots.get_mut(id).and_then(Option::as_mut) {
+            Some(slot) => std::mem::take(&mut slot.on_cycle),
+            None => return,
+        };
+        if !was_on_cycle && !needs.get(id).copied().unwrap_or(false) {
+            return;
+        }
+        if self.slot(id).is_some_and(|slot| slot.ast.is_none()) {
+            // A formula that did not parse is `#VALUE!`. A constant has nothing to evaluate: its
+            // readers were scheduled when it changed.
+            if let Some(slot) = self.slots.get_mut(id).and_then(Option::as_mut) {
+                let failed = Value::Error(ErrorValue::Value);
+                if slot.source.is_some() && slot.value != failed {
+                    slot.value = failed;
+                    report.changed.push(slot.key.clone());
+                    Self::wake(&self.dependents, id, needs);
+                }
+            }
             return;
         }
         let Some(slot) = self.slot(id) else {
             return;
         };
         let Some(ast) = &slot.ast else {
-            // A formula that did not parse keeps its error value, and readers still need a look.
-            // A constant has nothing to evaluate: its readers were scheduled when it changed.
-            if slot.source.is_some() {
-                Self::wake(&self.dependents, id, needs);
-            }
             return;
         };
         let env = EngineEnv {

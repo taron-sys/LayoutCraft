@@ -3,7 +3,7 @@
 //! The crate knows nothing about `.vsdx` packages. A host (the document model) supplies cells and
 //! services through the [`Env`] / [`Host`] traits; this crate supplies the language.
 //!
-//! # What it implements, and from which public sources
+//! # What it implements, and the sources it follows
 //!
 //! * Formula syntax and the set of function names: \[MS-VSDX\] "Formula Expressions and
 //!   Evaluation" and section 2.5.1 "Formula ABNF and Full Grammar Definition",

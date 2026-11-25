@@ -4,8 +4,8 @@
 //! evaluation"): unary `+` `-` and postfix `%`; `^`; `*` `/`; `+` `-`; `&`; the ordering
 //! comparisons `<` `<=` `>` `>=` (also `LT` `LE` `GT` `GE`); then `=` `<>` (also `EQ` `NE`).
 //! All binary operators associate to the left. Because the unary operators bind tighter than `^`,
-//! `-2^2` is `(-2)^2`; and `2^3^2` is `(2^3)^2`. Both match what the repository's earlier
-//! evaluator recorded from the application.
+//! `-2^2` is `(-2)^2` (the first row of that table). The page does not say how `^` groups, so
+//! `2^3^2` is `(2^3)^2`, like every other binary operator (docs/46, decision list).
 
 use crate::ast::*;
 use crate::error::{ParseError, ParseErrorKind, Span};

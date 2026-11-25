@@ -24,8 +24,11 @@ fn run(cases: Vec<Case>, test: &str) {
         match evaluate_str(case.formula, env) {
             Ok(evaluation) if matches(&evaluation.value, &case.want) => {}
             Ok(evaluation) => failures.push(format!(
-                "{} {:?}: expected {:?}, got {:?}",
-                case.function, case.formula, case.want, evaluation.value
+                "{} {:?}: expected {}, got {:?}",
+                case.function,
+                case.formula,
+                case.want.show(),
+                evaluation.value
             )),
             Err(error) => failures.push(format!(
                 "{} {:?}: does not parse: {error}",

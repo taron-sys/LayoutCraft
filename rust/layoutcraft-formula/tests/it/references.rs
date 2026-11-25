@@ -162,3 +162,24 @@ fn the_dependencies_of_a_formula_are_the_cells_its_references_resolve_to() {
         vec!["sheet.1!out".to_string()]
     );
 }
+
+#[test]
+fn a_shape_named_like_a_container_is_written_in_quotes_so_it_reads_back() {
+    // Found by the hostile-input sweep: `'ThePage'!X` is a shape named ThePage, and must not be
+    // shown as `ThePage!X`, which is the page.
+    use layoutcraft_formula::{parse, Container, ExprKind, SheetTarget};
+    for name in ["ThePage", "thedoc", "STYLES"] {
+        let text = format!("'{name}'!X");
+        let Ok(expr) = parse(&text) else {
+            panic!("{text} parses");
+        };
+        let ExprKind::Ref(reference) = expr.kind else {
+            panic!("{text} is a reference");
+        };
+        assert_eq!(reference.sheet.container, Container::Current);
+        assert_eq!(reference.sheet.target, SheetTarget::Name(name.to_string()));
+        let shown = reference.to_string();
+        assert_eq!(shown, format!("'{name}'!X"));
+        assert_eq!(parse(&shown).map(|e| e.kind), Ok(ExprKind::Ref(reference)));
+    }
+}

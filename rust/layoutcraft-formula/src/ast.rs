@@ -74,7 +74,12 @@ fn is_plain_name(name: &str) -> bool {
 }
 
 fn write_name(f: &mut fmt::Formatter<'_>, name: &str) -> fmt::Result {
-    if is_plain_name(name) {
+    // An unquoted `ThePage`, `TheDoc` or `Styles` before `!` names a container, so a shape that
+    // carries one of those names is written in quotes.
+    let is_container_word = ["ThePage", "TheDoc", "Styles"]
+        .iter()
+        .any(|word| name.eq_ignore_ascii_case(word));
+    if is_plain_name(name) && !is_container_word {
         f.write_str(name)
     } else {
         write!(f, "'{}'", name.replace('\'', "''"))

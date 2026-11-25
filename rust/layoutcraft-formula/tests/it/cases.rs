@@ -36,6 +36,24 @@ pub enum X {
     C(&'static str),
 }
 
+impl X {
+    /// The expectation as the function table shows it.
+    pub fn show(&self) -> String {
+        match self {
+            X::N(v) | X::Near(v) => format!("{v}"),
+            X::L(v) => format!("{v} in"),
+            X::A(v) | X::NearA(v) => format!("{v} rad"),
+            X::NearDeg(v) => format!("{v} deg"),
+            X::D(v) => format!("{v} days"),
+            X::Sq(v) => format!("{v} sq in"),
+            X::S(text) => format!("{text:?}"),
+            X::B(flag) => format!("{flag}"),
+            X::E(error) => error.text().to_string(),
+            X::C(hex) => (*hex).to_string(),
+        }
+    }
+}
+
 /// One formula and what it must evaluate to.
 #[derive(Clone, Debug)]
 pub struct Case {
@@ -154,6 +172,8 @@ pub fn math_cases() -> Vec<Case> {
     b.e("ROUND", "ROUND(1)", E(Err::Value));
     b.e("ROUND", "ROUND(1.5, 400)", N(1.5));
     b.e("ROUND", "ROUND(1.5, -400)", N(0.0));
+    b.e("ROUND", "ROUND(123, -1e300)", N(0.0));
+    b.e("TRUNC", "TRUNC(123, 1e300)", N(123.0));
     b.e("ROUND", "ROUND(1e300, 5)", N(1e300));
     b.e("ROUND", "ROUND(2.345 in, 1)", L(2.3));
     b.n("TRUNC", "TRUNC(123.654, 2)", N(123.65));
@@ -217,6 +237,7 @@ pub fn math_cases() -> Vec<Case> {
     b.n("SUM", "SUM(5, 7, 12)", N(24.0));
     b.e("SUM", "SUM(1 in, 2 in)", L(3.0));
     b.e("SUM", "SUM(1 in, 1 ed)", E(Err::Dim));
+    b.e("SUM", "SUM(1 ed, 2 eh * 12)", D(1.0 + 1.0));
     b.e("SUM", "SUM(1)", N(1.0));
     b.n("MAGNITUDE", "MAGNITUDE(1, 3, 1, 4)", N(5.0));
     b.e("MAGNITUDE", "MAGNITUDE(1, 3 in, 1, 4 in)", L(5.0));

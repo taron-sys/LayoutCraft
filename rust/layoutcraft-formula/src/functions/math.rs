@@ -131,7 +131,7 @@ fn power_of_ten(digits: i64) -> Option<f64> {
 
 /// Applies `step` to `value` scaled so that `digits` decimals become integer digits.
 fn at_digits(value: f64, digits: i64, step: fn(f64) -> f64) -> f64 {
-    let Some(scale) = power_of_ten(digits.abs()) else {
+    let Some(scale) = power_of_ten(i64::try_from(digits.unsigned_abs()).unwrap_or(i64::MAX)) else {
         // Beyond f64 range the digits cannot matter: huge positive means keep, huge negative means 0.
         return if digits > 0 { value } else { 0.0 };
     };

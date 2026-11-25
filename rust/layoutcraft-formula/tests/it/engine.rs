@@ -488,3 +488,55 @@ fn removing_many_cells_leaves_their_readers_with_ref_errors() {
     assert_eq!(value(&e, "Sheet.1!W7"), Value::Error(ErrorValue::Ref));
     assert_eq!(e.len(), N);
 }
+
+#[test]
+fn a_reader_that_was_circular_through_one_cycle_is_re_evaluated_when_another_cycle_replaces_it() {
+    // Found by the random-edit sweep. B reads C, C reads B (a cycle), and R reads C.
+    let mut e = engine();
+    formula(&mut e, "Sheet.1!R", "ISERR(C)");
+    formula(&mut e, B, "R * C");
+    formula(&mut e, C, "B + 1");
+    e.recalculate();
+    assert_eq!(value(&e, "Sheet.1!R"), Value::Error(ErrorValue::Circular));
+    // Now C reads D and D reads C: C stays #CIRC!, so no value R sees has changed, but R is no
+    // longer on a cycle and must say TRUE.
+    formula(&mut e, C, "D");
+    formula(&mut e, D, "C");
+    e.recalculate();
+    assert_eq!(value(&e, "Sheet.1!R"), Value::Bool(true));
+    assert_eq!(value(&e, B), Value::Error(ErrorValue::Circular));
+}
+
+#[test]
+fn a_cell_that_leaves_a_cycle_while_its_input_stays_circular_is_evaluated_again() {
+    // Found by the random-edit sweep. A reads Missing and C; A, B and C form a cycle through A's
+    // reader B. Breaking the cycle leaves C circular on its own, but A is a plain #REF! again.
+    let mut e = engine();
+    formula(&mut e, A, "Nowhere!X * C");
+    formula(&mut e, B, "A + 1");
+    formula(&mut e, C, "B + 1");
+    e.recalculate();
+    assert_eq!(value(&e, A), Value::Error(ErrorValue::Circular));
+    formula(&mut e, B, "C + 1");
+    e.recalculate();
+    assert_eq!(value(&e, B), Value::Error(ErrorValue::Circular));
+    assert_eq!(value(&e, A), Value::Error(ErrorValue::Ref));
+}
+
+#[test]
+fn a_formula_that_stops_parsing_changes_its_readers_even_if_it_is_replaced_before_the_recalculation(
+) {
+    // Found by the random-edit sweep: the failed parse must not overwrite the value the readers
+    // last saw, or the successful replacement looks unchanged to the change detection.
+    let mut e = engine();
+    set(&mut e, A, Value::number(1.0));
+    formula(&mut e, B, "A + 1");
+    formula(&mut e, C, "B / (B - B)");
+    e.recalculate();
+    assert_eq!(value(&e, C), Value::Error(ErrorValue::DivZero));
+    assert!(e.set_formula(lower(B), "A +").is_err());
+    formula(&mut e, B, "PNT(1, 2) + 1");
+    e.recalculate();
+    assert_eq!(value(&e, B), Value::Error(ErrorValue::Value));
+    assert_eq!(value(&e, C), Value::Error(ErrorValue::Value));
+}
