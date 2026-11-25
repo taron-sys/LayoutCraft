@@ -1931,6 +1931,7 @@ dependencies = [
 name = "layoutcraft-vsdx"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "image",
  "layoutcraft-model",
  "roxmltree 0.21.2",
