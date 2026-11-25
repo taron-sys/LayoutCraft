@@ -273,14 +273,19 @@ back when the missing searches (8.2) and the three-product evidence (8.3) are in
 
 | # | Label now shipped | Record's own doubt | Decision | Initials / date |
 |---|---|---|---|---|
-| 1 | Shape Formulas (was Shape Sheet) | none beyond the missing register searches | | |
-| 2 | Add and Connect Arrows (was AutoConnect) | long; "owner may shorten"; `Connect Arrows` had no USPTO hit | | |
-| 3 | Shape Fields (was Shape Data) | replaced as "unclear" (rule 5), not because of a found mark | | |
-| 4 | Copy Format (was Format Painter) | marked **interim**: two unrelated products use Format Painter, not three | | |
-| 5 | Check Drawing (was Check Diagram) | the record's reason is that it is "Visio's wording as far as known" (docs/43 S4) and says the check "did not settle it". Confirm the reason or pick a different word | | |
-| 6 | Favourite Commands Bar (was Quick Access Toolbar) | owner "may prefer a shorter name, e.g. Pinned Commands" | | |
-| 7 | Side panels (was Task panes) | USPTO not checked; common-use evidence not collected | | |
-| 8 | Page Overview (was Pan & Zoom) | none beyond the missing register searches | | |
+| 1 | Shape Formulas (was Shape Sheet) | none beyond the missing register searches | Approved as shipped | taron-sys, 2026-11-25 |
+| 2 | Add and Connect Arrows (was AutoConnect) | long; "owner may shorten"; `Connect Arrows` had no USPTO hit | Approved as shipped | taron-sys, 2026-11-25 |
+| 3 | Shape Fields (was Shape Data) | replaced as "unclear" (rule 5), not because of a found mark | Approved as shipped | taron-sys, 2026-11-25 |
+| 4 | Copy Format (was Format Painter) | marked **interim**: two unrelated products use Format Painter, not three | Approved as shipped | taron-sys, 2026-11-25 |
+| 5 | Check Drawing (was Check Diagram) | the record's reason is that it is "Visio's wording as far as known" (docs/43 S4) and says the check "did not settle it". Confirm the reason or pick a different word | Approved as shipped | taron-sys, 2026-11-25 |
+| 6 | Favourite Commands Bar (was Quick Access Toolbar) | owner "may prefer a shorter name, e.g. Pinned Commands" | Approved as shipped | taron-sys, 2026-11-25 |
+| 7 | Side panels (was Task panes) | USPTO not checked; common-use evidence not collected | Approved as shipped | taron-sys, 2026-11-25 |
+| 8 | Page Overview (was Pan & Zoom) | none beyond the missing register searches | Approved as shipped | taron-sys, 2026-11-25 |
+
+Sign-off recorded 2026-11-25 by the repository owner (taron-sys): all eight labels approved as shipped. This does not make them
+final. The register searches of 8.2 have not been run, the evidence gaps of 8.3 are open, and the rows of 8.4 are undecided, so every
+name stays provisional. Rows 4 (Copy Format, interim) and 5 (Check Drawing, reason not settled) should be looked at first when the
+searches are done.
 
 ### 8.2 Searches nobody has run
 
