@@ -74,17 +74,19 @@ jobs:
         with:
           node-version: 24
       - name: Provenance guard (public wording and private paths)
-        run: node tools/check-provenance.mjs
+        working-directory: rust
+        run: cargo xtask provenance
       - name: Build the wasm (public build)
         env:
           CARGO_TOOLCHAIN: '' # the script pins a toolchain for the maintainers' machine; on the runner the default one is used
         run: sh tools/build-web-wasm.sh public
       - name: Third-party notices are current
+        working-directory: rust
         env:
           CARGO_TOOLCHAIN: '' # use the runner's default toolchain, as for the wasm build
         run: |
-          cargo fetch --manifest-path rust/Cargo.toml
-          node tools/gen-third-party.mjs --check
+          cargo fetch
+          cargo xtask notices --check
 
   deny:
     name: licences and advisories (cargo-deny)

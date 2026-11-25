@@ -1902,8 +1902,8 @@ function drawMcp() {
   $('mcpDesktop').hidden = !desktop;
   $('mcpServer').disabled = !!desktop;
   const cfg = mcpConfig({
-    command: desktop ? desktop.command : 'node', args: desktop ? desktop.args || [] : null,
-    server: $('mcpServer').value.trim() || $('mcpServer').placeholder, root: $('mcpRoot').value.trim() || $('mcpRoot').placeholder,
+    command: desktop ? desktop.command : $('mcpServer').value.trim() || $('mcpServer').placeholder, args: desktop ? desktop.args || [] : [],
+    root: $('mcpRoot').value.trim() || $('mcpRoot').placeholder,
   });
   $('mcpJson').value = cfg.json; $('mcpCmd').value = cfg.claudeCode;
   try { localStorage.setItem(MCP_KEY, JSON.stringify({ server: $('mcpServer').value, root: $('mcpRoot').value })); } catch { /* not remembered */ }
@@ -1913,7 +1913,12 @@ const mcpCopy = async (text, what) => {
   catch { $('mcpMsg').textContent = `This browser did not allow copying: select the ${what.toLowerCase()} and copy it.`; }
 };
 $('mcpInfo').onclick = () => {
-  try { const saved = JSON.parse(localStorage.getItem(MCP_KEY) || '{}'); $('mcpServer').value = saved.server || ''; $('mcpRoot').value = saved.root || ''; } catch { /* nothing remembered */ }
+  try {
+    const saved = JSON.parse(localStorage.getItem(MCP_KEY) || '{}');
+    // a path remembered from the retired Node server (mcp/server.mjs) would not start: show the placeholder instead
+    $('mcpServer').value = typeof saved.server === 'string' && !/\.m?js$/i.test(saved.server.trim()) ? saved.server : '';
+    $('mcpRoot').value = typeof saved.root === 'string' ? saved.root : '';
+  } catch { /* nothing remembered */ }
   $('mcpMsg').textContent = '';
   drawMcp();
   $('mcpDialog').showModal();

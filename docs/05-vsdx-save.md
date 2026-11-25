@@ -1,5 +1,7 @@
 # VSDX save
 
+> Historical note: the JavaScript editor described here (the `js/` folder) was removed; see [42](42-javascript-removal.md). The last commit that still has it is `c9aa852`. The Rust crates carry this work now.
+
 ## UI entry point
 
 `app.saveVSDX` in `js/main.js` handles the toolbar VSDX button and
