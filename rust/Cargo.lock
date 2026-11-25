@@ -1878,6 +1878,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "layoutcraft-formula"
+version = "0.1.0"
+
+[[package]]
 name = "layoutcraft-mcp"
 version = "0.1.0"
 dependencies = [
