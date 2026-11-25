@@ -232,3 +232,31 @@ and "unclear" rows.
 Record the same table in the pull request that renames a label (rule 4). Do the renames as one labels-only change: keep command
 ids, keep the old label as a hidden search alias, translate the new label, and update `docs/43-ui-parity.md` section 6 statuses
 once the owner agrees.
+
+## 7. Status of the renames (2026-11-25)
+
+The eight "replace" rows of section 4 are applied to the text people see, as one labels-only change. The decisions stay provisional
+(section 5: EUIPO, TMview and WIPO were not searched); a Craft owner still has to review the "unclear" rows.
+
+| Old label | New label | Where changed |
+|---|---|---|
+| Shape Sheet / ShapeSheet | Shape Formulas | `web/shell.html` (pane checkbox, tooltip, heading), `web/shell.js` (heading, empty message) |
+| AutoConnect | Add and Connect Arrows | `web/shell.html` (checkbox, tooltip), `web/shell.js` (status messages, arrow tooltips), `web/engine.js` (error text) |
+| Shape Data / Shape data | Shape Fields / Shape fields | `web/shell.html` (button, dialog, report note), `web/shell.js` (error messages), `web/contextmenu.js` |
+| Format Painter / Format painter | Copy Format / Copy format | `rust/layoutcraft-app/src/ribbon.rs`, `web/shell.html` (tooltip, aria-label) |
+| Check Diagram | Check Drawing | `rust/layoutcraft-app/src/ribbon.rs`, `rust/layoutcraft-app/src/main.rs` (window title), `web/shell.html` (button, dialog) |
+| Quick Access Toolbar | Favourite Commands Bar | `web/qat.js` (menu items, aria-label), `web/ribbon.js` (aria-label) |
+| Task panes | Side panels | `web/shell.html` (tooltips) |
+| Pan & Zoom | Page Overview | `web/shell.html` (pane checkbox, tooltip, heading) |
+
+Not changed, on purpose:
+
+- Command ids, element ids, function names, storage keys and comments keep the old words (rule 6 of the naming policy); the engine's
+  internal error texts ("shape data: ...") and the stored Visio names are untouched.
+- The Check Drawing result line "(Shape data > Alt text)" in `web/checkdiagram.js` and `layoutcraft-engine/src/check.rs`: the private
+  oracle `tests/oracle/check-oracle.json` records that text. A maintainer has to change both places and regenerate the oracle with
+  `visio-test-harness/dump-check-oracle.mjs` in one step.
+- MCP tool descriptions (`rust/layoutcraft-mcp/tests/oracle/tools-list.json` is a recorded list) still use the old words.
+- No hidden search alias for the old labels: LayoutCraft has no command search yet. Add the aliases when it has one.
+- No translation of the new labels: the shell has no translation files.
+- "Visual Aids" and "stencil / master" (owner decision) and the "keep" rows.
