@@ -153,12 +153,6 @@
    "ok": true
   },
   {
-   "name": "constant_time_eq",
-   "version": "0.6.1",
-   "license": "CC0-1.0 OR MIT-0 OR Apache-2.0",
-   "ok": true
-  },
-  {
    "name": "cpufeatures",
    "version": "0.3.1",
    "license": "MIT OR Apache-2.0",
@@ -1365,18 +1359,6 @@
    "ok": true
   },
   {
-   "name": "zeroize",
-   "version": "1.9.2",
-   "license": "Apache-2.0 OR MIT",
-   "ok": true
-  },
-  {
-   "name": "zeroize_derive",
-   "version": "1.5.0",
-   "license": "Apache-2.0 OR MIT",
-   "ok": true
-  },
-  {
    "name": "zerotrie",
    "version": "0.2.5",
    "license": "Unicode-3.0",
@@ -1396,7 +1378,7 @@
   },
   {
    "name": "zip",
-   "version": "9.8.1",
+   "version": "9.1.3",
    "license": "MIT",
    "ok": true
   },
