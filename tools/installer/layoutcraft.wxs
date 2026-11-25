@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- LayoutCraft per-user MSI (WiX Toolset v4+; docs/36-packaging.md). Build: powershell -File LayoutCraft\tools\installer\build-msi.ps1
-     Installs layoutcraft-app.exe and layoutcraft-mcp.exe into %LOCALAPPDATA%\Programs\LayoutCraft, a Start menu shortcut, the third-party notices and PROVENANCE.md;
-     no administrator rights. The optional feature "Open .vsdx files with LayoutCraft" is off by default (it is not Visio's association to take over silently). -->
+<!-- LayoutCraft per-user MSI (WiX Toolset v4+; docs/36-packaging.md). Build: pwsh tools/installer/build-msi.ps1 [-Arch x64|arm64]
+     The processor architecture comes from "wix build -arch" (build-msi.ps1 passes it); Bin is the folder with the exes of that architecture.
+     Installs layoutcraft-app.exe and layoutcraft-mcp.exe into %LOCALAPPDATA%\Programs\LayoutCraft, a Start menu shortcut, the third-party notices, the licence files
+     and PROVENANCE.md; no administrator rights. The optional feature "Open .vsdx files with LayoutCraft" is off by default (it is not Visio's association to take over silently). -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="LayoutCraft" Manufacturer="LayoutCraft contributors" Version="$(var.Version)" UpgradeCode="bf8ebfc9-2d6b-4648-8c01-7f0588f308a4" Scope="perUser" Language="1033">
     <MajorUpgrade DowngradeErrorMessage="A newer version of LayoutCraft is already installed." />
@@ -21,6 +22,7 @@
       <ComponentRef Id="McpExe" />
       <ComponentRef Id="Notices" />
       <ComponentRef Id="Provenance" />
+      <ComponentRef Id="Licenses" />
       <ComponentRef Id="StartMenuShortcut" />
       <Feature Id="Association" Title="Open .vsdx files with LayoutCraft" Level="2" AllowAdvertise="no">
         <ComponentRef Id="VsdxAssociation" />
@@ -43,6 +45,11 @@
     <Component Id="Provenance" Directory="INSTALLFOLDER" Guid="*">
       <File Id="ProvenanceStatement" Source="$(var.Layout)\PROVENANCE.md" />
       <RegistryValue Root="HKCU" Key="Software\LayoutCraft\Install" Name="Provenance" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <Component Id="Licenses" Directory="INSTALLFOLDER" Guid="*">
+      <File Id="LicenseMit" Source="$(var.Layout)\LICENSE-MIT" />
+      <File Id="LicenseApache" Source="$(var.Layout)\LICENSE-APACHE" />
+      <RegistryValue Root="HKCU" Key="Software\LayoutCraft\Install" Name="Licenses" Type="integer" Value="1" KeyPath="yes" />
     </Component>
     <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder" Guid="*">
       <Shortcut Id="LayoutCraftShortcut" Name="LayoutCraft" Target="[INSTALLFOLDER]layoutcraft-app.exe" WorkingDirectory="INSTALLFOLDER" Icon="LayoutCraftIcon" />
