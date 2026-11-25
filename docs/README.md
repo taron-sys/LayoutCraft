@@ -25,6 +25,7 @@ is intended to be read before changing the importer or writer.
 19. [Headless scene/SVG/raster renderer](19-headless-renderer.md)
 20. [VSDX patch writer](20-vsdx-patch-writer.md)
 21. [Fresh VSDX writer](21-fresh-writer.md)
+44. [Document model: in-memory source of truth, undo journal, recalculation, save (design)](44-document-model.md)
 
 ## Test fixtures and distribution
 
