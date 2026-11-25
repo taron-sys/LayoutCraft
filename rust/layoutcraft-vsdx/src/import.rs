@@ -1669,6 +1669,8 @@ struct TextPaint {
     bold: bool,
     italic: bool,
     underline: bool,
+    /// `Char.Pos`: 1 superscript, 2 subscript, 0 normal.
+    script: u8,
 }
 
 #[derive(Debug, Clone)]
@@ -2032,6 +2034,10 @@ fn run_style(
     if pick("Strikethru").and_then(|cell| numeric_cell(Some(cell))).is_some_and(|value| value > 0.5) {
         out.insert("strike".to_string(), json!(true));
     }
+    let script = script_position(pick("Pos"));
+    if script != 0 {
+        out.insert("scriptPos".to_string(), json!(script));
+    }
     if let Some(case) = pick("Case").and_then(|cell| numeric_cell(Some(cell))).map(|value| value.round() as u32).filter(|case| *case == 1 || *case == 2) {
         out.insert("caps".to_string(), json!(case));
     }
@@ -2373,6 +2379,31 @@ fn resolve_text(
         bold: style & 1 != 0,
         italic: style & 2 != 0,
         underline: style & 4 != 0,
+        script: script_position(pick("Pos").or_else(|| node.cells.get("Char.Pos"))),
+    }
+}
+
+/// The colour of the text block's background: `TextBkgnd` when it is a concrete colour (0 means none) and `TextBkgndTrans` leaves it visible.
+/// Measured in Visio on the Aruba SFP modules: the white block of the label hides the lower half of the icon; `TextBkgnd = 0` or a transparency of
+/// 100 % shows the whole icon.
+fn text_background(node: &ResolvedShape) -> Option<String> {
+    // Only a group's label matters: it is drawn over the members. A plain shape's block lies over its own fill, which the cell's white default
+    // (a themed background colour on most styles) leaves unchanged on a white page.
+    if node.children.is_empty() {
+        return None;
+    }
+    let colour = node.cells.get("TextBkgnd")?.value.as_deref()?;
+    let hex = colour.starts_with('#') && colour.len() == 7 && colour[1..].chars().all(|c| c.is_ascii_hexdigit());
+    let transparent = numeric_cell(node.cells.get("TextBkgndTrans")).is_some_and(|value| value >= 0.995);
+    (hex && !transparent).then(|| colour.to_ascii_lowercase())
+}
+
+/// `Char.Pos` as 0 (normal), 1 (superscript) or 2 (subscript).
+fn script_position(cell: Option<&Cell>) -> u8 {
+    match numeric_cell(cell).map(|value| value.round() as i64) {
+        Some(1) => 1,
+        Some(2) => 2,
+        _ => 0,
     }
 }
 
@@ -2678,6 +2709,8 @@ fn convert_shape(
         alt_text: instance_user_value(node, "visAltDescription").filter(|text| !text.trim().is_empty()),
         text_fit,
         text_fits_line: text_width_fits_line(node),
+        text_script: text.script,
+        text_bkgnd: text_background(node),
         callout: None,
         native_data_graphic: None,
         layers: layer_members(node),
