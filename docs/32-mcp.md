@@ -39,7 +39,7 @@ Inches. The origin is the lower left corner of the page and y grows upward (the 
 | `export` | `svg`, `dxf` (one page), `drawio` (all pages), `excalidraw` (one page); with `path` it writes the file, without it returns the text |
 | `list_pages`, `list_shapes` | pages with sizes and shape counts; shapes with id, type, x, y, w, h, rotation, text, fill, line |
 | `draw_shape` | `kind` rectangle / rounded / ellipse / diamond / triangle / textbox / line, corners `x0 y0 x1 y1`, optional `text` and `style` |
-| `add_connector` | glue a connector between `from` and `to` (`id`, `side` 0 whole shape / 1 top / 2 right / 3 bottom / 4 left) |
+| `add_connector` | draw a connector from `from` to `to`; each end is glued to a shape (`id`, `side` 0 whole shape / 1 top / 2 right / 3 bottom / 4 left) or loose at a page position (`x`, `y` in inches) |
 | `set_text`, `style_shapes`, `delete_shapes` | text, style (fill, line, weight, pattern, fontPt, fontFamily, textColor, bold, italic, underline, fillTrans, lineTrans, shadow, beginArrow, endArrow), delete |
 | `move_shapes`, `rotate_shapes`, `flip_shapes` | move by (dx, dy) inches, rotate by degrees counter-clockwise, mirror |
 | `align_shapes`, `distribute_shapes` | left / center / right / top / middle / bottom to the first shape; even spacing of three or more |

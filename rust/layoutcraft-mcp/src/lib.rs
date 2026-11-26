@@ -2,7 +2,7 @@
 //! it is edited here, together with the tool it describes, and served as is. The retired Node server (last in commit c9aa852) had the same list.
 use std::path::{Component, Path, PathBuf};
 
-use layoutcraft_engine::Engine;
+use layoutcraft_engine::{EndTarget, Engine};
 use serde_json::{json, Value};
 
 const TOOLS_LIST: &str = include_str!("../tests/oracle/tools-list.json");
@@ -38,6 +38,21 @@ fn id_text(v: &Value) -> String {
     match v {
         Value::String(s) => s.clone(),
         other => other.to_string(),
+    }
+}
+
+/// One end of `add_connector`: `{id, side?}` is glued to a shape, `{x, y}` is loose at a page position.
+fn connector_end(a: &Value, key: &str) -> Result<EndTarget, String> {
+    let end = a.get(key).ok_or_else(|| format!("{key} is required"))?;
+    let given = |name: &str| end.get(name).filter(|v| !v.is_null());
+    let side = given("side").and_then(Value::as_u64).filter(|s| *s > 0).map(|s| s as usize);
+    match (given("id"), given("x"), given("y")) {
+        (Some(id), None, None) => Ok(EndTarget::Glue(id_text(id), side)),
+        (None, Some(x), Some(y)) if side.is_none() => match (x.as_f64(), y.as_f64()) {
+            (Some(x), Some(y)) => Ok(EndTarget::Free(x, y)),
+            _ => Err(format!("{key}: x and y must be numbers")),
+        },
+        _ => Err(format!("{key} needs either id (with an optional side) or both x and y")),
     }
 }
 
@@ -288,15 +303,8 @@ impl Server {
             }
             "add_connector" => {
                 let p = self.page(a)?;
-                let end = |k: &str| -> Result<(String, Option<usize>), String> {
-                    let e = a.get(k).ok_or_else(|| format!("{k} is required"))?;
-                    let id = e.get("id").map(id_text).ok_or("id is required")?;
-                    let side = e.get("side").and_then(Value::as_u64).filter(|s| *s > 0).map(|s| s as usize);
-                    Ok((id, side))
-                };
-                let (from, from_site) = end("from")?;
-                let (to, to_site) = end("to")?;
-                let id = self.engine.add_connector(p, &from, from_site, &to, to_site)?;
+                let (from, to) = (connector_end(a, "from")?, connector_end(a, "to")?);
+                let id = self.engine.add_connector_between(p, &from, &to)?;
                 Ok(pretty(&json!({ "id": id })))
             }
             "set_text" => {
@@ -797,6 +805,36 @@ mod tests {
         assert!(!err && text.starts_with("wrote out/a.drawio"), "{text}");
         assert!(root.join("out/a.drawio").exists());
         std::fs::remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn connector_ends_are_glued_or_loose() {
+        let mut s = Server::new(std::env::temp_dir());
+        let (err, text) = call(&mut s, "draw_shape", json!({"kind":"rectangle","x0":1,"y0":1,"x1":3,"y1":2}));
+        assert!(!err, "{text}");
+        let shape = serde_json::from_str::<Value>(&text).unwrap()["id"].clone();
+        let mut connect = |from: Value, to: Value| call(&mut s, "add_connector", json!({"from":from,"to":to}));
+        let (err, loose) = connect(json!({"x":1,"y":5}), json!({"x":4,"y":6}));
+        assert!(!err, "{loose}");
+        let (err, half) = connect(json!({"id":shape}), json!({"x":6,"y":4}));
+        assert!(!err, "{half}");
+        // refused: both kinds at once, half a position, a side without a shape, text for a number, ends on top of each other
+        for end in [json!({"id":shape,"x":1,"y":1}), json!({"x":1}), json!({"x":1,"y":1,"side":2}), json!({"x":"1","y":1}), json!({})] {
+            let (err, text) = connect(end.clone(), json!({"x":7,"y":7}));
+            assert!(err && text.starts_with("from"), "{end}: {text}");
+        }
+        assert!(connect(json!({"x":2,"y":2}), json!({"x":2,"y":2})).0);
+        let list: Value = serde_json::from_str(&call(&mut s, "list_connectors", json!({})).1).unwrap();
+        let list = list.as_array().unwrap();
+        assert_eq!(list.len(), 2, "{list:?}");
+        let id = |text: &str| serde_json::from_str::<Value>(text).unwrap()["id"].clone();
+        let find = |wanted: &Value| list.iter().find(|c| c["id"] == *wanted).unwrap();
+        let loose = find(&id(&loose));
+        assert!(loose["begin"]["glue"].is_null() && loose["end"]["glue"].is_null(), "{loose}");
+        assert!(loose["end"]["x"].as_f64() > loose["begin"]["x"].as_f64(), "{loose}");
+        let half = find(&id(&half));
+        assert_eq!(half["begin"]["glue"]["sheet"], shape, "{half}");
+        assert!(half["end"]["glue"].is_null(), "{half}");
     }
 
     #[test]
