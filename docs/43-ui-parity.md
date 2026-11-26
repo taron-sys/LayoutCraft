@@ -334,7 +334,7 @@ Compare File (`compareBtn`: present on both), AI assistant info (`mcpInfo`: pres
 | Text Block tool moves the text block independently | S5 | none | none | P2 |
 | Zoom: Ctrl+wheel; plain wheel scrolls | S11 | Ctrl+wheel zooms, wheel scrolls | wheel scrolls; `wheelZoom` option | Desktop matches |
 | Pan: Pan & Zoom window; scroll; Ctrl+Shift right-drag | S11 | middle button, Space-drag, Pan tool | same plus pane | P2 |
-| Tab / Shift+Tab cycle focus through shapes; Enter selects the focused shape | S1 | none | `tabThroughShapes` | Desktop: P1 (also an accessibility rule, `AGENTS.md` 13) |
+| Tab / Shift+Tab cycle focus through shapes; Enter selects the focused shape | S1 | Tab / Shift+Tab select the next / previous shape once a shape is selected on the canvas | `tabThroughShapes` | Desktop: no keyboard way in without a selection (Ctrl+A first) |
 | Page change: Page Up / Page Down in full screen; Ctrl+Page Down next page | S1 | none | none | P2 |
 
 ### 4.1 Keyboard shortcuts: Visio desktop (S1) against LayoutCraft desktop (`main.rs`)
@@ -365,7 +365,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Full-screen view / exit | F5 / Esc | F5 / Esc | no key | same on desktop |
 | Fit page to window | Ctrl+Shift+W | Ctrl+Shift+W | none | same on desktop |
 | Zoom in / out | Alt+F6 / Alt+Shift+F6 (web: Ctrl+Plus / Ctrl+Minus) | Ctrl+= or Ctrl++ / Ctrl+- | same | diff on desktop key set; matches the web variant |
-| Cycle focus through shapes | Tab / Shift+Tab | none | Tab on the stage | none (desktop) |
+| Cycle focus through shapes | Tab / Shift+Tab | Tab / Shift+Tab with a shape selected | Tab on the stage | same on desktop |
 | Toggle text edit and selection | F2 | F2 (also Ctrl+E) | F2 | same |
 | Nudge | Arrow (to snap position); Shift+Arrow one pixel | Arrow 0.05 in; Shift+Arrow 0.5 in | same | diff |
 | Select all | Ctrl+A (web table; desktop page lists it for text and masters) | Ctrl+A | Ctrl+A | same |
@@ -386,7 +386,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Find | Ctrl+F (web `findBtn`) | Ctrl+F | Ctrl+F | same on desktop |
 | Hyperlink | Ctrl+K (unverified in S1) | Ctrl+K | Ctrl+K | same on desktop |
 
-Count of the 41 rows above: same 19, diff 2, partial 2, none 18. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 20, diff 2, partial 2, none 17. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 
