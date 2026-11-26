@@ -819,6 +819,100 @@ mod change_shape_tests {
     }
 }
 
+/// The paper sizes of the Design tab's Size menu: (name, short side, long side) in inches (`web/shell.html` `designSize`).
+const PAGE_SIZES: [(&str, f64, f64); 6] = [("Letter", 8.5, 11.0), ("Legal", 8.5, 14.0), ("Tabloid", 11.0, 17.0), ("A5", 5.8268, 8.2677), ("A4", 8.2677, 11.6929), ("A3", 11.6929, 16.5354)];
+
+/// (width, height) of the shown page from `Engine::page_size_json`.
+fn page_dimensions(engine: &Engine, page: usize) -> Option<(f64, f64)> {
+    let size: serde_json::Value = serde_json::from_str(&engine.page_size_json(page).ok()?).ok()?;
+    Some((size["w"].as_f64()?, size["h"].as_f64()?))
+}
+
+/// The new page size when a paper size (short, long) and / or an orientation is picked; what is not picked is kept
+/// (`web/shell.js` `applyPageShape`). `None` when nothing would change.
+fn shaped_page(current: (f64, f64), paper: Option<(f64, f64)>, portrait: Option<bool>) -> Option<(f64, f64)> {
+    let (short, long) = paper.unwrap_or((current.0.min(current.1), current.0.max(current.1)));
+    let portrait = portrait.unwrap_or(current.0 <= current.1);
+    let (w, h) = if portrait { (short, long) } else { (long, short) };
+    ((w - current.0).abs() > 1e-3 || (h - current.1).abs() > 1e-3).then_some((w, h))
+}
+
+#[cfg(test)]
+mod page_shape_tests {
+    use super::{page_dimensions, shaped_page};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn orientation_swaps_the_sides_and_a_paper_size_keeps_the_orientation() {
+        assert_eq!(shaped_page((8.5, 11.0), None, Some(false)), Some((11.0, 8.5)));
+        assert_eq!(shaped_page((11.0, 8.5), Some((8.5, 14.0)), None), Some((14.0, 8.5)));
+        assert_eq!(shaped_page((8.5, 11.0), Some((8.5, 14.0)), None), Some((8.5, 14.0)));
+        assert_eq!(shaped_page((8.5, 11.0), Some((8.5, 11.0)), None), None);
+        assert_eq!(shaped_page((8.5, 11.0), None, Some(true)), None);
+    }
+
+    #[test]
+    fn the_new_size_reaches_the_page() {
+        let mut engine = Engine::default();
+        engine.new_blank(8.5, 11.0, false, "Page-1").unwrap();
+        let (w, h) = shaped_page(page_dimensions(&engine, 0).unwrap(), None, Some(false)).unwrap();
+        engine.page_op(6, 0, 0, &format!("{w},{h}")).unwrap();
+        let (w, h) = page_dimensions(&engine, 0).unwrap();
+        assert!(w > h);
+    }
+}
+
+/// The theme (name) and colour variant the page shows, from `Engine::themes_json`, as `web/shell.js` `buildThemeGallery`
+/// reads it: when some page states a theme of its own, the page's own one counts (none if it states none), else the drawing's.
+fn current_theme(info: &serde_json::Value, page: usize) -> (Option<String>, u64) {
+    let pages = info["pages"].as_array().cloned().unwrap_or_default();
+    if pages.iter().any(|entry| entry["theme"].as_u64().is_some_and(|index| index != 0)) {
+        let own = pages.get(page).and_then(|entry| entry["theme"].as_u64());
+        let name = info["themes"].as_array().and_then(|themes| themes.iter().find(|theme| theme["index"].as_u64() == own)).and_then(|theme| theme["name"].as_str());
+        (name.map(str::to_string), pages.get(page).and_then(|entry| entry["variant"].as_u64()).unwrap_or(0))
+    } else {
+        (info["current"].as_str().map(str::to_string), info["variant"].as_u64().unwrap_or(0))
+    }
+}
+
+/// The `Engine::page_op` number that applies a theme (or, with `variant`, a colour variant) to every page or to one page.
+fn theme_op(variant: bool, all_pages: bool) -> i32 {
+    match (variant, all_pages) {
+        (false, true) => 30,
+        (true, true) => 31,
+        (false, false) => 32,
+        (true, false) => 33,
+    }
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::{current_theme, theme_op};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn a_theme_and_a_variant_are_applied_and_marked() {
+        for all_pages in [true, false] {
+            let mut engine = Engine::default();
+            engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+            let info = |engine: &Engine| serde_json::from_str::<serde_json::Value>(&engine.themes_json().unwrap()).unwrap();
+            let name = info(&engine)["themes"][1]["name"].as_str().unwrap().to_string();
+            assert_ne!(current_theme(&info(&engine), 0).0.as_deref(), Some(name.as_str()));
+            engine.page_op(theme_op(false, all_pages), 0, 0, &name).unwrap();
+            assert_eq!(current_theme(&info(&engine), 0).0.as_deref(), Some(name.as_str()));
+            engine.page_op(theme_op(true, all_pages), 0, 0, "2").unwrap();
+            assert_eq!(current_theme(&info(&engine), 0), (Some(name), 2));
+        }
+    }
+
+    #[test]
+    fn a_page_without_a_theme_of_its_own_shows_none_when_others_have_one() {
+        let info = serde_json::json!({ "themes": [{ "index": 5, "name": "A" }], "current": "A", "variant": 1, "pages": [{ "theme": 5, "variant": 3 }, { "theme": null, "variant": 0 }] });
+        assert_eq!(current_theme(&info, 0), (Some("A".to_string()), 3));
+        assert_eq!(current_theme(&info, 1), (None, 0));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -1554,6 +1648,9 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Themes menus: apply to every page instead of the shown one; and the gallery, until the page is rebuilt.
+    theme_all_pages: bool,
+    theme_cache: Option<serde_json::Value>,
     /// "Change Shape" is waiting for a click on a shape of the Shapes panel.
     change_shape: bool,
     /// The Find window, while it is open.
@@ -1669,6 +1766,8 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            theme_all_pages: false,
+            theme_cache: None,
             change_shape: false,
             find: None,
             struck_cache: None,
@@ -1831,6 +1930,7 @@ impl LayoutCraftApp {
         let _timer = Timer::new("build_page (whole)", 0.0);
         self.sites_cache.clear();
         self.struck_cache = None;
+        self.theme_cache = None;
         *self.routes_cache.borrow_mut() = None;
         let (Some(package), Some(document)) = (self.engine.package.as_ref(), self.engine.document.as_ref())
         else {
@@ -3447,6 +3547,14 @@ impl LayoutCraftApp {
             });
             return;
         }
+        if id == "themeGallery" || id == "variantGallery" {
+            self.ribbon_themes(ui, id == "variantGallery", action);
+            return;
+        }
+        if id == "designOrientation" || id == "designSize" {
+            self.ribbon_page_shape(ui, id, action);
+            return;
+        }
         if id == "pageTools" {
             for page_id in ["pageAdd", "pageDup", "pageRename", "pageDel", "pageLeft", "pageRight"] {
                 self.ribbon_button(ui, ctx, page_id, action);
@@ -4180,6 +4288,94 @@ impl LayoutCraftApp {
             }
             Err(error) => self.status = format!("Could not change the shape: {error}"),
         }
+    }
+
+    /// `Engine::themes_json`, read once per page build (it parses every theme of the gallery).
+    fn theme_info(&mut self) -> Option<serde_json::Value> {
+        if self.theme_cache.is_none() {
+            self.theme_cache = self.engine.themes_json().ok().and_then(|text| serde_json::from_str(&text).ok());
+        }
+        self.theme_cache.clone()
+    }
+
+    /// The Design tab's Themes and Variants menus: for the shown page, or for all pages when the box is ticked.
+    fn ribbon_themes(&mut self, ui: &mut egui::Ui, variants: bool, action: &mut Option<Action>) {
+        let enabled = self.texture.is_some();
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.menu_button(if variants { "Variants \u{25be}" } else { "Themes \u{25be}" }, |ui| {
+                let Some(info) = self.theme_info() else {
+                    ui.label("The themes cannot be read.");
+                    return;
+                };
+                let (current, variant) = current_theme(&info, self.page_index);
+                ui.checkbox(&mut self.theme_all_pages, "Apply to all pages");
+                let op = theme_op(variants, self.theme_all_pages);
+                if !variants {
+                    for theme in info["themes"].as_array().into_iter().flatten() {
+                        let Some(name) = theme["name"].as_str() else { continue };
+                        if ui.selectable_label(current.as_deref() == Some(name), name).clicked() {
+                            *action = Some(Action::Theme(op, name.to_string()));
+                            ui.close();
+                        }
+                    }
+                } else if current.is_none() {
+                    ui.label("Apply a theme first (Design > Themes).");
+                } else {
+                    for choice in 0..4u64 {
+                        if ui.selectable_label(choice == variant, format!("Variant {}", choice + 1)).clicked() {
+                            *action = Some(Action::Theme(op, choice.to_string()));
+                            ui.close();
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    /// Apply a theme or variant (`theme_op`) with the shown page as the target.
+    fn apply_theme(&mut self, ctx: &egui::Context, op: i32, value: &str) {
+        let page = self.page_index;
+        let result = self.engine.page_op(op, page, 0, value).map(|_| ());
+        let selected = self.selected.clone();
+        self.finish_edit(ctx, result, "Changed the theme", selected);
+    }
+
+    /// The Design tab's Orientation and Size menus; the current choice is marked.
+    fn ribbon_page_shape(&mut self, ui: &mut egui::Ui, id: &str, action: &mut Option<Action>) {
+        let (engine, page, enabled) = (&self.engine, self.page_index, self.texture.is_some());
+        let title = if id == "designSize" { "Size \u{25be}" } else { "Orientation \u{25be}" };
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.menu_button(title, |ui| {
+                let Some(current) = page_dimensions(engine, page) else {
+                    ui.label("The page size cannot be read.");
+                    return;
+                };
+                let choices: Vec<(&str, Option<(f64, f64)>, Option<bool>)> = if id == "designSize" {
+                    PAGE_SIZES.iter().map(|(name, short, long)| (*name, Some((*short, *long)), None)).collect()
+                } else {
+                    vec![("Portrait", None, Some(true)), ("Landscape", None, Some(false))]
+                };
+                for (name, paper, portrait) in choices {
+                    let next = shaped_page(current, paper, portrait);
+                    if ui.selectable_label(next.is_none(), name).clicked() {
+                        if let Some((w, h)) = next {
+                            *action = Some(Action::PageShape(w, h));
+                        }
+                        ui.close();
+                    }
+                }
+            });
+        });
+    }
+
+    /// Set the size of the shown page (the shapes keep their positions) and fit it to the window.
+    fn set_page_shape(&mut self, ctx: &egui::Context, w: f64, h: f64) {
+        let page = self.page_index;
+        let result = self.engine.page_op(6, page, 0, &format!("{w},{h}")).map(|_| ());
+        let changed = result.is_ok();
+        let selected = self.selected.clone();
+        self.finish_edit(ctx, result, "Page size changed", selected);
+        self.fit_pending |= changed;
     }
 
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
@@ -5767,6 +5963,8 @@ impl eframe::App for LayoutCraftApp {
             }
             Some(Action::DocProps) => self.doc_props_open = true,
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
+            Some(Action::Theme(op, ref value)) => self.apply_theme(&ctx, op, value),
+            Some(Action::PageShape(w, h)) => self.set_page_shape(&ctx, w, h),
             Some(Action::Find) => self.open_find(),
             Some(Action::HelpAbout) => self.help_about_open = true,
             Some(Action::HelpMcp) => self.mcp_open = true,
@@ -5861,6 +6059,10 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// `Engine::page_op` `theme_op` with the theme name or variant number.
+    Theme(i32, String),
+    /// Set the shown page's width and height (inches).
+    PageShape(f64, f64),
     Find,
     /// Format the whole text of the selected shapes: `cells` and / or `para` of `Engine::edit` op 13.
     FormatText(serde_json::Value),
