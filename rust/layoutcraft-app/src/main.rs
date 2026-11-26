@@ -1459,6 +1459,96 @@ mod zoom_tests {
     }
 }
 
+/// The place a page tab dragged from `from` goes to when it is let go at `x`: the tab whose horizontal span holds `x`, or
+/// the first / last place when `x` is left / right of the strip. `None` when nothing would move.
+fn tab_drop(spans: &[(f32, f32)], from: usize, x: f32) -> Option<usize> {
+    let to = if x < spans.first()?.0 {
+        0
+    } else if x > spans.last()?.1 {
+        spans.len() - 1
+    } else {
+        spans.iter().position(|(left, right)| x >= *left && x <= *right)?
+    };
+    (to != from).then_some(to)
+}
+
+#[cfg(test)]
+mod tab_tests {
+    use super::tab_drop;
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn a_dragged_tab_goes_where_it_is_let_go() {
+        let spans = [(0.0, 50.0), (60.0, 110.0), (120.0, 170.0)];
+        assert_eq!(tab_drop(&spans, 0, 130.0), Some(2));
+        assert_eq!(tab_drop(&spans, 2, -20.0), Some(0));
+        assert_eq!(tab_drop(&spans, 0, 500.0), Some(2));
+        // on itself, or in the gap between two tabs: nothing moves
+        assert_eq!(tab_drop(&spans, 1, 80.0), None);
+        assert_eq!(tab_drop(&spans, 0, 55.0), None);
+        assert_eq!(tab_drop(&[], 0, 1.0), None);
+    }
+
+    #[test]
+    fn the_move_reorders_the_pages() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "First").unwrap();
+        engine.page_op(1, 0, 0, "").unwrap();
+        let names = |engine: &Engine| serde_json::from_str::<Vec<String>>(&engine.page_names_json().unwrap()).unwrap();
+        let before = names(&engine);
+        engine.page_op(4, 0, 1, "").unwrap();
+        assert_eq!(names(&engine), [before[1].clone(), before[0].clone()]);
+    }
+}
+
+/// The status bar's zoom slider over `percent` of actual size; the new percentage when the user moves it. A zoom outside
+/// the slider's range (a very small fitted page) is left alone.
+fn zoom_slider(ui: &mut egui::Ui, percent: f64) -> Option<u32> {
+    let mut value = percent;
+    let slider = egui::Slider::new(&mut value, 10.0..=800.0).logarithmic(true).show_value(false).clamping(egui::SliderClamping::Edits);
+    let response = ui.add(slider).on_hover_text("Zoom");
+    (response.changed() && (value - percent).abs() >= 0.5).then(|| value.round() as u32)
+}
+
+#[cfg(test)]
+mod zoom_slider_tests {
+    use super::zoom_slider;
+    use eframe::egui::{self, Event, Key, Modifiers};
+
+    /// One frame with the slider; what it asks for.
+    fn frame(ctx: &egui::Context, percent: f64, events: Vec<Event>) -> Option<u32> {
+        let mut asked = None;
+        let output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+            asked = zoom_slider(ui, percent);
+        });
+        // nothing paints here: the texture changes of the frame are not applied, so the output must not be dropped
+        std::mem::forget(output);
+        asked
+    }
+
+    fn press(key: Key) -> Vec<Event> {
+        vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]
+    }
+
+    #[test]
+    fn showing_the_slider_changes_nothing_also_outside_its_range() {
+        for percent in [3.0, 100.0, 1200.0] {
+            let ctx = egui::Context::default();
+            assert_eq!(frame(&ctx, percent, Vec::new()), None);
+            assert_eq!(frame(&ctx, percent, Vec::new()), None);
+        }
+    }
+
+    #[test]
+    fn tab_reaches_the_slider_and_an_arrow_key_zooms_in() {
+        let ctx = egui::Context::default();
+        frame(&ctx, 100.0, Vec::new());
+        frame(&ctx, 100.0, press(Key::Tab));
+        frame(&ctx, 100.0, Vec::new());
+        assert!(frame(&ctx, 100.0, press(Key::ArrowRight)).is_some_and(|percent| percent > 100));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -5459,6 +5549,55 @@ impl LayoutCraftApp {
         });
     }
 
+    /// The page tabs under the drawing: click to show a page, right-click for the page commands, drag to reorder.
+    fn page_tabs(&self, ui: &mut egui::Ui, action: &mut Option<Action>) {
+        let Some(document) = self.engine.document.as_ref() else {
+            return;
+        };
+        let count = document.pages.len();
+        egui::ScrollArea::horizontal().id_salt("page-tabs").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let mut spans = Vec::with_capacity(count);
+                let mut dropped = None;
+                for (at, page) in document.pages.iter().enumerate() {
+                    let tab = ui.add(egui::Button::new(page.name.as_str()).selected(at == self.page_index).sense(egui::Sense::click_and_drag()));
+                    spans.push((tab.rect.left(), tab.rect.right()));
+                    // the menu's commands work on the shown page, so a right click shows the tab's page first
+                    if tab.clicked() || (tab.secondary_clicked() && at != self.page_index) {
+                        *action = Some(Action::Page(at));
+                    }
+                    if tab.drag_stopped_by(egui::PointerButton::Primary) {
+                        dropped = ui.ctx().pointer_latest_pos().map(|pointer| (at, pointer));
+                    }
+                    tab.context_menu(|ui| {
+                        for (name, enabled, command) in [
+                            ("Add a page", true, Action::PageAdd),
+                            ("Duplicate the page", true, Action::PageDuplicate),
+                            ("Rename the page", true, Action::PageRename),
+                            ("Move left", at > 0, Action::PageMove(-1)),
+                            ("Move right", at + 1 < count, Action::PageMove(1)),
+                            ("Delete the page", count > 1, Action::PageDelete),
+                        ] {
+                            if ui.add_enabled(enabled, egui::Button::new(name)).clicked() {
+                                *action = Some(command);
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+                // let go over the strip (not somewhere else in the window)
+                if let Some((from, pointer)) = dropped.filter(|(_, pointer)| ui.max_rect().y_range().contains(pointer.y)) {
+                    if let Some(to) = tab_drop(&spans, from, pointer.x) {
+                        *action = Some(Action::PageReorder(from, to));
+                    }
+                }
+                if ui.button("+").on_hover_text("Add a page").clicked() {
+                    *action = Some(Action::PageAdd);
+                }
+            });
+        });
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -5743,7 +5882,16 @@ impl eframe::App for LayoutCraftApp {
                 ui.separator();
                 ui.label(&self.status);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("zoom {:.0}%", zoom_percent(self.zoom, self.raster_scale)));
+                    if ui.add_enabled(self.texture.is_some(), egui::Button::new("Fit")).on_hover_text("Fit the page to the window (Ctrl+Shift+W)").clicked() {
+                        action = Some(Action::Fit);
+                    }
+                    let percent = zoom_percent(self.zoom, self.raster_scale);
+                    ui.label(format!("zoom {percent:.0}%"));
+                    ui.add_enabled_ui(self.texture.is_some(), |ui| {
+                        if let Some(level) = zoom_slider(ui, percent) {
+                            action = Some(Action::ZoomTo(level));
+                        }
+                    });
                     if self.dirty {
                         ui.colored_label(egui::Color32::from_rgb(255, 196, 0), "modified");
                     }
@@ -5751,6 +5899,12 @@ impl eframe::App for LayoutCraftApp {
             });
             ui.add_space(2.0);
         });
+
+        if !self.full_screen && self.texture.is_some() {
+            egui::Panel::bottom("page-tabs").show(ui, |ui| {
+                self.page_tabs(ui, &mut action);
+            });
+        }
 
         if !self.full_screen {
             egui::Panel::right("inspector")
@@ -7133,6 +7287,7 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::PageDelete) => self.delete_page(&ctx),
             Some(Action::PageRename) => self.open_page_rename(),
             Some(Action::PageMove(direction)) => self.move_page(&ctx, direction),
+            Some(Action::PageReorder(from, to)) => self.run_page_op(&ctx, 4, from, to, "", "Moved page"),
             Some(Action::Reload) => {
                 if self.dirty {
                     self.pending_open = Some(PendingOpen::Reload);
@@ -7176,6 +7331,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Move the page at the first position to the second.
+    PageReorder(usize, usize),
     /// Show the page at this percentage of actual size.
     ZoomTo(u32),
     DeleteGuide,
