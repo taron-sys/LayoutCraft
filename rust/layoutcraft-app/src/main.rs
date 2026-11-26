@@ -2108,6 +2108,10 @@ mod recent_tests {
     }
 }
 
+/// The snap strength a session starts with (screen px), and the strengths the Snap and Attach window offers.
+const SNAP_REACH_PX: f32 = 8.0;
+const SNAP_REACHES: std::ops::RangeInclusive<f32> = 2.0..=30.0;
+
 /// The colour of the marks across equal gaps: a darker orange than the snap guides, readable on white.
 const SPACING_MARK: egui::Color32 = egui::Color32::from_rgb(184, 80, 0);
 
@@ -2944,6 +2948,28 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert_eq!(driver.app.engine.undo_depth(), depth + 1);
         assert_eq!(driver.app.selected, Some(ids[0].clone()));
         assert!(driver.app.extra_selected.is_empty(), "Ctrl+A stayed in the field");
+    }
+
+    /// A shape moved so that its edge stops 14 screen px short of another's is pulled onto it only by a strength that
+    /// reaches that far.
+    #[test]
+    fn the_snap_strength_sets_how_far_an_edge_is_pulled() {
+        let (mut driver, ids) = Driver::new();
+        (driver.app.snap_grid, driver.app.snap_guides, driver.app.snap_shapes) = (false, false, true);
+        driver.app.selected = Some(ids[0].clone());
+        driver.app.snap_open = true;
+        driver.frames(3);
+        assert!(!driver.texts("Snap strength").is_empty(), "the setting is in the Snap and Attach window");
+        let rect = |driver: &Driver, id: &str| LayoutCraftApp::selection_scene_rect(driver.app.scene_shape(id).unwrap());
+        let (moved, other) = (rect(&driver, &ids[0]), rect(&driver, &ids[1]));
+        let short = 14.0 / driver.app.view_scale();
+        let delta = vec2(other.left() - moved.right() - short, 0.0);
+        driver.app.snap_reach_px = 8.0;
+        let weak = driver.app.snapped_move(moved, delta).0;
+        assert!((weak.x - delta.x).abs() < 0.01, "{weak:?} {delta:?}");
+        driver.app.snap_reach_px = 20.0;
+        let strong = driver.app.snapped_move(moved, delta).0;
+        assert!((moved.right() + strong.x - other.left()).abs() < 0.01, "{strong:?} {delta:?}");
     }
 
     #[test]
@@ -3793,6 +3819,8 @@ struct LayoutCraftApp {
     snap_grid: bool,
     snap_shapes: bool,
     snap_guides: bool,
+    /// The snap strength: how near on screen (px) an edge must come to be pulled.
+    snap_reach_px: f32,
     grid_step: f64,
     snap_guide: (Option<f32>, Option<f32>),
     conn_end: Option<ConnEndState>,
@@ -3942,6 +3970,7 @@ impl LayoutCraftApp {
             snap_grid: false,
             snap_shapes: false,
             snap_guides: true,
+            snap_reach_px: SNAP_REACH_PX,
             grid_step: 0.25,
             snap_guide: (None, None),
             conn_end: None,
@@ -4635,6 +4664,11 @@ impl LayoutCraftApp {
             .collect()
     }
 
+    /// How near (page inches) something must come to be pulled: the snap strength, which is a distance on screen.
+    fn snap_threshold(&self) -> f64 {
+        f64::from(self.snap_reach_px) / (DPI * f64::from(self.view_scale().max(0.01)))
+    }
+
     fn snapping_on(&self) -> bool {
         self.snap_grid || self.snap_shapes || self.snap_guides
     }
@@ -4647,7 +4681,7 @@ impl LayoutCraftApp {
         let page_h = self.page_height_in;
         let (xs, ys) = self.snap_targets();
         let box_in = (f64::from(start.min.x) / DPI, page_h - f64::from(start.max.y) / DPI, f64::from(start.max.x) / DPI, page_h - f64::from(start.min.y) / DPI);
-        let threshold = 8.0 / (DPI * f64::from(self.view_scale().max(0.01)));
+        let threshold = self.snap_threshold();
         let grid = if self.snap_grid { self.grid_step } else { 0.0 };
         let raw = (f64::from(delta.x) / DPI, -f64::from(delta.y) / DPI);
         let (mut dx, mut dy, mut gx, mut gy) = snap_move(box_in, raw.0, raw.1, grid, &xs, &ys, threshold);
@@ -4697,7 +4731,7 @@ impl LayoutCraftApp {
             return point;
         }
         let (xs, ys) = self.snap_targets();
-        let threshold = 8.0 / (DPI * f64::from(self.view_scale().max(0.01)));
+        let threshold = self.snap_threshold();
         let grid = if self.snap_grid { self.grid_step } else { 0.0 };
         let page_h = self.page_height_in;
         let x = snap_axis(&[f64::from(point.x) / DPI], &xs, grid, threshold).map_or(point.x, |(d, _)| point.x + (d * DPI) as f32);
@@ -4713,7 +4747,7 @@ impl LayoutCraftApp {
         }
         let page_h = self.page_height_in;
         let (xs, ys) = self.snap_targets();
-        let threshold = 8.0 / (DPI * f64::from(self.view_scale().max(0.01)));
+        let threshold = self.snap_threshold();
         let grid = if self.snap_grid { self.grid_step } else { 0.0 };
         let (fx, fy) = handle.fractions();
         let (mut min, mut max) = (rect.min, rect.max);
@@ -7416,6 +7450,8 @@ impl LayoutCraftApp {
             ui.checkbox(&mut self.snap_grid, "The grid");
             ui.checkbox(&mut self.snap_shapes, "Edges and centres of other shapes");
             ui.checkbox(&mut self.snap_guides, "Ruler guides");
+            ui.add(egui::Slider::new(&mut self.snap_reach_px, SNAP_REACHES).integer().suffix(" px").text("Snap strength"))
+                .on_hover_text("How near on screen an edge must come before it snaps");
             ui.separator();
             ui.checkbox(&mut self.show_grid, "Show the grid");
             ui.horizontal(|ui| {
