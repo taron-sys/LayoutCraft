@@ -1,4 +1,5 @@
 //! Records to drawing: which shape, page, master or style a record belongs to, and at the end the shape trees and the texts.
+use super::glue::{self, Links};
 use super::super::drawing::{Drawing, Master, Page, Picture, Row, Shape, Sheet, Style, TextPiece, MAX_DEPTH};
 use super::records::{block_numbers, block_string, point_formula, shape_data_formula, windows_1252, zero_terminated, Reader, UNIT_STRING};
 use std::collections::{BTreeMap, HashMap};
@@ -47,6 +48,7 @@ const CONNECTION_POINT: u32 = 0x99;
 const TRANSFORM: u32 = 0x9b;
 const TEXT_TRANSFORM: u32 = 0x9c;
 const TRANSFORM_1D: u32 = 0x9d;
+const EVENTS: u32 = 0xa4;
 const FIELD: u32 = 0xa1;
 const SPLINE_START: u32 = 0xa5;
 const SPLINE_KNOT: u32 = 0xa6;
@@ -107,6 +109,7 @@ struct Raw {
     names: BTreeMap<u32, String>,
     shape_data: BTreeMap<u32, Vec<u8>>,
     pending: Vec<PendingCurve>,
+    links: Links,
 }
 
 #[derive(Default)]
@@ -423,7 +426,11 @@ impl Builder {
                     }
                 }
             }
-            TRANSFORM_1D => cells(sheet, &mut r, &["BeginX", "BeginY", "EndX", "EndY"]),
+            TRANSFORM_1D => {
+                cells(sheet, &mut r, &["BeginX", "BeginY", "EndX", "EndY"]);
+                raw.links.transform_1d(body);
+            }
+            EVENTS => raw.links.events(body),
             TEXT_TRANSFORM => cells(sheet, &mut r, &["TxtPinX", "TxtPinY", "TxtWidth", "TxtHeight", "TxtLocPinX", "TxtLocPinY", "TxtAngle"]),
             PAGE_PROPERTIES => cells(sheet, &mut r, &["PageWidth", "PageHeight", "ShdwOffsetX", "ShdwOffsetY", "PageScale", "DrawingScale"]),
             FOREIGN_TYPE => cells(sheet, &mut r, &["ImgOffsetX", "ImgOffsetY", "ImgWidth", "ImgHeight"]),
@@ -605,7 +612,7 @@ impl Builder {
             // Shapes refer to a master by the index of its stream.
             let id = container.key;
             let name = self.master_names.get(&container.key).and_then(|n| self.names.get(n)).cloned();
-            let (sheet, shapes) = tree(container, self.version, &mut drawing);
+            let (sheet, shapes, _) = tree(container, self.version, &mut drawing);
             drawing.masters.push(Master { id, name: name.unwrap_or_default(), sheet, shapes, connects: Vec::new() });
         }
         let pages = std::mem::take(&mut self.pages);
@@ -615,11 +622,12 @@ impl Builder {
             let key = container.key;
             let back_page = container.background_page.filter(|b| known.contains(b));
             let name = self.page_names.get(&key).and_then(|n| self.names.get(n)).cloned();
-            let (sheet, shapes) = tree(container, self.version, &mut drawing);
+            let (sheet, mut shapes, links) = tree(container, self.version, &mut drawing);
             // The file also keeps stream entries without a drawing page behind them.
             if sheet.cell("PageWidth").is_none() && shapes.is_empty() {
                 continue;
             }
+            let connects = glue::connect(&mut shapes, &links);
             drawing.pages.push(Page {
                 id: key,
                 name: name.unwrap_or_default(),
@@ -627,7 +635,7 @@ impl Builder {
                 back_page,
                 sheet,
                 shapes,
-                connects: Vec::new(),
+                connects,
             });
         }
         let masters: HashMap<u32, HashMap<u32, &Shape>> = drawing
@@ -1092,13 +1100,15 @@ fn finish_shape(raw: &mut Raw, version: u8, drawing: &mut Drawing) {
 }
 
 /// A container's page sheet and its shapes nested into their groups, bottom shape first.
-fn tree(mut container: Container, version: u8, drawing: &mut Drawing) -> (Sheet, Vec<Shape>) {
+fn tree(mut container: Container, version: u8, drawing: &mut Drawing) -> (Sheet, Vec<Shape>, HashMap<u32, Links>) {
     finish_shape(&mut container.sheet, version, drawing);
     let mut by_id: BTreeMap<u32, Raw> = BTreeMap::new();
     let mut ids = Vec::new();
+    let mut links = HashMap::new();
     for mut raw in std::mem::take(&mut container.shapes) {
         finish_shape(&mut raw, version, drawing);
         let id = raw.shape.id;
+        links.insert(id, std::mem::take(&mut raw.links));
         if by_id.insert(id, raw).is_none() {
             ids.push(id);
         }
@@ -1140,5 +1150,5 @@ fn tree(mut container: Container, version: u8, drawing: &mut Drawing) -> (Sheet,
     let mut sheet = container.sheet.shape.sheet;
     // A page sheet carries a transform record too; it means nothing there.
     sheet.cells.retain(|cell| !matches!(cell.name.as_str(), "PinX" | "PinY" | "Width" | "Height" | "LocPinX" | "LocPinY" | "Angle" | "FlipX" | "FlipY"));
-    (sheet, shapes)
+    (sheet, shapes, links)
 }

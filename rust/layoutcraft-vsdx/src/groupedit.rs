@@ -409,7 +409,7 @@ pub fn add_connector_between(package: &Package, page_index: usize, from: &EndTar
 /// The glue formula of a connector end: the connection point's position, or `_WALKGLUE` when the
 /// connector is glued to the whole shape (Visio then picks the side; the master defines
 /// `WalkPreference`). `begin_end` is true for the begin end.
-fn glue_formula(end_of: &(&str, Option<usize>), begin_end: bool) -> String {
+pub(crate) fn glue_formula(end_of: &(&str, Option<usize>), begin_end: bool) -> String {
     match end_of.1 {
         Some(n) => format!("PAR(PNT(Sheet.{0}!Connections.X{1},Sheet.{0}!Connections.Y{1}))", end_of.0, n),
         None if begin_end => "_WALKGLUE(BegTrigger,EndTrigger,WalkPreference)".to_string(),
