@@ -4,4 +4,5 @@
 // The module is shared with the engine test target by path, and each target uses a part of it.
 #[allow(dead_code)]
 mod hostile;
+mod legacy;
 mod regress;

@@ -218,7 +218,8 @@ impl Server {
                     }
                     _ => {
                         self.engine.open(bytes)?;
-                        Ok(format!("opened {shown}: {} page(s)", self.engine.page_count().unwrap_or(0)))
+                        let converted = self.engine.conversion.as_ref().map_or_else(String::new, |c| format!(". {}", c.message()));
+                        Ok(format!("opened {shown}: {} page(s){converted}", self.engine.page_count().unwrap_or(0)))
                     }
                 }
             }
@@ -539,7 +540,11 @@ impl Server {
                 };
                 let st: Value = serde_json::from_str(&st).map_err(|e| e.to_string())?;
                 let masters: Vec<Value> = st["masters"].as_array().map_or_else(Vec::new, |l| l.iter().map(|m| json!({ "id": m["id"], "name": m["name"] })).collect());
-                Ok(pretty(&json!({ "stencil": st["index"], "masters": masters })))
+                let mut answer = json!({ "stencil": st["index"], "masters": masters });
+                if st["converted"].is_string() {
+                    answer["converted"] = st["converted"].clone();
+                }
+                Ok(pretty(&answer))
             }
             "drop_master" => {
                 let p = self.page(a)?;

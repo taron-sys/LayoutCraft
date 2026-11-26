@@ -27,6 +27,7 @@ is intended to be read before changing the importer or writer.
 21. [Fresh VSDX writer](21-fresh-writer.md)
 42. [Removal of the JavaScript editor](42-javascript-removal.md) (what went, what stays, how to run the tools now)
 44. [Document model: in-memory source of truth, undo journal, recalculation, save (design)](44-document-model.md)
+47. [Old Visio formats: `.vsd` and `.vdx`](47-legacy-formats.md)
 
 ## Test fixtures and distribution
 
@@ -60,8 +61,8 @@ server for the repository root on 127.0.0.1 (see [42](42-javascript-removal.md))
 - The editor is the Rust core (`rust/`) behind two hosts: the native egui desktop app and a thin browser shell (`web/`) over the core compiled to WebAssembly.
   The rest of this list was written for the JavaScript editor that has since been removed ([42](42-javascript-removal.md)); the Rust core carries the import and the save, but check the code before relying on a detail.
 - `.vsdx`, `.vstx`, `.vsdm` and `.vstm` files are imported by reading the OPC
-  package directly in the Rust core. `.vdx` is imported through the same page
-  builder; `.vsd` is not supported.
+  package directly in the Rust core. `.vsd` (versions 6 and 11) and `.vdx` are
+  converted to a `.vsdx` package first ([47](47-legacy-formats.md)).
 - Opening a VSDX retains the original package. Saving can **patch** that
   package, preserving unknown parts, masters, images and macros.
 - New shapes, connectors and pages created in LayoutCraft are written as inline

@@ -1029,7 +1029,7 @@ mod file_dialog {
 
     fn run(save: bool, title: &str, default_name: Option<&str>) -> Option<PathBuf> {
         let filter: Vec<u16> =
-            "Visio, Excalidraw and draw.io files (*.vsdx;*.vstx;*.vsdm;*.vstm;*.excalidraw;*.drawio) *.vsdx;*.vstx;*.vsdm;*.vstm;*.excalidraw;*.drawio All files (*.*) *.*  "
+            "Visio, Excalidraw and draw.io files (*.vsdx;*.vstx;*.vsdm;*.vstm;*.vsd;*.vss;*.vst;*.vdx;*.vsx;*.vtx;*.excalidraw;*.drawio) *.vsdx;*.vstx;*.vsdm;*.vstm;*.vsd;*.vss;*.vst;*.vdx;*.vsx;*.vtx;*.excalidraw;*.drawio All files (*.*) *.*  "
                 .encode_utf16()
                 .collect();
         let title = wide(title);
@@ -1146,7 +1146,7 @@ mod file_dialog {
     }
 
     pub fn open_stencil() -> Option<PathBuf> {
-        run_ext(false, "Open stencil", None, "Visio stencils", "vssx")
+        run_ext(false, "Open stencil", None, "Visio stencils", "vssx;*.vss;*.vsx")
     }
 
     pub fn save_csv(default_name: &str) -> Option<PathBuf> {
@@ -1168,7 +1168,7 @@ mod file_dialog {
     use rfd::FileDialog;
     use std::path::PathBuf;
 
-    const DRAWINGS: &[&str] = &["vsdx", "vstx", "vsdm", "vstm", "excalidraw", "drawio"];
+    const DRAWINGS: &[&str] = &["vsdx", "vstx", "vsdm", "vstm", "vsd", "vss", "vst", "vdx", "vsx", "vtx", "excalidraw", "drawio"];
 
     pub fn open() -> Option<PathBuf> {
         FileDialog::new()
@@ -1191,7 +1191,19 @@ mod file_dialog {
         FileDialog::new().set_title("Export as").set_file_name(default_name).add_filter(label, &[ext]).save_file()
     }
     pub fn open_stencil() -> Option<PathBuf> {
-        FileDialog::new().set_title("Open stencil").add_filter("Visio stencils", &["vssx"]).pick_file()
+        FileDialog::new().set_title("Open stencil").add_filter("Visio stencils", &["vssx", "vss", "vsx"]).pick_file()
+    }
+}
+
+/// `path` with the extension `.vsdx` in place of an old Visio format's, for saving; other names are returned unchanged.
+fn vsdx_name(path: &Path) -> PathBuf {
+    let old = path.extension().and_then(|extension| extension.to_str()).is_some_and(|extension| {
+        ["vsd", "vss", "vst", "vdx", "vsx", "vtx"].iter().any(|old| extension.eq_ignore_ascii_case(old))
+    });
+    if old {
+        path.with_extension("vsdx")
+    } else {
+        path.to_path_buf()
     }
 }
 
@@ -1710,7 +1722,7 @@ impl LayoutCraftApp {
             mcp_message: String::new(),
             ribbon_textures: BTreeMap::new(),
             shift_down: false,
-            status: "Open a .vsdx/.vstx file or drop one on the window.".to_string(),
+            status: "Open a Visio drawing (.vsdx, or the older .vsd and .vdx) or drop one on the window.".to_string(),
         };
         if let Some(path) = initial {
             app.load(&cc.egui_ctx, Path::new(&path));
@@ -1762,6 +1774,8 @@ impl LayoutCraftApp {
             .map_or(0, |document| document.pages.len());
         self.status = if is_scene {
             format!("Imported {} as a new drawing; use Save as to keep it", path.display())
+        } else if let Some(conversion) = &self.engine.conversion {
+            format!("{} - {pages} page(s). {}", path.display(), conversion.message())
         } else {
             format!("{} - {pages} page(s)", path.display())
         };
@@ -3005,9 +3019,11 @@ impl LayoutCraftApp {
             .file_stem()
             .and_then(|value| value.to_str())
             .unwrap_or("drawing");
+        // A drawing converted from an old format is a .vsdx package now.
         let extension = path
             .extension()
             .and_then(|value| value.to_str())
+            .filter(|_| self.engine.conversion.is_none())
             .unwrap_or("vsdx");
         let output = path.with_file_name(format!("{stem}-edited.{extension}"));
         match fs::write(&output, bytes.clone()) {
@@ -3114,6 +3130,8 @@ impl LayoutCraftApp {
         let default_name = self
             .loaded_path
             .as_ref()
+            .map(|path| vsdx_name(path))
+            .as_ref()
             .and_then(|path| path.file_name())
             .and_then(|name| name.to_str())
             .unwrap_or("drawing.vsdx")
@@ -3121,6 +3139,8 @@ impl LayoutCraftApp {
         let Some(path) = file_dialog::save_as(&default_name) else {
             return;
         };
+        // What is written is a .vsdx package: never under an old format's name, which could be the file that was opened.
+        let path = vsdx_name(&path);
         match fs::write(&path, bytes) {
             Ok(()) => {
                 self.loaded_path = Some(path.clone());
@@ -3842,7 +3862,12 @@ impl LayoutCraftApp {
             return;
         };
         let name = path.file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "Stencil".to_string());
-        let result = fs::read(&path).map_err(|e| e.to_string()).and_then(|bytes| self.engine.stencil_open(bytes)).and_then(|json| self.register_stencil(&name, &json));
+        let mut converted = String::new();
+        let result = fs::read(&path).map_err(|e| e.to_string()).and_then(|bytes| self.engine.stencil_open(bytes)).and_then(|json| {
+            let answer: Option<serde_json::Value> = serde_json::from_str(&json).ok();
+            converted = answer.and_then(|answer| answer["converted"].as_str().map(str::to_string)).unwrap_or_default();
+            self.register_stencil(&name, &json)
+        });
         if result.is_ok() {
             if let Some(entry) = self.stencils.last_mut() {
                 entry.path = Some(path.clone());
@@ -3850,7 +3875,7 @@ impl LayoutCraftApp {
             self.remember_stencils();
         }
         self.status = match result {
-            Ok(()) => format!("Opened the stencil {name}: click a shape, then click on the page to place it."),
+            Ok(()) => format!("Opened the stencil {name}: click a shape, then click on the page to place it. {converted}"),
             Err(error) => format!("Could not open {}: {error}", path.display()),
         };
     }

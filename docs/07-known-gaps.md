@@ -46,7 +46,7 @@ the output in Visio after writer changes.
 | Gap | Impact | Notes |
 | --- | --- | --- |
 | No full formula evaluator | Some inherited geometry/colour may fall back to cached values | cached `V` is usually enough |
-| Pictures | PNG/JPEG/GIF/BMP/WebP/SVG preview; crop, rotation/flip, transparency and truecolour brightness/contrast/gamma; grouped pictures; media inherited from masters resolves through the master relationship table; one shared media record per part | EMF vector pictures convert to SVG and render (Rust only); EMF bitmaps/EMF+/arcs, WMF and TIFF bytes are preserved but shown as placeholders; VDX images are not resolved; Visio's indexed-colour adjustment quirk is mirrored |
+| Pictures | PNG/JPEG/GIF/BMP/WebP/SVG preview; crop, rotation/flip, transparency and truecolour brightness/contrast/gamma; grouped pictures; media inherited from masters resolves through the master relationship table; one shared media record per part | EMF vector pictures convert to SVG and render (Rust only); EMF bitmaps/EMF+/arcs, WMF and TIFF bytes are preserved but shown as placeholders; Visio's indexed-colour adjustment quirk is mirrored |
 | No OLE/ink | Embedded objects and ink are absent | Patch mode preserves untouched package bytes; fresh rebuild cannot |
 | Rich text runs/fields | Imported, rendered, edited and saved: per-run font/size/style/colour, paragraph alignment/bullets, Page/PageCount/FileName/Date and Shape Data fields, run-level inspector, field insertion/formula editing, autosize and shape hyperlinks | Text-level hyperlink runs, some field formats and autosize reflow in the editor are not modelled |
 | Spline/NURBS/arc/infinite geometry | Imported and rendered: `NURBSTo` (degree, knot values, weights, `xType`/`yType`), periodic `SplineStart` rows, `PolylineTo` interior vertices, `ArcTo` bow, `EllipticalArcTo` and `RelEllipticalArcTo` ellipse reconstruction, relative Bézier rows and `InfiniteLine`. Zero-length `MoveTo` rows continue the current contour (Visio stencils use them to split outlines), and fills use Visio's even-odd rule so keyhole contours (electrical resistor bodies) keep their holes | Non-uniform `SplineStart` knot layouts are approximated; curves are sampled polylines |
@@ -60,8 +60,7 @@ the output in Visio after writer changes.
 | Fill/line gradients and effects | Master/part `FillGradient` and `LineGradient` stops, opacity, angle and direction (`FillGradientDir`: 0 linear, 1-7 radial, 8-12 rectangular, 13 path) import into `ShapePart.fillGradient`/`stroke_gradient` and render as SVG linear/radial gradients. Stops without an explicit colour inherit from the matching row of the FillStyle/LineStyle gradient section (Visio's network and 3-D stencils keep colours on the style). `LineColorTrans`/`FillForegndTrans` drive stroke/fill opacity, so ImageNode master backgrounds stay invisible. `FillPattern` 2-24 render as two-colour SVG pattern tiles. Outer/oblique `ShapeShdw*` shadows, explicit `Glow*`, `SoftEdgesSize` and `Reflection*` effects import and render; top/bottom bevel types 1-12 render as a clipped gradient ring. Theme matrices use linear-light DrawingML tint/shade. | Rectangular gradients are approximated by a linear fade along the preset direction; exact 3-D lighting/material and RotationX/Y/Z, inner-shadow page-default nuances (this Visio build renders it as an offset shadow), gradient-angle edge cases |
 | Theme/quick-style subset | Base colours, active variation palettes, quick-style colour indices, the theme's `fmtScheme` fill/line/effect style lists, quick-style matrices 1-6 and variant matrices 100-103, line width/dash and effect-matrix outer shadows, plus five quick-style presets; theme presets/UI apply concrete colours | Theme XML/index cells are not rewritten; pattern fills and bevel/3-D effects are not modelled |
 | Document default style | `DocumentSettings` Fill/Line/Text defaults and role-aware bare-`THEMEVAL()`/`Themed` resolution are applied; unstyled shapes now render white fill, dark line/text | Quick-style matrices that theme a default cell to a variation colour beyond the supported indices |
-| VDX master support limited | `.vdx` may lose master-derived styling | Best-effort; fresh rebuild is possible |
-| `.vsd` binary | Unsupported | Out of scope unless a separate binary parser is added |
+| Old formats | `.vsd` (versions 6 and 11) and `.vdx` are converted; binary formulas and connector glue are lost, version 5 is refused | See [47](47-legacy-formats.md) |
 
 ## 3. Patch-save limitations
 
@@ -142,7 +141,7 @@ available.
 - Pictures can be inserted, replaced, cropped, adjusted and grouped. There is no
   media manager or garbage collection: replacing an image leaves the old record
   in `doc.media` (undo may need it) and the old package part on a patch save.
-  EMF/WMF/TIFF are not previewed; VDX images are not resolved; OLE/ink are not
+  EMF/WMF/TIFF are not previewed; OLE/ink are not
   supported. Inserted WebP/SVG pictures are converted to PNG. Copy/paste carries
   picture bytes, including into a new document; editor groups are still
   flattened on save.
@@ -258,7 +257,6 @@ available.
 
 ### D6 — Out of scope unless explicitly approved
 
-- `.vsd` binary parser.
 - Full Visio formula VM port.
 - Full Visio object/automation model.
 - 3-D rendering beyond the current bevel approximation.

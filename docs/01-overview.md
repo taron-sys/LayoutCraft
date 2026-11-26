@@ -55,8 +55,8 @@ Supported input:
 | `.vstx` | Same package format as `.vsdx` |
 | `.vsdm` | Same package format; macros are not interpreted |
 | `.vstm` | Same package format; macros are not interpreted |
-| `.vdx` | Visio 2003 XML, read through the same page builder |
-| `.vsd` | **Not supported** — legacy binary format |
+| `.vdx`, `.vsx`, `.vtx` | Visio 2003 XML, converted to a new `.vsdx` package ([47](47-legacy-formats.md)) |
+| `.vsd`, `.vss`, `.vst` | Binary format, file versions 6 and 11 (Visio 2000-2010), converted to a new `.vsdx` package; version 5 and older are refused ([47](47-legacy-formats.md)) |
 
 The importer resolves masters, nested master bodies, style sheets, theme
 colours, quick styles, geometry rows (including NURBS, splines, elliptical and

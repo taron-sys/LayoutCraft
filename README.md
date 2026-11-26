@@ -46,6 +46,8 @@ The builds are not code-signed, so your system will warn you:
 
 - Open: `.vsdx`, `.vstx`, `.vsdm`, `.vstm`, draw.io (`.drawio`), Excalidraw (`.excalidraw`). Stencils (`.vssx`) open in
   the Shapes pane.
+- The older `.vsd` / `.vss` / `.vst` (Visio 2000-2010) and `.vdx` / `.vsx` / `.vtx` files are converted to a new drawing when
+  opened (desktop app and MCP server); the app says what could not be carried over ([docs/47](docs/47-legacy-formats.md)).
 - Save: `.vsdx`. The writer patches the original package, so parts it does not edit are kept as they were.
 - Export from the desktop app (File > Export): SVG, PDF (all pages), DXF, draw.io (all pages), Excalidraw, and a single
   HTML web page with a tab per page. The browser shell also exports PNG (and SVG/PNG per page in a ZIP) and can copy the

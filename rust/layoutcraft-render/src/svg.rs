@@ -384,7 +384,9 @@ fn render_shape(out: &mut String, shape: &SceneShape, index: usize) {
         // The frame only closes the corners of geometry that runs into them: a diamond (a Lucidchart decision) has no
         // square corner for the clip to cut, and Visio draws no box around it.
         let reaches_corner = shape.parts.iter().any(|part| path_reaches_box_corner(&part.d, shape.w, shape.h));
-        if let (true, Some((frame_stroke, frame_opacity, frame_width, frame_dash))) = (rounded && reaches_corner, frame) {
+        // Lines are no box either, though their ends sit on the corners of theirs: a slanted line, a dimension line's ticks.
+        let has_area = shape.parts.iter().any(|part| path_encloses_area(&part.d));
+        if let (true, Some((frame_stroke, frame_opacity, frame_width, frame_dash))) = (rounded && reaches_corner && has_area, frame) {
             // The geometry is square; the clip rounds the fills and trims the
             // straight border, and this rounded outline closes the corners.
             out.push_str(&format!(
@@ -2173,6 +2175,19 @@ fn round_polygon(d: &str, radius: f64) -> String {
     }
     out.push('Z');
     out
+}
+
+/// Whether the path can bound a surface: it is closed (by `Z` or by ending where it began) and extends in both directions.
+fn path_encloses_area(d: &str) -> bool {
+    let numbers: Vec<f64> = d
+        .split(|c: char| !(c.is_ascii_digit() || c == '.' || c == '-'))
+        .filter(|t| !t.is_empty())
+        .filter_map(|t| t.parse().ok())
+        .collect();
+    let points: Vec<&[f64]> = numbers.chunks_exact(2).collect();
+    let (Some(first), Some(last)) = (points.first(), points.last()) else { return false };
+    let closed = d.contains(['Z', 'z']) || ((first[0] - last[0]).abs() < 0.5 && (first[1] - last[1]).abs() < 0.5);
+    closed && (0..2).all(|axis| points.iter().any(|point| (point[axis] - first[axis]).abs() >= 0.5))
 }
 
 /// True when the path is a single axis-aligned rectangle that covers the whole `w` x `h` box.

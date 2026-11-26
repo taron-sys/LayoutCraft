@@ -42,6 +42,7 @@ pub mod shapename;
 pub mod hyperlinks;
 pub mod router;
 pub mod import;
+pub mod legacy;
 mod masterbody;
 mod media;
 pub mod shapes;
