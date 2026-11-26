@@ -1948,6 +1948,53 @@ mod full_screen_page_tests {
     }
 }
 
+/// How many recently opened drawings are remembered.
+const RECENT_LIMIT: usize = 8;
+
+/// `%APPDATA%\LayoutCraft\recent.txt` (one path per line, newest first), beside the list of opened stencils.
+fn recent_file() -> Option<std::path::PathBuf> {
+    stencil_memory_file().map(|file| file.with_file_name("recent.txt"))
+}
+
+fn read_recent(file: &Path) -> Vec<std::path::PathBuf> {
+    fs::read_to_string(file).unwrap_or_default().lines().filter(|line| !line.trim().is_empty()).take(RECENT_LIMIT).map(std::path::PathBuf::from).collect()
+}
+
+/// Put `opened` at the top of the list kept in `file`, once.
+fn remember_recent(file: &Path, opened: &Path) -> std::io::Result<()> {
+    let mut list = read_recent(file);
+    list.retain(|path| path != opened);
+    list.insert(0, opened.to_path_buf());
+    list.truncate(RECENT_LIMIT);
+    if let Some(folder) = file.parent() {
+        fs::create_dir_all(folder)?;
+    }
+    fs::write(file, list.iter().map(|path| format!("{}\n", path.display())).collect::<String>())
+}
+
+#[cfg(test)]
+mod recent_tests {
+    use super::{read_recent, remember_recent, RECENT_LIMIT};
+    use std::path::PathBuf;
+
+    #[test]
+    fn the_newest_is_first_listed_once_and_the_list_stays_short() {
+        let folder = std::env::temp_dir().join(format!("layoutcraft-recent-{}", std::process::id()));
+        let file = folder.join("recent.txt");
+        assert!(read_recent(&file).is_empty());
+        for number in 0..RECENT_LIMIT + 3 {
+            remember_recent(&file, &PathBuf::from(format!("drawing {number}.vsdx"))).unwrap();
+        }
+        let again = PathBuf::from("drawing 5.vsdx");
+        remember_recent(&file, &again).unwrap();
+        let list = read_recent(&file);
+        assert_eq!(list.len(), RECENT_LIMIT);
+        assert_eq!(list[0], again);
+        assert_eq!(list.iter().filter(|path| **path == again).count(), 1);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -2961,6 +3008,10 @@ impl LayoutCraftApp {
         self.dirty = is_scene;
         self.pending_open = None;
         self.build_page(ctx, true);
+        // a list that cannot be written only means the drawing is not offered under Recent
+        if let Some(file) = recent_file() {
+            let _ = remember_recent(&file, path);
+        }
         let pages = self
             .engine
             .document
@@ -4691,6 +4742,24 @@ impl LayoutCraftApp {
         if id == "paletteSel" {
             self.ribbon_palette(ui);
             return;
+        }
+        // the recently opened drawings stand beside Open
+        if id == "file" {
+            ui.menu_button("Recent \u{25be}", |ui| {
+                let list = recent_file().map(|file| read_recent(&file)).unwrap_or_default();
+                if list.is_empty() {
+                    ui.label("No drawings opened yet.");
+                }
+                for path in list {
+                    let name = path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
+                    if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
+                        *action = Some(Action::OpenRecent(path));
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Drawings opened lately");
         }
         if id == "zl" {
             self.ribbon_zoom(ui, action);
@@ -7849,6 +7918,15 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
             Some(Action::Hyperlink) => self.open_links(),
             Some(Action::Layers) => self.layers_open = !self.layers_open,
+            // as a dropped file: unsaved changes are asked about first
+            Some(Action::OpenRecent(ref path)) => {
+                self.path_input = path.display().to_string();
+                if self.dirty {
+                    self.pending_open = Some(PendingOpen::Load(self.path_input.clone()));
+                } else {
+                    self.load(&ctx, path);
+                }
+            }
             Some(Action::ShapeFormulas) => self.sheet_pane = if self.sheet_pane.is_some() { None } else { Some(SheetPane::default()) },
             Some(Action::DeleteGuide) => self.delete_selected_guide(&ctx),
             Some(Action::SizeField(ref id, field, value, per_inch)) => self.set_size_field(&ctx, id, field, value, per_inch),
@@ -7958,6 +8036,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Open a drawing of the Recent menu.
+    OpenRecent(std::path::PathBuf),
     /// Show or hide the Shape Formulas window.
     ShapeFormulas,
     /// Reverse the ends of the selected connectors.
