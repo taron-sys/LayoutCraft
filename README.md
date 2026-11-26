@@ -14,9 +14,8 @@ For Windows, macOS and Linux.
 
 </div>
 
-<img width="2353" height="1629" alt="LayoutCraft on Linux with a block diagram open" src="https://github.com/user-attachments/assets/76de3f97-f425-4452-a96b-aa1c822fec30" />
-
-*LayoutCraft 0.1.0-rc.2 on Linux.*
+<img width="2806" height="1664" alt="image" src="https://github.com/user-attachments/assets/c9f184f0-7ced-463e-9dd9-f1d32c9df281" />
+*Example for stencil fidelity on LayoutCraft 0.1.0-rc.4*
 
 > **Early preview.** LayoutCraft is young. Some drawings will not look or behave exactly as they did in the program that made
 > them, so keep a copy of important files. See [known gaps](docs/07-known-gaps.md).
