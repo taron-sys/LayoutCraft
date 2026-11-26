@@ -1741,6 +1741,9 @@ enum EditKey {
 /// Font size keys: Ctrl+Shift with the `>` / `<` keys, which the toolkit reports as the period and comma keys.
 const SIZE_KEYS: [(egui::Key, i8); 2] = [(egui::Key::Period, 1), (egui::Key::Comma, -1)];
 
+/// The font sizes, in points, that can be typed into the ribbon.
+const FONT_SIZES: std::ops::RangeInclusive<f64> = 1.0..=1000.0;
+
 /// The font size in points one step from the model's size in px (96 per inch; 12 pt when the shape states none).
 fn stepped_font_size(px: Option<f64>, delta: f64) -> f64 {
     let points = px.map_or(12.0, |px| (px * 72.0 / 96.0 * 10.0).round() / 10.0);
@@ -2520,6 +2523,41 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         driver.key(Key::Escape, Modifiers::NONE);
         assert!(driver.app.zoom_draft.is_none() && driver.app.selected == Some(ids[0].clone()));
         assert!(driver.app.doc_shape(&ids[0]).is_some_and(|shape| !shape.label.contains("250")));
+    }
+
+    #[test]
+    fn a_font_size_can_be_typed_on_the_ribbon() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        let size = |driver: &Driver| driver.app.doc_shape(&ids[0]).and_then(|shape| shape.font_size).map(|px| (px * 72.0 / 96.0).round());
+        let enter = |driver: &mut Driver, typed: &str, end: Key| {
+            let shown = size(driver).unwrap_or(12.0).to_string();
+            // in a window this narrow the font controls are in the drop-down of their group
+            if driver.texts(" pt").is_empty() {
+                let group = *driver.texts("Font \u{25be}").first().expect("the Font group");
+                driver.click(group.center(), Modifiers::NONE);
+                driver.frames(2);
+            }
+            let unit = *driver.texts(" pt").first().expect("the size field");
+            let field = *driver.texts(&shown).iter().find(|number| (number.center().y - unit.center().y).abs() < 2.0).unwrap_or_else(|| panic!("the field does not show {shown}"));
+            driver.click(field.center(), Modifiers::NONE);
+            driver.frames(2);
+            driver.write(typed);
+            driver.key(end, Modifiers::NONE);
+            driver.frames(2);
+        };
+        enter(&mut driver, "24", Key::Enter);
+        assert_eq!(size(&driver), Some(24.0), "{}", driver.app.status);
+        // Esc leaves the size, the selection and the text alone
+        enter(&mut driver, "48", Key::Escape);
+        assert_eq!(size(&driver), Some(24.0), "{}", driver.app.status);
+        assert_eq!(driver.app.selected, Some(ids[0].clone()));
+        assert!(driver.app.text_editor.is_none() && driver.app.doc_shape(&ids[0]).is_some_and(|shape| !shape.label.contains("48")));
+        // a size that cannot be set is refused, and said so
+        enter(&mut driver, "0", Key::Enter);
+        assert_eq!(size(&driver), Some(24.0));
+        assert!(driver.app.status.contains("font size"), "{}", driver.app.status);
     }
 
     #[test]
@@ -5532,11 +5570,26 @@ impl LayoutCraftApp {
                 // the model keeps the size in px (96 per inch); the file and the engine speak points
                 let px = primary.as_ref().and_then(|shape| shape.font_size);
                 let points = px.map_or(12.0, |px| (px * 72.0 / 96.0 * 10.0).round() / 10.0);
-                for (label, delta) in [("A-", -1.0), ("A+", 1.0)] {
+                let step = |ui: &mut egui::Ui, label: &str, delta: f64, action: &mut Option<Action>| {
                     if ui.add_enabled(enabled, egui::Button::new(label)).on_hover_text(format!("Font size {points} pt")).clicked() {
                         *action = Some(Action::StyleSelected(serde_json::json!({ "fontPt": stepped_font_size(px, delta) }).to_string()));
                     }
+                };
+                step(ui, "A-", -1.0, action);
+                // typed only (no dragging, which would make an edit at every pointer move); Enter applies, Esc does not
+                let mut typed = points;
+                let field = ui
+                    .add_enabled(enabled, egui::DragValue::new(&mut typed).speed(0.0).custom_formatter(|points, _| points.to_string()).suffix(" pt").update_while_editing(false))
+                    .on_hover_text("Font size: click and type");
+                ui.ctx().accesskit_node_builder(field.id, |node| node.set_label("Font size in points"));
+                if field.changed() && typed != points {
+                    if FONT_SIZES.contains(&typed) {
+                        *action = Some(Action::StyleSelected(serde_json::json!({ "fontPt": typed }).to_string()));
+                    } else {
+                        *action = Some(Action::Say(format!("Type a font size from {} to {} points.", FONT_SIZES.start(), FONT_SIZES.end())));
+                    }
                 }
+                step(ui, "A+", 1.0, action);
             }
             _ => {
                 let (label, key) = if id == "p:fillColor" { ("Fill ▾", "fill") } else { ("Line ▾", "line") };
@@ -8682,6 +8735,7 @@ impl eframe::App for LayoutCraftApp {
                 self.pan = egui::Vec2::ZERO;
                 self.fit_pending = false;
             }
+            Some(Action::Say(ref message)) => self.status = message.clone(),
             Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
                 self.zoom = zoom_for_percent(f64::from(percent), self.raster_scale);
@@ -8723,6 +8777,8 @@ enum Action {
     /// Show the page at this percentage of actual size.
     ZoomTo(u32),
     ZoomDialog,
+    /// Put a message in the status bar.
+    Say(String),
     DeleteGuide,
     /// Make the page as wide as the view.
     FitWidth,

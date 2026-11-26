@@ -152,7 +152,7 @@ these are row counts, not a count of every Visio button.
 | Clipboard: Copy | S4 | copy | present | present | | P0 |
 | Format Painter (Ctrl+Shift+P) | S1 | painter | missing | present | Engine copy format exists for browser | P1 |
 | Font: family | S1 (Font group named) | p:fontFamily | present | present | Desktop: font list with search | P1 |
-| Font: size and Increase/Decrease size (Ctrl+Shift+> and <) | S1 | p:fontSize | partial | present | Desktop: smaller / larger buttons and Ctrl+Shift+> / < (US key positions); no typed size | P1 |
+| Font: size and Increase/Decrease size (Ctrl+Shift+> and <) | S1 | p:fontSize | present | present | Desktop: smaller / larger buttons, a typed size, and Ctrl+Shift+> / < (US key positions) | P1 |
 | Font: Bold / Italic / Underline | S1 | p:bold | present | present | Desktop: buttons and Ctrl+B / I / U | P1 |
 | Font: strikethrough, caps, sub/superscript, font colour | S1 for caps and sub/superscript; others unverified | p:strike | partial | partial | Desktop: strikethrough of the whole text | P2 |
 | Paragraph: align left / centre / right / justify | S1 | p:alignL | present | present | Desktop: the whole text of the selected shapes | P1 |
