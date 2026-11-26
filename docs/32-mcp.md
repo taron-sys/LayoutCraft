@@ -13,12 +13,16 @@ layoutcraft-mcp --root <folder>
 
 Build it with `cargo build --release -p layoutcraft-mcp` in `rust/` (the program is `rust/target/release/layoutcraft-mcp`, `.exe` on Windows); the portable zip of the app ships it next to `layoutcraft-app`.
 Files are read and written only below `<folder>` (default: the current directory); a path outside it is refused. The drawing lives in memory until `save`.
+An assistant connected this way can change files below that folder, so choose it with care.
 
 Client configuration (Claude Code `.mcp.json`, Claude Desktop `claude_desktop_config.json`):
 
 ```json
 { "mcpServers": { "layoutcraft": { "command": "C:/path/to/LayoutCraft/layoutcraft-mcp.exe", "args": ["--root", "C:/path/to/my/drawings"] } } }
 ```
+
+The program is started by the client, not by the app. On Linux and macOS use the same configuration with the path of your
+`layoutcraft-mcp` (no `.exe`). The desktop app's Help > AI assistant (MCP) window writes the configuration for you.
 
 For Claude Code: `claude mcp add layoutcraft -- C:/path/to/LayoutCraft/layoutcraft-mcp.exe --root C:/path/to/my/drawings`.
 

@@ -6,6 +6,12 @@ This folder documents the current state of LayoutCraft from the VSDX import,
 round-trip save, authored-object save, fresh-package and feature-sprint work. It
 is intended to be read before changing the importer or writer.
 
+## Using and building
+
+- [48 Features and file formats](48-features.md)
+- [49 Building and testing](49-building.md)
+- [32 AI assistant (MCP server)](32-mcp.md)
+
 ## Start here
 
 1. [Overview and status](01-overview.md)
