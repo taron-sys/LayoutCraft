@@ -2083,6 +2083,146 @@ mod page_picture_tests {
     }
 }
 
+/// The whole app, driven without a window: real frames, key presses and pointer drags. Nothing here opens or writes the
+/// user's settings (no file is loaded and the stencil panel does not open itself).
+#[cfg(test)]
+mod app_frame_tests {
+    use super::{DataPane, Find, LayoutCraftApp, SheetPane};
+    use eframe::egui::{self, pos2, vec2, Event, Key, Modifiers, PointerButton};
+    use eframe::App as _;
+
+    struct Driver {
+        ctx: egui::Context,
+        app: LayoutCraftApp,
+        frame: eframe::Frame,
+        time: f64,
+        modifiers: Modifiers,
+    }
+
+    impl Driver {
+        /// A new drawing with two rectangles, shown in a 1400 x 900 window.
+        fn new() -> (Self, Vec<String>) {
+            let ctx = egui::Context::default();
+            let mut app = LayoutCraftApp::new(&eframe::CreationContext::_new_kittest(ctx.clone()), None);
+            app.stencil_autoopen_done = true;
+            app.engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+            let ids: Vec<String> = [1.0, 6.0].iter().map(|x| app.engine.draw(0, 0, *x, 3.0, x + 2.0, 5.0).unwrap()).collect();
+            for id in &ids {
+                app.engine.edit(0, 8, &format!("{id}
+label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+            }
+            app.baseline = app.engine.document().cloned();
+            app.build_page(&ctx, true);
+            let mut driver = Driver { ctx, app, frame: eframe::Frame::_new_kittest(), time: 0.0, modifiers: Modifiers::NONE };
+            driver.frames(3);
+            (driver, ids)
+        }
+
+        fn run(&mut self, mut events: Vec<Event>) {
+            self.time += 0.1;
+            events.insert(0, Event::ModifiersChanged(self.modifiers));
+            let mut raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0))),
+                time: Some(self.time),
+                events,
+                ..Default::default()
+            };
+            self.app.raw_input_hook(&self.ctx, &mut raw);
+            let (app, frame) = (&mut self.app, &mut self.frame);
+            let output = self.ctx.run_ui(raw, |ui| app.ui(ui, frame));
+            // nothing paints here: the texture changes of the frame are not applied, so the output must not be dropped
+            std::mem::forget(output);
+        }
+
+        fn frames(&mut self, count: usize) {
+            for _ in 0..count {
+                self.run(Vec::new());
+            }
+        }
+
+        fn key(&mut self, key: Key, modifiers: Modifiers) {
+            self.modifiers = modifiers;
+            self.run(vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }]);
+            self.run(vec![Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers }]);
+            self.modifiers = Modifiers::NONE;
+            self.frames(2);
+        }
+
+        fn drag(&mut self, from: egui::Pos2, to: egui::Pos2) {
+            let button = |at, pressed, modifiers| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers };
+            self.run(vec![Event::PointerMoved(from)]);
+            self.run(vec![button(from, true, self.modifiers)]);
+            for step in 1..=6 {
+                self.run(vec![Event::PointerMoved(from + (to - from) * (step as f32 / 6.0))]);
+            }
+            self.run(vec![button(to, false, self.modifiers)]);
+            self.frames(3);
+        }
+    }
+
+    const CTRL: Modifiers = Modifiers { alt: false, ctrl: true, shift: false, mac_cmd: false, command: true };
+
+    #[test]
+    fn every_window_and_view_draws_with_a_shape_selected() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.app.find = Some(Find { text: "a".to_string(), ..Find::default() });
+        driver.app.data_pane = Some(DataPane::default());
+        driver.app.sheet_pane = Some(SheetPane::default());
+        driver.app.layers_open = true;
+        driver.app.snap_open = true;
+        driver.app.help_shortcuts_open = true;
+        driver.app.open_links();
+        driver.frames(4);
+        assert!(driver.app.link_draft.is_some() && driver.app.sheet_pane.as_ref().is_some_and(|pane| !pane.groups.is_empty()));
+        driver.app.shapes_minimised = true;
+        driver.frames(2);
+        driver.app.full_screen = true;
+        driver.frames(2);
+        // every ribbon tab
+        driver.app.full_screen = false;
+        for tab in 0..driver.app.ribbon.tabs.len() {
+            driver.app.ribbon_tab = tab;
+            driver.frames(2);
+        }
+    }
+
+    #[test]
+    fn keys_reach_the_selection_and_the_view() {
+        let (mut driver, ids) = Driver::new();
+        driver.key(Key::A, CTRL);
+        assert_eq!(driver.app.all_selected().len(), 2);
+        driver.key(Key::B, CTRL);
+        assert!(ids.iter().all(|id| driver.app.doc_shape(id).is_some_and(|shape| shape.bold == Some(true))), "{}", driver.app.status);
+        // Tab steps through the shapes after select all
+        let first = driver.app.selected.clone();
+        driver.key(Key::Tab, Modifiers::NONE);
+        assert!(driver.app.selected.is_some() && driver.app.selected != first && driver.app.all_selected().len() == 1);
+        driver.key(Key::F5, Modifiers::NONE);
+        assert!(driver.app.full_screen);
+        driver.key(Key::Escape, Modifiers::NONE);
+        assert!(!driver.app.full_screen && driver.app.selected.is_some(), "the first Esc only leaves full screen");
+        driver.key(Key::Num3, CTRL);
+        assert!(driver.app.tool == super::Tool::Connector);
+    }
+
+    #[test]
+    fn a_guide_is_dragged_out_of_the_ruler_and_back() {
+        let (mut driver, _) = Driver::new();
+        let canvas = driver.app.last_viewport;
+        assert!(canvas.width() > 100.0, "the canvas was drawn");
+        // from the left ruler to an empty part of the canvas: a vertical guide
+        let ruler = pos2(canvas.left() - 10.0, canvas.top() + 40.0);
+        let inside = pos2(canvas.left() + 40.0, canvas.top() + 40.0);
+        driver.drag(ruler, inside);
+        assert_eq!(driver.app.guides.len(), 1, "{}", driver.app.status);
+        assert!(driver.app.guides[0].1, "vertical");
+        // and back onto the ruler: gone
+        driver.drag(inside, ruler);
+        assert!(driver.app.guides.is_empty(), "{}", driver.app.status);
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
