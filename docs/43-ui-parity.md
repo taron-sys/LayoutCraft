@@ -345,25 +345,25 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Action | Visio desktop key (S1) | LayoutCraft desktop | LayoutCraft browser | Result |
 |---|---|---|---|---|
 | Group | Ctrl+G or Ctrl+Shift+G | Ctrl+G | Ctrl+G | same |
-| Ungroup | Ctrl+Shift+U | Ctrl+Shift+G | Ctrl+Shift+G | diff (Ctrl+Shift+G is Visio's Group alias) |
+| Ungroup | Ctrl+Shift+U | Ctrl+Shift+U | Ctrl+Shift+G | same on desktop |
 | Bring to front | Ctrl+Shift+F | Ctrl+Shift+F | Ctrl+Shift+F | same |
 | Send to back | Ctrl+Shift+B | Ctrl+Shift+B | Ctrl+Shift+B | same |
-| Rotate left / right | Ctrl+L / Ctrl+R | `[` / `]` | `[` / `]` | diff |
-| Flip horizontal / vertical | Ctrl+H / Ctrl+J | `H` / `V` | `H` / `V` | diff (plain letters) |
+| Rotate left / right | Ctrl+L / Ctrl+R | Ctrl+L / Ctrl+R (`[` / `]` kept as aliases) | `[` / `]` | same on desktop |
+| Flip horizontal / vertical | Ctrl+H / Ctrl+J | Ctrl+H / Ctrl+J (`H` / `V` kept as aliases) | `H` / `V` | same on desktop |
 | Align Shapes dialog | F8 | none | none | none |
-| Pointer tool | Ctrl+1 | none (Esc) | Esc | none |
+| Pointer tool | Ctrl+1 | Ctrl+1 | Esc | same on desktop |
 | Text tool | Ctrl+2 | none | none | none |
-| Connector tool | Ctrl+3 | none | none | none |
+| Connector tool | Ctrl+3 | Ctrl+3 | none | same on desktop |
 | Connection point tool | Ctrl+Shift+1 | none | none | none |
 | Text block tool | Ctrl+Shift+4 | none | none | none |
 | Crop tool | Ctrl+Shift+2 | none | none | none |
-| Pencil / Freeform / Line / Arc / Rectangle / Ellipse | Ctrl+4 / 5 / 6 / 7 / 8 / 9 | none | none | none |
+| Pencil / Freeform / Line / Arc / Rectangle / Ellipse | Ctrl+4 / 5 / 6 / 7 / 8 / 9 | Ctrl+6 / 8 / 9 (line, rectangle, ellipse) | none | partial |
 | Format Painter | Ctrl+Shift+P | none | none | none |
 | Format Shape pane | F3 | none | none | none |
 | Text dialog | F11 | none | none | none |
 | Snap & Glue dialog | Alt+F9 | none | none | none |
 | Full-screen view / exit | F5 / Esc | none | no key | none |
-| Fit page to window | Ctrl+Shift+W | none | none | none |
+| Fit page to window | Ctrl+Shift+W | Ctrl+Shift+W | none | same on desktop |
 | Zoom in / out | Alt+F6 / Alt+Shift+F6 (web: Ctrl+Plus / Ctrl+Minus) | Ctrl+= or Ctrl++ / Ctrl+- | same | diff on desktop key set; matches the web variant |
 | Cycle focus through shapes | Tab / Shift+Tab | none | Tab on the stage | none (desktop) |
 | Toggle text edit and selection | F2 | F2 (also Ctrl+E) | F2 | same |
@@ -372,7 +372,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Duplicate | Ctrl+D (web table) | Ctrl+D | Ctrl+D | same |
 | Cut / copy / paste, undo | standard; Ctrl+Y redo in the web table | Ctrl+X/C/V, Ctrl+Z; redo Ctrl+Y or Ctrl+Shift+Z | same | same |
 | Page dialog / reorder pages | Shift+F4 / Ctrl+Alt+P | none | none | none |
-| Next / previous page | Ctrl+Page Down / Ctrl+Page Up | none | none | none |
+| Next / previous page | Ctrl+Page Down / Ctrl+Page Up | same | none | same on desktop |
 | Switch to next drawing | Ctrl+Tab or Ctrl+F6 | none | none | none |
 | Move to a task pane | F6 | none | F6 cycles regions | none (desktop) |
 | Help pane | F1 | none (Ctrl+F1 collapses the ribbon, the same as Office) | same | none |
@@ -386,13 +386,14 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Find | Ctrl+F (web `findBtn`) | none | Ctrl+F | none (desktop) |
 | Hyperlink | Ctrl+K (unverified in S1) | none | Ctrl+K | none (desktop) |
 
-Count of the 41 rows above: same 9, diff 5, partial 1, none 26. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 16, diff 2, partial 2, none 21. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 
 Four LayoutCraft keys collide with the Visio meaning of keys the same host may want later: `H` and `V` (plain letters flip a shape;
 Visio uses them for nothing in S1 but uses Ctrl+H and Ctrl+J), `[` and `]` (rotate; Visio uses Ctrl+L and Ctrl+R) and Ctrl+Shift+G (Visio
-groups with it). The Visio keys should become the primary bindings and the current ones either removed or kept as secondary
+groups with it). On the desktop the Visio keys are now the primary bindings and the earlier keys are aliases (Ctrl+Shift+G now groups);
+the browser shell is unchanged. The Visio keys should become the primary bindings and the current ones either removed or kept as secondary
 aliases for one release, announced in the shortcut dialog.
 
 ### 4.3 Key tips

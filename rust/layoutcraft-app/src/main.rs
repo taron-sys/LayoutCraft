@@ -251,6 +251,126 @@ mod nudge_tests {
     }
 }
 
+/// The keys of the arrange commands. The first key listed for a command is the one Visio documents (`docs/43-ui-parity.md` 4.1);
+/// `[`, `]`, `H` and `V` are the earlier LayoutCraft keys, kept as aliases (4.2). egui ignores an extra Shift when it matches a
+/// shortcut, so a Shift binding comes before a plain one on the same key.
+const ARRANGE_KEYS: &[(egui::Modifiers, egui::Key, ArrangeCmd)] = &[
+    (CTRL_SHIFT, egui::Key::U, ArrangeCmd::Ungroup),
+    (egui::Modifiers::CTRL, egui::Key::G, ArrangeCmd::Group),
+    (CTRL_SHIFT, egui::Key::F, ArrangeCmd::Order(2)),
+    (CTRL_SHIFT, egui::Key::B, ArrangeCmd::Order(3)),
+    (egui::Modifiers::CTRL, egui::Key::L, ArrangeCmd::RotateLeft),
+    (egui::Modifiers::CTRL, egui::Key::R, ArrangeCmd::RotateQuarter),
+    (egui::Modifiers::CTRL, egui::Key::H, ArrangeCmd::Flip(false)),
+    (egui::Modifiers::CTRL, egui::Key::J, ArrangeCmd::Flip(true)),
+    (egui::Modifiers::NONE, egui::Key::OpenBracket, ArrangeCmd::RotateLeft),
+    (egui::Modifiers::NONE, egui::Key::CloseBracket, ArrangeCmd::RotateQuarter),
+    (egui::Modifiers::NONE, egui::Key::H, ArrangeCmd::Flip(false)),
+    (egui::Modifiers::NONE, egui::Key::V, ArrangeCmd::Flip(true)),
+];
+
+const CTRL_SHIFT: egui::Modifiers = egui::Modifiers { alt: false, ctrl: true, shift: true, mac_cmd: false, command: false };
+
+/// Takes the first arrange shortcut pressed in this frame out of the input.
+fn consume_arrange_key(input: &mut egui::InputState) -> Option<ArrangeCmd> {
+    ARRANGE_KEYS.iter().find(|(modifiers, key, _)| input.consume_key(*modifiers, *key)).map(|(_, _, command)| *command)
+}
+
+#[cfg(test)]
+mod arrange_key_tests {
+    use super::{consume_arrange_key, ArrangeCmd};
+    use eframe::egui::{self, Key, Modifiers};
+
+    fn press(key: Key, ctrl: bool, shift: bool) -> Option<ArrangeCmd> {
+        // what egui reports on Windows and Linux: Ctrl also sets `command`
+        let modifiers = Modifiers { alt: false, ctrl, shift, mac_cmd: false, command: ctrl };
+        let event = egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers };
+        let mut input = egui::InputState::default();
+        input.events.push(event);
+        consume_arrange_key(&mut input)
+    }
+
+    #[test]
+    fn group_and_ungroup_follow_the_documented_keys() {
+        assert!(press(Key::G, true, false) == Some(ArrangeCmd::Group));
+        assert!(press(Key::G, true, true) == Some(ArrangeCmd::Group));
+        assert!(press(Key::U, true, true) == Some(ArrangeCmd::Ungroup));
+        assert!(press(Key::U, true, false).is_none());
+    }
+
+    #[test]
+    fn turn_and_flip_take_the_ctrl_keys_and_the_old_aliases() {
+        for (key, alias, command) in [
+            (Key::L, Key::OpenBracket, ArrangeCmd::RotateLeft),
+            (Key::R, Key::CloseBracket, ArrangeCmd::RotateQuarter),
+            (Key::H, Key::H, ArrangeCmd::Flip(false)),
+            (Key::J, Key::V, ArrangeCmd::Flip(true)),
+        ] {
+            assert!(press(key, true, false) == Some(command));
+            assert!(press(alias, false, false) == Some(command));
+        }
+        // Ctrl+V is paste, never a flip
+        assert!(press(Key::V, true, false).is_none());
+    }
+}
+
+/// What a tool or view shortcut asks for.
+#[derive(Clone, Copy, PartialEq)]
+enum ViewKey {
+    Tool(Tool),
+    FitPage,
+    NextPage,
+    PreviousPage,
+}
+
+/// Tool and view shortcuts for features the app has, with Visio's documented keys (`docs/43-ui-parity.md` 4.1). The draw
+/// numbers are the positions in the ribbon's draw tools: 0 rectangle, 2 ellipse, 6 line.
+const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
+    (egui::Modifiers::CTRL, egui::Key::Num1, ViewKey::Tool(Tool::Select)),
+    (egui::Modifiers::CTRL, egui::Key::Num3, ViewKey::Tool(Tool::Connector)),
+    (egui::Modifiers::CTRL, egui::Key::Num6, ViewKey::Tool(Tool::Draw(6))),
+    (egui::Modifiers::CTRL, egui::Key::Num8, ViewKey::Tool(Tool::Draw(0))),
+    (egui::Modifiers::CTRL, egui::Key::Num9, ViewKey::Tool(Tool::Draw(2))),
+    (CTRL_SHIFT, egui::Key::W, ViewKey::FitPage),
+    (egui::Modifiers::CTRL, egui::Key::PageDown, ViewKey::NextPage),
+    (egui::Modifiers::CTRL, egui::Key::PageUp, ViewKey::PreviousPage),
+];
+
+/// Takes the first tool or view shortcut pressed in this frame out of the input.
+fn consume_view_key(input: &mut egui::InputState) -> Option<ViewKey> {
+    VIEW_KEYS.iter().find(|(modifiers, key, _)| input.consume_key(*modifiers, *key)).map(|(_, _, command)| *command)
+}
+
+#[cfg(test)]
+mod view_key_tests {
+    use super::{consume_view_key, Tool, ViewKey};
+    use eframe::egui::{self, Key, Modifiers};
+
+    fn press(key: Key, ctrl: bool, shift: bool) -> Option<ViewKey> {
+        let modifiers = Modifiers { alt: false, ctrl, shift, mac_cmd: false, command: ctrl };
+        let mut input = egui::InputState::default();
+        input.events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+        consume_view_key(&mut input)
+    }
+
+    #[test]
+    fn ctrl_digits_pick_the_tools() {
+        assert!(press(Key::Num1, true, false) == Some(ViewKey::Tool(Tool::Select)));
+        assert!(press(Key::Num3, true, false) == Some(ViewKey::Tool(Tool::Connector)));
+        assert!(press(Key::Num8, true, false) == Some(ViewKey::Tool(Tool::Draw(0))));
+        // a digit typed without Ctrl is not a tool change
+        assert!(press(Key::Num1, false, false).is_none());
+    }
+
+    #[test]
+    fn fit_and_page_keys() {
+        assert!(press(Key::W, true, true) == Some(ViewKey::FitPage));
+        assert!(press(Key::W, true, false).is_none());
+        assert!(press(Key::PageDown, true, false) == Some(ViewKey::NextPage));
+        assert!(press(Key::PageUp, true, false) == Some(ViewKey::PreviousPage));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -732,7 +852,7 @@ const ROTATE_STEM: f32 = 24.0;
 const SITE_HIT_PX: f32 = 12.0;
 
 /// An arrangement of the selected shapes (`Engine::group_op` / `Engine::edit` ops 11, 12, 14, 15).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 enum ArrangeCmd {
     Group,
     Ungroup,
@@ -3489,16 +3609,9 @@ impl eframe::App for LayoutCraftApp {
             {
                 action = Some(Action::DeleteSelected);
             }
-            // the rest of the web shell's shortcuts (web/shell.js keydown): select all, group / ungroup, front / back, F2, turn and flip, zoom, arrow nudge
-            let ctrl_shift = egui::Modifiers::CTRL | egui::Modifiers::SHIFT;
-            if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::G)) {
-                action = Some(Action::Arrange(ArrangeCmd::Ungroup));
-            } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::G)) {
-                action = Some(Action::Arrange(ArrangeCmd::Group));
-            } else if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::F)) {
-                action = Some(Action::Arrange(ArrangeCmd::Order(2)));
-            } else if ctx.input_mut(|input| input.consume_key(ctrl_shift, egui::Key::B)) {
-                action = Some(Action::Arrange(ArrangeCmd::Order(3)));
+            // arrange commands (ARRANGE_KEYS), then select all, zoom, F2 and the arrow nudge
+            if let Some(command) = ctx.input_mut(consume_arrange_key) {
+                action = Some(Action::Arrange(command));
             } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::A)) {
                 self.select_all();
             } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Equals) || input.consume_key(egui::Modifiers::CTRL, egui::Key::Plus)) {
@@ -3506,17 +3619,16 @@ impl eframe::App for LayoutCraftApp {
             } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Minus)) {
                 action = Some(Action::ZoomOut);
             }
+            match ctx.input_mut(consume_view_key) {
+                Some(ViewKey::Tool(tool)) => self.tool = tool,
+                Some(ViewKey::FitPage) => action = Some(Action::Fit),
+                Some(ViewKey::NextPage) => action = Some(Action::Page(self.page_index + 1)),
+                Some(ViewKey::PreviousPage) => action = Some(Action::Page(self.page_index.saturating_sub(1))),
+                None => {}
+            }
             if self.selected.is_some() {
                 if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
                     action = Some(Action::EditText);
-                } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::OpenBracket)) {
-                    action = Some(Action::Arrange(ArrangeCmd::RotateLeft));
-                } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::CloseBracket)) {
-                    action = Some(Action::Arrange(ArrangeCmd::RotateQuarter));
-                } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::H)) {
-                    action = Some(Action::Arrange(ArrangeCmd::Flip(false)));
-                } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::V)) {
-                    action = Some(Action::Arrange(ArrangeCmd::Flip(true)));
                 }
                 let nudge = ctx.input(|input| {
                     [egui::Key::ArrowLeft, egui::Key::ArrowRight, egui::Key::ArrowUp, egui::Key::ArrowDown]
