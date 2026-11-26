@@ -318,7 +318,7 @@ Compare File (`compareBtn`: present on both), AI assistant info (`mcpInfo`: pres
 
 | Convention | Visio (source) | LayoutCraft desktop | LayoutCraft browser | Gap / prio |
 |---|---|---|---|---|
-| Selection by click, Shift/Ctrl add, Shift-click deselects, Esc or blank click clears | S19 | Click, Shift-click adds (`shift_down`), Esc clears; Ctrl+click not mapped | Same, plus Tab through shapes (`tabThroughShapes`) | Ctrl-click add, Shift-click remove: P1 |
+| Selection by click, Shift/Ctrl add, Shift-click deselects, Esc or blank click clears | S19 | Click; Shift- or Ctrl-click adds or removes; Shift / Ctrl band adds; Tab through shapes; Esc clears | Same, plus Tab through shapes (`tabThroughShapes`) | Desktop matches |
 | Area select and lasso, optional "select shapes partially within area" | S19 | Rectangle drag only, fully inside | Rectangle drag | Lasso; partial-in-area option: P2 |
 | Handles: blue corner handles resize proportionally, side handles change one dimension, rotation handle round above shape, yellow control handles, 1-D endpoints | S5, S19 | Corner and side resize handles, rotate handle above top edge (`ROTATE_HANDLE`), Shift snaps rotation to 15 degrees; connector end handles; no control handles; rotated shapes cannot be resized ("move only") | Same plus Edit Points | Control handles; resize of rotated shapes: P1 |
 | Rotate around the pin; finer steps farther from the selection | S19 | Rotates about pin in engine; no distance-based fine step | Same | P3 |

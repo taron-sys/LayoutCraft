@@ -1903,6 +1903,23 @@ mod axis_lock_tests {
     }
 }
 
+/// Whether a click or a band drag with these keys held adds to (or takes out of) the selection: Shift or Ctrl.
+fn adds_to_selection(modifiers: egui::Modifiers) -> bool {
+    modifiers.shift || modifiers.command
+}
+
+#[cfg(test)]
+mod selection_modifier_tests {
+    use super::adds_to_selection;
+    use eframe::egui::Modifiers;
+
+    #[test]
+    fn shift_and_ctrl_add_to_the_selection_and_alt_does_not() {
+        assert!(adds_to_selection(Modifiers::SHIFT) && adds_to_selection(Modifiers { ctrl: true, command: true, ..Modifiers::NONE }));
+        assert!(!adds_to_selection(Modifiers::NONE) && !adds_to_selection(Modifiers::ALT));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -2733,6 +2750,8 @@ struct LayoutCraftApp {
     ribbon_textures: BTreeMap<String, egui::TextureHandle>,
     /// Shift was held at the start of the frame (read once per frame).
     shift_down: bool,
+    /// Shift or Ctrl is held: clicks and bands add to the selection.
+    add_down: bool,
     status: String,
 }
 
@@ -2868,6 +2887,7 @@ impl LayoutCraftApp {
             mcp_message: String::new(),
             ribbon_textures: BTreeMap::new(),
             shift_down: false,
+            add_down: false,
             status: "Open a Visio drawing (.vsdx, or the older .vsd and .vdx) or drop one on the window.".to_string(),
         };
         if let Some(path) = initial {
@@ -3640,7 +3660,7 @@ impl LayoutCraftApp {
 
     fn begin_pointer(&mut self, pointer: egui::Pos2, image_rect: egui::Rect) {
         let scene_pointer = self.screen_to_scene(pointer, image_rect);
-        let shift = self.shift_down;
+        let shift = self.add_down;
         if self.tool == Tool::Hand || self.space_down {
             // the Hand tool and Space + drag move the view and touch nothing else
             self.drag = None;
@@ -3987,7 +4007,7 @@ impl LayoutCraftApp {
             .collect();
         let found = enclosed_ids(&candidates, band);
         let mut chosen: Vec<String> = self.all_selected();
-        if !self.shift_down {
+        if !self.add_down {
             chosen.clear();
         }
         for id in found {
@@ -6239,6 +6259,7 @@ impl eframe::App for LayoutCraftApp {
         self.apply_raster(&ctx);
         self.settle_raster(&ctx);
         self.shift_down = ctx.input(|input| input.modifiers.shift);
+        self.add_down = ctx.input(|input| adds_to_selection(input.modifiers));
         let mut action: Option<Action> = None;
         if let Some(backwards) = self.tab_cycle.take() {
             self.cycle_shape(backwards);
@@ -6987,7 +7008,7 @@ impl eframe::App for LayoutCraftApp {
                         dropped_now = self.click_connect_arrow(&ctx, pointer, image_rect);
                     }
                 }
-                if response.clicked() && self.drag.is_none() && !self.panning && self.shift_down && !dropped_now {
+                if response.clicked() && self.drag.is_none() && !self.panning && self.add_down && !dropped_now {
                     if let Some(pointer) = response.interact_pointer_pos() {
                         if image_rect.contains(pointer) {
                             let scene_pointer = self.screen_to_scene(pointer, image_rect);
