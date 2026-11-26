@@ -2158,6 +2158,47 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
             self.run(vec![button(to, false, self.modifiers)]);
             self.frames(3);
         }
+
+        /// A press and the start of a drag, then `held` keys going down while it goes on, and the release. (Keys that are
+        /// down before the pointer has moved count for the press: Shift would then add to the selection.)
+        fn drag_holding(&mut self, from: egui::Pos2, to: egui::Pos2, held: Modifiers) {
+            let button = |at, pressed, modifiers| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers };
+            self.run(vec![Event::PointerMoved(from)]);
+            self.run(vec![button(from, true, Modifiers::NONE)]);
+            self.run(vec![Event::PointerMoved(from + (to - from) * (1.0 / 6.0))]);
+            self.modifiers = held;
+            for step in 2..=6 {
+                self.run(vec![Event::PointerMoved(from + (to - from) * (step as f32 / 6.0))]);
+            }
+            self.run(vec![button(to, false, held)]);
+            self.modifiers = Modifiers::NONE;
+            self.frames(3);
+        }
+
+        fn click(&mut self, at: egui::Pos2, modifiers: Modifiers) {
+            self.modifiers = modifiers;
+            let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers };
+            self.run(vec![Event::PointerMoved(at)]);
+            self.run(vec![button(true)]);
+            self.run(vec![button(false)]);
+            self.modifiers = Modifiers::NONE;
+            // long enough that the next click is not read as a double click
+            self.time += 1.0;
+            self.frames(2);
+        }
+
+        /// Where the middle of a shape is on the screen.
+        fn middle_of(&self, id: &str) -> egui::Pos2 {
+            let image = self.app.image_rect(self.app.last_viewport);
+            let shape = self.app.scene_shape(id).expect("the shape is drawn");
+            self.app.scene_to_screen(LayoutCraftApp::shape_scene_rect(shape).center(), image)
+        }
+
+        /// The shape's position in the model (px, y down).
+        fn at(&self, id: &str) -> (f64, f64) {
+            let shape = self.app.doc_shape(id).expect("the shape exists");
+            (shape.x, shape.y)
+        }
     }
 
     const CTRL: Modifiers = Modifiers { alt: false, ctrl: true, shift: false, mac_cmd: false, command: true };
@@ -2220,6 +2261,62 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         // and back onto the ruler: gone
         driver.drag(inside, ruler);
         assert!(driver.app.guides.is_empty(), "{}", driver.app.status);
+    }
+
+    #[test]
+    fn shift_pressed_during_a_drag_keeps_the_move_on_one_axis() {
+        let (mut driver, ids) = Driver::new();
+        // free movement: nothing to snap to may bend the result
+        (driver.app.snap_grid, driver.app.snap_shapes, driver.app.snap_guides) = (false, false, false);
+        let start = driver.at(&ids[0]);
+        let from = driver.middle_of(&ids[0]);
+        driver.drag_holding(from, from + vec2(90.0, 30.0), Modifiers::SHIFT);
+        let straight = driver.at(&ids[0]);
+        assert!(straight.0 > start.0 + 10.0 && (straight.1 - start.1).abs() < 0.01, "{start:?} {straight:?} {}", driver.app.status);
+        let from = driver.middle_of(&ids[0]);
+        driver.drag_holding(from, from + vec2(60.0, 40.0), Modifiers::NONE);
+        let free = driver.at(&ids[0]);
+        assert!(free.0 > straight.0 + 10.0 && free.1 > straight.1 + 10.0, "{straight:?} {free:?}");
+    }
+
+    #[test]
+    fn ctrl_click_adds_a_shape_and_takes_it_out_again() {
+        let (mut driver, ids) = Driver::new();
+        let (first, second) = (driver.middle_of(&ids[0]), driver.middle_of(&ids[1]));
+        driver.click(first, Modifiers::NONE);
+        assert_eq!(driver.app.all_selected(), [ids[0].clone()], "{}", driver.app.status);
+        driver.click(second, CTRL);
+        assert_eq!(driver.app.all_selected().len(), 2);
+        driver.click(second, CTRL);
+        assert_eq!(driver.app.all_selected(), [ids[0].clone()]);
+    }
+
+    #[test]
+    fn a_clicked_guide_is_deleted_by_the_delete_key() {
+        let (mut driver, ids) = Driver::new();
+        let canvas = driver.app.last_viewport;
+        let inside = pos2(canvas.left() + 40.0, canvas.top() + 40.0);
+        driver.drag(pos2(canvas.left() - 10.0, canvas.top() + 40.0), inside);
+        assert_eq!(driver.app.guides.len(), 1);
+        driver.click(inside, Modifiers::NONE);
+        assert!(driver.app.selected_guide.is_some(), "{}", driver.app.status);
+        driver.key(Key::Delete, Modifiers::NONE);
+        assert!(driver.app.guides.is_empty(), "{}", driver.app.status);
+        assert!(ids.iter().all(|id| driver.app.doc_shape(id).is_some()), "no shape went with it");
+    }
+
+    #[test]
+    fn page_keys_turn_pages_in_full_screen() {
+        let (mut driver, _) = Driver::new();
+        driver.app.engine.page_op(1, 0, 0, "").unwrap();
+        let ctx = driver.ctx.clone();
+        driver.app.build_page(&ctx, true);
+        driver.frames(2);
+        driver.key(Key::F5, Modifiers::NONE);
+        driver.key(Key::PageDown, Modifiers::NONE);
+        assert_eq!(driver.app.page_index, 1, "{}", driver.app.status);
+        driver.key(Key::PageUp, Modifiers::NONE);
+        assert_eq!(driver.app.page_index, 0);
     }
 }
 
