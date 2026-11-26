@@ -95,6 +95,56 @@ mod resize_tests {
 const DPI: f64 = 96.0;
 const MIN_SHAPE_PX: f32 = 6.0;
 const HANDLE_SIZE: f32 = 9.0;
+/// A shape frame lower than this (scene px) may be a mere line under its picture (1-D masters).
+const HAIRLINE_FRAME: f32 = 12.0;
+
+/// The outline of a hairline-framed group: `own` (the frame and what the shape itself paints) widened to its `members`, when
+/// they make it clearly higher than the frame (the picture of the "Direct QSFP" stencil part is 1.6 times its frame); a real
+/// line (a group of lines) keeps its own outline.
+fn hairline_outline(frame: egui::Rect, own: egui::Rect, members: impl Iterator<Item = egui::Rect>) -> egui::Rect {
+    let all = members.fold(own, |all, member| all.union(member));
+    if all.height() > frame.height() * 1.25 {
+        all
+    } else {
+        own
+    }
+}
+
+#[cfg(test)]
+mod small_shape_tests {
+    use super::{hairline_outline, Handle, LayoutCraftApp};
+    use eframe::egui::{pos2, vec2, Rect};
+
+    /// Stencil parts a few pixels high must stay movable: a press in their middle takes no resize handle, a press on a
+    /// corner still does, and a shape of normal size keeps all its handles.
+    #[test]
+    fn the_middle_of_a_shape_is_never_a_resize_handle() {
+        for size in [vec2(23.0, 8.0), vec2(28.0, 8.0), vec2(57.0, 16.0), vec2(30.0, 30.0), vec2(200.0, 6.0), vec2(6.0, 200.0)] {
+            let rect = Rect::from_min_size(pos2(100.0, 100.0), size);
+            assert_eq!(LayoutCraftApp::handle_at(rect, rect.center()), None, "{size:?}");
+            assert_eq!(LayoutCraftApp::handle_at(rect, rect.center() + size / 5.0), None, "{size:?}");
+            assert!(LayoutCraftApp::handle_at(rect, rect.max + vec2(1.0, 1.0)) == Some(Handle::Se), "{size:?}");
+        }
+        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(120.0, 60.0));
+        for (handle, hit) in LayoutCraftApp::handle_rects(rect) {
+            assert!(LayoutCraftApp::handle_at(rect, hit.center()) == Some(handle));
+        }
+    }
+
+    #[test]
+    fn a_hairline_group_is_outlined_around_its_pictures() {
+        let frame = Rect::from_min_size(pos2(10.0, 20.0), vec2(5.0, 2.0));
+        let picture = Rect::from_min_size(pos2(9.0, 17.0), vec2(8.0, 7.0));
+        let outline = hairline_outline(frame, frame, [picture].into_iter());
+        assert!(outline.contains_rect(picture) && outline.contains_rect(frame));
+        // a picture only somewhat higher than the frame counts too
+        let low = Rect::from_min_size(pos2(10.0, 19.4), vec2(5.0, 3.2));
+        assert!(hairline_outline(frame, frame, [low].into_iter()).contains_rect(low));
+        // members that lie along the line do not widen it
+        let along = Rect::from_min_size(pos2(0.0, 20.0), vec2(40.0, 2.0));
+        assert_eq!(hairline_outline(frame, frame, [along].into_iter()), frame);
+    }
+}
 
 /// Best snap on one axis (the web shell's `snapAxis`): `values` are the moving positions, `targets` the positions to snap to, `grid` the grid step (0 = off),
 /// `threshold` the reach. Returns (the shift to apply, the position snapped to); the smallest shift wins.
@@ -1797,7 +1847,7 @@ fn vsdx_name(path: &Path) -> PathBuf {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Handle {
     Nw,
     N,
@@ -2883,7 +2933,7 @@ impl LayoutCraftApp {
     /// masters of the Dell stencils, shows its picture well outside the frame).
     fn selection_scene_rect(shape: &SceneShape) -> egui::Rect {
         let frame = Self::shape_scene_rect(shape);
-        if shape.rot.abs() > 1e-9 || frame.height() >= 12.0 {
+        if shape.rot.abs() > 1e-9 || frame.height() >= HAIRLINE_FRAME {
             return frame; // a turned shape keeps its frame (the outline is turned with it); a normal frame is already what the shape is
         }
         let (x, y, w, h) = layoutcraft_render::shape_painted_bounds(shape);
@@ -2897,6 +2947,39 @@ impl LayoutCraftApp {
             egui::pos2(shape.x as f32, shape.y as f32),
             egui::vec2(shape.w as f32, shape.h as f32),
         )
+    }
+
+    /// `selection_scene_rect` of the shape `id`, and for a group whose frame is a hairline under pictures that are its members (the SFP
+    /// modules of the HPE stencils) what the members cover: the frame alone would put the resize handles across the picture.
+    fn selection_rect(&self, id: &str) -> Option<egui::Rect> {
+        let shape = self.scene_shape(id)?;
+        let own = Self::selection_scene_rect(shape);
+        let frame = Self::shape_scene_rect(shape);
+        if shape.rot.abs() > 1e-6 || frame.height() >= HAIRLINE_FRAME {
+            return Some(own);
+        }
+        let members = self.scene.iter().flat_map(|scene| scene.items.iter()).filter_map(|item| match item {
+            SceneItem::Shape(member) => {
+                let member_id = member.visio_id.as_deref()?;
+                (member_id != id && self.group_root(member_id) == id).then(|| Self::selection_scene_rect(member))
+            }
+            _ => None,
+        });
+        Some(hairline_outline(frame, own, members))
+    }
+
+    /// The resize handle a press at `pointer` takes on a shape shown at `rect`. The middle half of a shape in each direction is
+    /// always left for moving it: on a small shape the handles would otherwise cover (almost) all of it.
+    fn handle_at(rect: egui::Rect, pointer: egui::Pos2) -> Option<Handle> {
+        if !Self::handles_fit(rect) || egui::Rect::from_center_size(rect.center(), rect.size() / 2.0).contains(pointer) {
+            return None;
+        }
+        // where handles overlap on a small shape, the nearest one
+        Self::handle_rects(rect)
+            .into_iter()
+            .filter(|(_, hit)| hit.expand(2.0).contains(pointer))
+            .min_by(|a, b| a.1.center().distance(pointer).total_cmp(&b.1.center().distance(pointer)))
+            .map(|(handle, _)| handle)
     }
 
     /// Whether a selected shape is big enough on screen for its eight resize handles: on a shape smaller than the handles in both directions
@@ -3072,7 +3155,7 @@ impl LayoutCraftApp {
             return None;
         }
         let scene = self.scene_shape(id)?;
-        let rect = self.scene_rect_to_screen(Self::selection_scene_rect(scene), image_rect);
+        let rect = self.scene_rect_to_screen(self.selection_rect(id).unwrap_or_else(|| Self::selection_scene_rect(scene)), image_rect);
         let rot = (match &self.rotating {
             Some(r) if r.id == id => -r.theta,
             _ => shape.rot.to_radians(), // the model keeps the angle in degrees, clockwise on screen
@@ -3167,26 +3250,24 @@ impl LayoutCraftApp {
                 }
             }
             if let Some(shape) = self.doc_shape(&selected_id) {
-                let frame_is_shape = self.scene_shape(&selected_id).is_some_and(|scene| Self::selection_scene_rect(scene) == Self::shape_scene_rect(scene));
+                let frame_is_shape = self.scene_shape(&selected_id).is_some_and(|scene| self.selection_rect(&selected_id) == Some(Self::shape_scene_rect(scene)));
                 if shape.group.is_none() && shape.rot.abs() < 1e-6 && frame_is_shape {
                     let rect = egui::Rect::from_min_size(
                         egui::pos2(shape.x as f32, shape.y as f32),
                         egui::vec2(shape.w as f32, shape.h as f32),
                     );
                     let screen_rect = self.scene_rect_to_screen(rect, image_rect);
-                    for (handle, hit) in Self::handle_rects(screen_rect).into_iter().filter(|_| Self::handles_fit(screen_rect)) {
-                        if hit.expand(2.0).contains(pointer) {
-                            self.drag = Some(DragState {
-                                visio_id: selected_id.clone(),
-                                mode: DragMode::Resize(handle),
-                                start_pointer: scene_pointer,
-                                end_pointer: scene_pointer,
-                                start_rect: rect,
-                            });
-                            self.preview = Some(rect);
-                            self.status = format!("Resizing shape {selected_id}");
-                            return;
-                        }
+                    if let Some(handle) = Self::handle_at(screen_rect, pointer) {
+                        self.drag = Some(DragState {
+                            visio_id: selected_id.clone(),
+                            mode: DragMode::Resize(handle),
+                            start_pointer: scene_pointer,
+                            end_pointer: scene_pointer,
+                            start_rect: rect,
+                        });
+                        self.preview = Some(rect);
+                        self.status = format!("Resizing shape {selected_id}");
+                        return;
                     }
                 }
             }
@@ -3226,7 +3307,7 @@ impl LayoutCraftApp {
                 egui::vec2(shape.w as f32, shape.h as f32),
             );
             // the outline that moves with the pointer is the painted extent (the frame of a 1-D group is a hairline)
-            let rect = self.scene_shape(&id).map_or(frame, Self::selection_scene_rect);
+            let rect = self.selection_rect(&id).unwrap_or(frame);
             self.drag = Some(DragState {
                 visio_id: id.clone(),
                 mode: DragMode::Move,
@@ -3407,7 +3488,11 @@ impl LayoutCraftApp {
             .filter_map(|item| match item {
                 SceneItem::Shape(shape) => {
                     let id = shape.visio_id.clone()?;
-                    self.doc_shape(&id).is_some_and(|doc| doc.group.is_none()).then(|| (id, Self::selection_scene_rect(shape)))
+                    if self.doc_shape(&id).is_none_or(|doc| doc.group.is_some()) {
+                        return None;
+                    }
+                    let rect = self.selection_rect(&id).unwrap_or_else(|| Self::selection_scene_rect(shape));
+                    Some((id, rect))
                 }
                 _ => None,
             })
@@ -3500,7 +3585,7 @@ impl LayoutCraftApp {
             return;
         }
         if !resized {
-            if let Some(old) = self.scene_shape(visio_id).map(Self::selection_scene_rect) {
+            if let Some(old) = self.selection_rect(visio_id) {
                 let (dx, dy) = ((rect.min.x - old.min.x) as f64 / DPI, -((rect.min.y - old.min.y) as f64) / DPI);
                 let page = self.page_index;
                 let edit_timer = Timer::new("  engine.edit (move)", 0.0);
@@ -6292,10 +6377,10 @@ impl eframe::App for LayoutCraftApp {
                         let doc_shape = self.doc_shape(&selected);
                         // a shape whose frame is a hairline under its picture (1-D masters) cannot be resized by the outline of its picture
                         let resizable = doc_shape.is_some_and(|shape| shape.group.is_none() && shape.rot.abs() < 1e-6)
-                            && Self::selection_scene_rect(shape) == Self::shape_scene_rect(shape);
+                            && self.selection_rect(&selected) == Some(Self::shape_scene_rect(shape));
                         let rect = self
                             .preview
-                            .unwrap_or_else(|| Self::selection_scene_rect(shape));
+                            .unwrap_or_else(|| self.selection_rect(&selected).unwrap_or_else(|| Self::selection_scene_rect(shape)));
                         let screen_rect = self.scene_rect_to_screen(rect, image_rect);
                         let turned = doc_shape.map_or(0.0, |shape| shape.rot.to_radians() as f32);
                         if turned.abs() > 1e-6 {
@@ -6320,12 +6405,8 @@ impl eframe::App for LayoutCraftApp {
                             );
                         }
                         if resizable && Self::handles_fit(screen_rect) {
-                            for (handle, hit) in Self::handle_rects(screen_rect) {
-                                if let Some(pointer) = response.hover_pos() {
-                                    if hit.expand(2.0).contains(pointer) {
-                                        hover_handle = Some(handle);
-                                    }
-                                }
+                            hover_handle = response.hover_pos().and_then(|pointer| Self::handle_at(screen_rect, pointer));
+                            for (_, hit) in Self::handle_rects(screen_rect) {
                                 painter.rect_filled(
                                     hit,
                                     1.0,
