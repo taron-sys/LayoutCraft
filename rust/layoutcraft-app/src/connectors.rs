@@ -156,7 +156,7 @@ impl LayoutCraftApp {
     }
 
     /// Place a shape (the master `pick`, else a copy of `id`) on that side of `id` and connect the two.
-    fn place_neighbour(&mut self, ctx: &egui::Context, id: &str, direction: Direction, pick: Option<(usize, &str)>) {
+    pub(super) fn place_neighbour(&mut self, ctx: &egui::Context, id: &str, direction: Direction, pick: Option<(usize, &str)>) {
         match self.engine.connect_new_neighbour(self.page_index, id, direction, pick) {
             Ok(made) => {
                 self.arrow_shape = None;
@@ -183,7 +183,9 @@ impl LayoutCraftApp {
         // on the list of shapes, or on the way to it, the pointer keeps the list and its arrow (the list covers the canvas,
         // so the canvas itself is not hovered there)
         let on_picker = response.ctx.pointer_hover_pos().filter(|at| self.arrow_picker.as_ref().is_some_and(|picker| picker.area.expand(8.0).contains(*at)));
-        let Some(pointer) = on_picker.or_else(|| response.hover_pos()) else {
+        // while a shape is dragged from the Shapes panel the canvas is not hovered, but the arrows show where it can be let go
+        let dragged = response.ctx.pointer_latest_pos().filter(|at| self.pane_drag.is_some() && response.rect.contains(*at));
+        let Some(pointer) = on_picker.or(dragged).or_else(|| response.hover_pos()) else {
             self.arrow_shape = None;
             self.arrow_picker = None;
             return;
@@ -200,7 +202,8 @@ impl LayoutCraftApp {
         }
         let Some(id) = self.arrow_shape.clone() else { return };
         let Some((rect, over_rotate)) = self.arrow_frame(&id, image_rect) else { return };
-        let shapes = self.quick_shapes();
+        // a shape already being dragged needs no list of shapes
+        let shapes = if self.pane_drag.is_some() { Vec::new() } else { self.quick_shapes() };
         let listed = on_picker.and(self.arrow_picker.as_ref().map(|picker| picker.direction));
         let mut offer = None;
         for (direction, at) in arrow_places(rect, over_rotate) {
@@ -219,7 +222,7 @@ impl LayoutCraftApp {
                 response.ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
                 let what = if self.armed_master.is_some() { "place the picked shape" } else { "copy this shape" };
                 // the list of shapes takes the place of the hint, which would cover it
-                if shapes.is_empty() {
+                if shapes.is_empty() && self.pane_drag.is_none() {
                     response.clone().on_hover_text_at_pointer(format!("Click to {what} {} and connect them; drag to connect to a shape or to the page", direction_words(direction)));
                 }
             }

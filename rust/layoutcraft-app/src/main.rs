@@ -2794,6 +2794,47 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_shape_dragged_from_the_panel_onto_a_connect_arrow_is_connected() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.open_builtin_stencil();
+        driver.frames(3);
+        // a name short enough to be written out in the panel
+        let name = driver.app.stencils[0].masters[2].1.clone();
+        let counts = |driver: &Driver| {
+            let page = &driver.app.engine.document().unwrap().pages[0];
+            (page.shapes.len(), page.connectors.len())
+        };
+        // press on the shape in the panel, move over a shape of the page, then to `end`, and let go
+        let drag_to = |driver: &mut Driver, end: &dyn Fn(egui::Rect) -> egui::Pos2| {
+            let canvas = driver.app.last_viewport;
+            let entry = driver.texts(&name).into_iter().find(|text| text.center().x < canvas.left()).expect("the shape in the panel").center();
+            let image = driver.app.image_rect(canvas);
+            let frame = driver.app.scene_rect_to_screen(LayoutCraftApp::selection_scene_rect(driver.app.scene_shape(&ids[0]).unwrap()), image);
+            let end = end(frame);
+            let button = |at, pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+            driver.run(vec![Event::PointerMoved(entry)]);
+            driver.run(vec![button(entry, true)]);
+            for (from, to) in [(entry, frame.center()), (frame.center(), end)] {
+                for step in 1..=6 {
+                    driver.run(vec![Event::PointerMoved(from + (to - from) * (step as f32 / 6.0))]);
+                }
+            }
+            driver.frames(2);
+            driver.run(vec![button(end, false)]);
+            driver.frames(3);
+        };
+        let before = counts(&driver);
+        drag_to(&mut driver, &|frame| pos2(frame.right() + 16.0, frame.center().y));
+        assert_eq!(counts(&driver), (before.0 + 1, before.1 + 1), "{}", driver.app.status);
+        let made = driver.app.selected.clone().expect("the new shape is selected");
+        assert!(driver.at(&made).0 > driver.at(&ids[0]).0, "on the right of the shape");
+        // let go beside the arrows: placed, not connected
+        let before = counts(&driver);
+        drag_to(&mut driver, &|frame| pos2(frame.center().x, frame.bottom() + 120.0));
+        assert_eq!(counts(&driver), (before.0 + 1, before.1), "{}", driver.app.status);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -8108,7 +8149,12 @@ impl eframe::App for LayoutCraftApp {
                     }
                 }
                 if let Some((index, master, name, at_screen)) = self.pending_drop.take() {
-                    if image_rect.contains(at_screen) {
+                    // let go on a connect arrow: the shape goes to that side and is connected
+                    if let Some((id, direction)) = self.connect_arrow_at(at_screen, image_rect) {
+                        self.place_neighbour(&ctx, &id, direction, Some((index, &master)));
+                        self.armed_master = None;
+                        dropped_now = true;
+                    } else if image_rect.contains(at_screen) {
                         let at = self.screen_to_scene(at_screen, image_rect);
                         let page = self.page_index;
                         let (x, y) = (at.x as f64 / DPI, self.page_height_in - at.y as f64 / DPI);
