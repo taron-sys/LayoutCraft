@@ -75,6 +75,28 @@ A "cell" in the data is a unit byte and an f64 in internal units. The record typ
 240 files with an old extension under `examples/Documents/`: 233 converted and imported. The 7 others: five of file version 5 (two of
 them damaged fuzzer files), one damaged compound file, one fuzzer file that is neither format.
 
+## File version 5: what is known (not read)
+
+Looked at on 2026-11-26 to decide whether a reader is practical. 414 samples under `examples/` are version 5 (one more is version
+4). Measured on all 414:
+
+* The container is the same compound file and `VisioDocument` stream, and the compression is the same.
+* The root pointer at `0x24` is 16 bytes: type u16, format u16, address u32, offset u32, length u32. It lies inside the stream in
+  all 414. Pointer lists hold these 16-byte pointers after their count (u16), and the stream types seen are those of version 6.
+* A record has a 12-byte header: type u16, id u16, level u8, 1 byte, list u16, data length u32. With zero padding skipped, all
+  11,561 record streams reached (53,594 records) read to their end. 777 of 5,028 pointer lists gave no pointers with the rule used
+  here; whether they are empty or laid out differently is not known.
+* In the one page stream looked at by hand, the page size is stored as in version 6 (a unit byte and an f64).
+
+What differs: the record types that carry a shape's transform, geometry, line, fill, text block and characters in versions 6 and 11
+(`0x92`, `0x9b`, `0x9d`, `0x89`-`0x8b`, `0x85`, `0x86`, `0x94`) do not occur in any record stream reached in the 414 files. Those properties are stored
+another way, apparently inside other records, and that layer has **not** been decoded. Reading version 5 therefore needs its own
+record reader, not an adjustment of the existing one, and version 5 files are still refused by name.
+
+399 of the samples have a `.vsdx` copy that could serve as a comparison. Their `docProps/app.xml` names no application (only
+`AppVersion` 16), so what made them is not known; it must be established before they are used as evidence (AGENTS.md rule 14). No
+source file of a third-party reader was opened.
+
 ## Tests
 
 `rust/layoutcraft-vsdx/tests/it/legacy.rs` builds a small binary drawing and a small XML drawing by hand (our own work) and also runs a
