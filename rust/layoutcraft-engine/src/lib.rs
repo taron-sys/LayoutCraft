@@ -51,6 +51,38 @@ pub struct Engine {
     pub clipboard_connects: Vec<String>,
     /// The move preview: the page, the fingerprint of the bytes, the editor of that page and its `Connect` rows.
     pub preview: Option<(usize, u64, GroupEditor, Vec<layoutcraft_vsdx::Connect>)>,
+    /// Set when the open drawing was converted from an old Visio format (`.vsd`, `.vdx`, ...): what the user has to know.
+    /// The drawing is a new `.vsdx` package from then on; the old file is never written.
+    pub conversion: Option<Conversion>,
+}
+
+/// How the open drawing came out of an old format.
+#[derive(Debug, Clone)]
+pub struct Conversion {
+    /// The format of the file that was opened.
+    pub format: &'static str,
+    /// What was left behind or is only approximate.
+    pub notes: Vec<String>,
+}
+
+impl Conversion {
+    /// One paragraph for the host to show.
+    pub fn message(&self) -> String {
+        let mut text = format!("Converted from the {} to a new .vsdx drawing; the original file is not changed.", self.format);
+        if !self.notes.is_empty() {
+            text.push_str(&format!(" Please check: {}.", self.notes.join("; ")));
+        }
+        text
+    }
+}
+
+/// The bytes of a `.vsdx` package: `bytes` themselves, or the conversion of a drawing in an old format.
+fn as_package_bytes(bytes: Vec<u8>) -> Result<(Vec<u8>, Option<Conversion>), String> {
+    let Some(kind) = layoutcraft_vsdx::legacy::detect(&bytes) else {
+        return Ok((bytes, None));
+    };
+    let converted = layoutcraft_vsdx::legacy::convert(&bytes).map_err(|error| error.to_string())?;
+    Ok((converted.vsdx, Some(Conversion { format: kind.describe(), notes: converted.notes })))
 }
 
 /// A hash of the package bytes: what ties an undone state to the document it came from.
@@ -68,11 +100,14 @@ impl Engine {
     }
 
     /// Open a VSDX / VSTX from its bytes: the undo history, redo states and the clipboard are cleared (opened stencils stay).
+    /// A drawing in an old format (binary or XML) is converted first; [`Engine::conversion`] then says so.
     pub fn open(&mut self, bytes: Vec<u8>) -> Result<(), String> {
+        let (bytes, conversion) = as_package_bytes(bytes)?;
         // Same path as the wasm build always used for a first import (a package without `source`).
         let package = Package::from_reader(std::io::Cursor::new(bytes.clone())).map_err(|error| error.to_string())?;
         let (document, import_state) = layoutcraft_vsdx::import_document_with(&package, None).map_err(|error| error.to_string())?;
         self.install(bytes, package, document, import_state);
+        self.conversion = conversion;
         Ok(())
     }
 
@@ -95,6 +130,7 @@ impl Engine {
         self.redo.clear();
         self.clipboard.clear();
         self.clipboard_connects.clear();
+        self.conversion = None;
     }
 
     /// Re-open `bytes` as the current document and make it the export source.
@@ -972,8 +1008,10 @@ impl Engine {
         Ok(serde_json::Value::Array(list.into_iter().map(|(_, v)| v).collect()).to_string())
     }
 
-    /// Open an external stencil (`.vssx` / `.vstx` bytes) next to the drawing. Returns JSON `{index, masters: [..]}`.
+    /// Open an external stencil (`.vssx` / `.vstx` bytes, or `.vss` / `.vsx` and the other old formats) next to the drawing.
+    /// Returns JSON `{index, masters: [..]}`, with `converted` (a message for the user) for an old format.
     pub fn stencil_open(&mut self, bytes: Vec<u8>) -> Result<String, String> {
+        let (bytes, conversion) = as_package_bytes(bytes)?;
         let package = Package::from_reader(Cursor::new(bytes)).map_err(|e| e.to_string())?;
         let masters = layoutcraft_vsdx::stencil::master_list(&package).map_err(|e| e.to_string())?;
         if masters.as_array().is_none_or(|list| list.is_empty()) {
@@ -981,7 +1019,11 @@ impl Engine {
         }
         self.stencils.push(Some(package));
         let index = self.stencils.len() - 1;
-        Ok(serde_json::json!({ "index": index, "masters": masters }).to_string())
+        let mut answer = serde_json::json!({ "index": index, "masters": masters });
+        if let Some(conversion) = conversion {
+            answer["converted"] = conversion.message().into();
+        }
+        Ok(answer.to_string())
     }
 
     /// Open the built-in "Basic shapes" stencil the first time and answer with it every time (JSON like `stencil_open`).
@@ -1299,5 +1341,23 @@ impl Engine {
         }
         let scene = scene_from_document_with_options(document, page, &media, SceneOptions { print: true, fit_text: true }).map_err(|e| e.to_string())?;
         layoutcraft_render::render_rgb(&scene, scale, [255, 255, 255])
+    }
+}
+
+#[cfg(test)]
+mod conversion_tests {
+    use super::Engine;
+
+    /// An old-format drawing opens as a `.vsdx` drawing that says it was converted; opening anything else clears that.
+    #[test]
+    fn an_old_format_drawing_opens_as_vsdx_and_says_so() {
+        let old = br#"<VisioDocument xmlns="http://schemas.microsoft.com/visio/2003/core"><Pages><Page ID="0"><PageSheet><PageProps><PageWidth>8.5</PageWidth><PageHeight>11</PageHeight></PageProps></PageSheet><Shapes/></Page></Pages></VisioDocument>"#;
+        let mut engine = Engine::new();
+        engine.open(old.to_vec()).unwrap();
+        assert!(engine.conversion.as_ref().is_some_and(|c| c.message().contains(".vsdx")));
+        let saved = engine.export().unwrap().to_vec();
+        assert!(saved.starts_with(b"PK"));
+        engine.open(saved).unwrap();
+        assert!(engine.conversion.is_none());
     }
 }

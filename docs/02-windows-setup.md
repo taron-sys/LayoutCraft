@@ -82,7 +82,7 @@ Do not commit generated `.vsdx` outputs or browser test folders; `.gitignore` al
 ## File types on Windows
 
 - `.vsdx`, `.vstx`, `.vssx` are ZIP/OPC packages. You can rename a copy to `.zip` and use Explorer or `Expand-Archive` to inspect the XML.
-- `.vsd` (the legacy binary format) is not supported.
+- The older `.vsd` and `.vdx` formats are converted to `.vsdx` when opened in the desktop app or the MCP server ([47](47-legacy-formats.md)); the browser shell's file pickers do not offer them yet.
 
 ## Browser choice
 
@@ -97,7 +97,7 @@ Chrome and Edge are the primary targets for the browser shell. The wasm core doe
 | `cargo xtask serve` says the port is in use | Another program has 8137 | `cargo xtask serve 8138` |
 | 403 for a page you know exists | A hidden name (`.x`), or a `Host` that is not local | Use `127.0.0.1` or `localhost` in the address |
 | The linker fails on a long path | MSVC linker limit | Short repository path or a short `CARGO_TARGET_DIR` |
-| Import fails with "Not a ZIP archive" | File is `.vsd` or not a VSDX | `.vsd` is unsupported |
+| Import fails with "Not a ZIP archive" | Not a Visio drawing | See [47](47-legacy-formats.md) for the formats that are read |
 | Save opens in Visio with a repair dialog | Visio compatibility gap | Record the repair message and the exact test file ([07](07-known-gaps.md)) |
 
 ## Security and licensing notes
