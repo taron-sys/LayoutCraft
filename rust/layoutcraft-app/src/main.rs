@@ -1920,6 +1920,34 @@ mod selection_modifier_tests {
     }
 }
 
+/// In the full-screen view, Page Down and Page Up alone change the page: +1 or -1.
+fn consume_full_screen_page(input: &mut egui::InputState) -> Option<i32> {
+    if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+        Some(1)
+    } else {
+        input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp).then_some(-1)
+    }
+}
+
+#[cfg(test)]
+mod full_screen_page_tests {
+    use super::consume_full_screen_page;
+    use eframe::egui::{self, Key, Modifiers};
+
+    #[test]
+    fn page_keys_alone_step_through_the_pages() {
+        let press = |key: Key, modifiers: Modifiers| {
+            let mut input = egui::InputState::default();
+            input.events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+            consume_full_screen_page(&mut input)
+        };
+        assert_eq!((press(Key::PageDown, Modifiers::NONE), press(Key::PageUp, Modifiers::NONE)), (Some(1), Some(-1)));
+        // Ctrl+Page Down is the ordinary page key, read elsewhere
+        assert_eq!(press(Key::PageDown, Modifiers { ctrl: true, command: true, ..Modifiers::NONE }), None);
+        assert_eq!(press(Key::ArrowDown, Modifiers::NONE), None);
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -6387,6 +6415,14 @@ impl eframe::App for LayoutCraftApp {
                 });
                 if let Some((dx, dy)) = nudge {
                     self.nudge_selected(&ctx, dx, dy);
+                }
+            }
+            if self.full_screen {
+                match ctx.input_mut(consume_full_screen_page) {
+                    // `go_to_page` keeps the number inside the drawing
+                    Some(1) => action = Some(Action::Page(self.page_index + 1)),
+                    Some(_) => action = Some(Action::Page(self.page_index.saturating_sub(1))),
+                    None => {}
                 }
             }
             if self.full_screen && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {

@@ -335,7 +335,7 @@ Compare File (`compareBtn`: present on both), AI assistant info (`mcpInfo`: pres
 | Zoom: Ctrl+wheel; plain wheel scrolls | S11 | Ctrl+wheel zooms, wheel scrolls | wheel scrolls; `wheelZoom` option | Desktop matches |
 | Pan: Pan & Zoom window; scroll; Ctrl+Shift right-drag | S11 | middle button, Space-drag, Pan tool | same plus pane | P2 |
 | Tab / Shift+Tab cycle focus through shapes; Enter selects the focused shape | S1 | Tab / Shift+Tab select the next / previous shape once a shape is selected on the canvas | `tabThroughShapes` | Desktop: no keyboard way in without a selection (Ctrl+A first) |
-| Page change: Page Up / Page Down in full screen; Ctrl+Page Down next page | S1 | none | none | P2 |
+| Page change: Page Up / Page Down in full screen; Ctrl+Page Down next page | S1 | both | none | Desktop matches |
 
 ### 4.1 Keyboard shortcuts: Visio desktop (S1) against LayoutCraft desktop (`main.rs`)
 
