@@ -21,10 +21,32 @@ mod webpage_template;
 
 use std::collections::BTreeMap;
 
+pub use layoutcraft_vsdx::groupedit::EndTarget;
 use layoutcraft_model::Document;
 use layoutcraft_render::{scene_from_document_with_options, to_svg, SceneOptions};
 use layoutcraft_vsdx::groupedit::GroupEditor;
 use layoutcraft_vsdx::{import_document, media_bytes, Package};
+
+/// Where on the page a neighbour of a shape goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    Right,
+    Left,
+    Up,
+    Down,
+}
+
+impl Direction {
+    /// The unit step (x right, y up).
+    pub fn step(self) -> (f64, f64) {
+        match self {
+            Direction::Right => (1.0, 0.0),
+            Direction::Left => (-1.0, 0.0),
+            Direction::Up => (0.0, 1.0),
+            Direction::Down => (0.0, -1.0),
+        }
+    }
+}
 
 /// The open drawing and everything an edit session keeps next to it. The fields are public while the wasm crate
 /// still holds functions that have not moved into methods yet (they go away as the methods arrive).
@@ -903,6 +925,85 @@ impl Engine {
         let (bytes, id) = layoutcraft_vsdx::groupedit::add_connector(package, page, (from, from_site), (to, to_site)).map_err(|e| e.to_string())?;
         self.commit(bytes)?;
         Ok(id)
+    }
+
+    /// Add a connector whose ends are each glued to a shape or loose at a page position. ONE undo step; returns the id.
+    pub fn add_connector_between(&mut self, page: usize, from: &EndTarget, to: &EndTarget) -> Result<String, String> {
+        let package = self.package_ref()?;
+        let (bytes, id) = layoutcraft_vsdx::groupedit::add_connector_between(package, page, from, to).map_err(|e| e.to_string())?;
+        self.commit(bytes)?;
+        Ok(id)
+    }
+
+    /// The begin and the end of a connector trade places, glue included; each line end style stays at its end of the line, so an
+    /// arrowhead then points the other way. ONE undo step.
+    pub fn reverse_ends(&mut self, page: usize, connector: &str) -> Result<(), String> {
+        let all: serde_json::Value = serde_json::from_str(&self.connectors_json(page)?).map_err(|e| e.to_string())?;
+        let found = all.as_array().and_then(|list| list.iter().find(|c| c["id"] == connector)).ok_or_else(|| format!("shape {connector} is not a connector"))?;
+        let end = |name: &str| -> Result<(Option<(String, Option<usize>)>, (f64, f64)), String> {
+            let end = &found[name];
+            let at = (end["x"].as_f64().ok_or("the connector end has no position")?, end["y"].as_f64().ok_or("the connector end has no position")?);
+            let glue = end["glue"]["sheet"].as_str().map(|sheet| (sheet.to_string(), end["glue"]["n"].as_u64().map(|n| n as usize)));
+            Ok((glue, at))
+        };
+        let (begin, finish) = (end("begin")?, end("end")?);
+        let depth = self.undo_depth();
+        // The end is let go first: a connector cannot have both ends on one shape while the ends trade places.
+        let result = self
+            .move_connector_end(page, connector, false, None, finish.1)
+            .and_then(|()| self.move_connector_end(page, connector, true, finish.0.as_ref().map(|(s, n)| (s.as_str(), *n)), finish.1))
+            .and_then(|()| self.move_connector_end(page, connector, false, begin.0.as_ref().map(|(s, n)| (s.as_str(), *n)), begin.1));
+        self.one_step_or_nothing(depth, result)
+    }
+
+    /// Place a shape next to shape `from` in `direction`, one avenue (the page's spacing) away and centred on its axis, and connect
+    /// the two. The new shape is master `pick` of an open stencil, or without it a copy of `from`. ONE undo step; returns its id.
+    pub fn connect_new_neighbour(&mut self, page: usize, from: &str, direction: Direction, pick: Option<(usize, &str)>) -> Result<String, String> {
+        let editor = GroupEditor::open(self.package_ref()?, page).map_err(|e| e.to_string())?;
+        let (left, bottom, right, top) = editor.shape_page_box(from).ok_or_else(|| format!("no shape {from}"))?;
+        let size: serde_json::Value = serde_json::from_str(&self.page_size_json(page)?).map_err(|e| e.to_string())?;
+        let avenue = |axis: usize| size["avenue"][axis].as_f64().unwrap_or(0.0);
+        let (width, height) = match pick {
+            Some((stencil, master)) => {
+                let package = self.stencils.get(stencil).and_then(|s| s.as_ref()).ok_or("no such stencil")?;
+                let masters = layoutcraft_vsdx::stencil::master_list(package).map_err(|e| e.to_string())?;
+                let found = masters.as_array().and_then(|list| list.iter().find(|m| m["id"].as_str().map_or_else(|| m["id"].to_string(), str::to_string) == master));
+                let found = found.ok_or_else(|| format!("the stencil has no master {master}"))?;
+                (found["w"].as_f64().unwrap_or(0.0), found["h"].as_f64().unwrap_or(0.0))
+            }
+            None => (right - left, top - bottom),
+        };
+        let (dx, dy) = direction.step();
+        let middle = ((left + right) / 2.0, (bottom + top) / 2.0);
+        let offset = (dx * ((right - left) / 2.0 + avenue(0) + width / 2.0), dy * ((top - bottom) / 2.0 + avenue(1) + height / 2.0));
+        let depth = self.undo_depth();
+        let made = match pick {
+            Some((stencil, master)) => self.stencil_drop(page, stencil, master, middle.0 + offset.0, middle.1 + offset.1),
+            None => {
+                // The user's clipboard stays what it was.
+                let kept = (std::mem::take(&mut self.clipboard), std::mem::take(&mut self.clipboard_connects));
+                let pasted = self.copy(page, &[from.to_string()]).and_then(|_| self.paste(page, offset.0, offset.1));
+                (self.clipboard, self.clipboard_connects) = kept;
+                pasted.and_then(|ids| ids.into_iter().next().ok_or_else(|| "nothing was copied".to_string()))
+            }
+        };
+        let result = made.and_then(|id| self.add_connector(page, from, None, &id, None).map(|_| id));
+        self.one_step_or_nothing(depth, result)
+    }
+
+    /// Make the edits since undo depth `depth` one step when they all worked, else take them back.
+    fn one_step_or_nothing<T>(&mut self, depth: usize, result: Result<T, String>) -> Result<T, String> {
+        match result {
+            Ok(value) => {
+                self.collapse_history(depth);
+                Ok(value)
+            }
+            Err(error) => {
+                while self.undo_depth() > depth && self.undo()? {}
+                self.redo.clear();
+                Err(error)
+            }
+        }
     }
 
     /// The page-level connectors of `page` as JSON (route, ends, what each end is glued to).

@@ -283,8 +283,50 @@ pub fn add_connector(
     from: (&str, Option<usize>),
     to: (&str, Option<usize>),
 ) -> Result<(Vec<u8>, String)> {
+    let end = |(shape, site): (&str, Option<usize>)| EndTarget::Glue(shape.to_string(), site);
+    add_connector_between(package, page_index, &end(from), &end(to))
+}
+
+/// The shortest connector that may be drawn with a loose end, in inches.
+const MIN_LOOSE_LENGTH: f64 = 0.05;
+
+/// [`add_connector`] where either end may also be loose at a page position, written as a dragged-off end is
+/// ([`move_connector_end`]): literal coordinates, no trigger and no `Connect` row. The stored route turns at right angles between
+/// two shapes; with a loose end it is the straight line between the ends, which the scene routes at right angles when it draws it.
+pub fn add_connector_between(package: &Package, page_index: usize, from: &EndTarget, to: &EndTarget) -> Result<(Vec<u8>, String)> {
     let editor = GroupEditor::open(package, page_index)?;
-    let plan = editor.plan_connector(from, to)?;
+    let glue = |end: &EndTarget| match end {
+        EndTarget::Glue(shape, site) => Some((shape.clone(), *site)),
+        EndTarget::Free(..) => None,
+    };
+    let (from_glue, to_glue) = (glue(from), glue(to));
+    let plan = match (&from_glue, &to_glue) {
+        (Some(a), Some(b)) => editor.plan_connector((&a.0, a.1), (&b.0, b.1))?,
+        _ => {
+            for (shape, site) in [&from_glue, &to_glue].into_iter().flatten() {
+                if editor.chain(shape).is_none() {
+                    return Err(Error(format!("no shape {shape}")));
+                }
+                if let Some(n) = site {
+                    if editor.site(shape, *n).is_none() {
+                        return Err(Error(format!("shape {shape} has no connection point {n}")));
+                    }
+                }
+            }
+            // A glued end takes the connection point nearest to the loose one.
+            let (begin, end) = match (from, to) {
+                (EndTarget::Free(ax, ay), EndTarget::Free(bx, by)) => ((*ax, *ay), (*bx, *by)),
+                (EndTarget::Free(x, y), glued) => ((*x, *y), editor.end_point(glued, (*x, *y))?),
+                (glued, EndTarget::Free(x, y)) => (editor.end_point(glued, (*x, *y))?, (*x, *y)),
+                _ => return Err(Error("a connector needs two ends".to_string())),
+            };
+            let length = (end.0 - begin.0).hypot(end.1 - begin.1);
+            if !length.is_finite() || length < MIN_LOOSE_LENGTH {
+                return Err(Error("the two ends of the connector are too close together".to_string()));
+            }
+            ConnectorPlan { begin, end, route: vec![begin, end] }
+        }
+    };
     let id = crate::writer::next_shape_id(package, page_index)?.to_string();
     let catalog = MasterCatalog::load(package)?;
     let master = catalog
@@ -316,17 +358,21 @@ pub fn add_connector(
     xml.push_str(&cell("Height", h, Some("GUARD(EndY-BeginY)".to_string())));
     xml.push_str(&inh(w / 2.0).replace('@', "LocPinX"));
     xml.push_str(&inh(h / 2.0).replace('@', "LocPinY"));
-    xml.push_str(&cell("BeginX", plan.begin.0, Some(glue_formula(&from, true))));
-    xml.push_str(&cell("BeginY", plan.begin.1, Some(glue_formula(&from, true))));
-    xml.push_str(&cell("EndX", plan.end.0, Some(glue_formula(&to, false))));
-    xml.push_str(&cell("EndY", plan.end.1, Some(glue_formula(&to, false))));
+    let formula = |end: &Option<(String, Option<usize>)>, begin: bool| end.as_ref().map(|(shape, site)| glue_formula(&(shape.as_str(), *site), begin));
+    xml.push_str(&cell("BeginX", plan.begin.0, formula(&from_glue, true)));
+    xml.push_str(&cell("BeginY", plan.begin.1, formula(&from_glue, true)));
+    xml.push_str(&cell("EndX", plan.end.0, formula(&to_glue, false)));
+    xml.push_str(&cell("EndY", plan.end.1, formula(&to_glue, false)));
     xml.push_str("<Cell N='LayerMember' V='0'/>");
     if themed.is_some() {
         xml.push_str(crate::draw::QUICK_STYLE);
     }
     let trigger = |shape: &str| format!("_XFTRIGGER(Sheet.{shape}!EventXFMod)");
-    xml.push_str(&format!("<Cell N='BegTrigger' V='2' F='{}'/>", escape_xml_attr(&trigger(from.0))));
-    xml.push_str(&format!("<Cell N='EndTrigger' V='2' F='{}'/>", escape_xml_attr(&trigger(to.0))));
+    for (name, end) in [("BegTrigger", &from_glue), ("EndTrigger", &to_glue)] {
+        if let Some((shape, _)) = end {
+            xml.push_str(&format!("<Cell N='{name}' V='2' F='{}'/>", escape_xml_attr(&trigger(shape))));
+        }
+    }
     xml.push_str("<Cell N='ShapeRouteStyle' V='1'/>");
     if master.is_none() {
         xml.push_str("<Cell N='WalkPreference' V='0'/>");
@@ -343,8 +389,8 @@ pub fn add_connector(
         ));
     }
     xml.push_str("</Section></Shape>");
-    let row = |from_cell: &str, from_part: u32, end: &(&str, Option<usize>)| connect_row(&id, from_cell, from_part, end);
-    let rows = format!("{}{}", row("BeginX", 9, &from), row("EndX", 12, &to));
+    let row = |from_cell: &str, from_part: u32, end: &Option<(String, Option<usize>)>| end.as_ref().map_or_else(String::new, |(shape, site)| connect_row(&id, from_cell, from_part, &(shape.as_str(), *site)));
+    let rows = format!("{}{}", row("BeginX", 9, &from_glue), row("EndX", 12, &to_glue));
     let bytes = crate::writer::append_shape_with_connects(package, page_index, &xml, &rows)?;
     // The page must relate to the connector master too (see `writer::page_master_relationship`).
     let bytes = match &master {
@@ -614,21 +660,7 @@ pub fn move_connector_end(package: &Package, page_index: usize, id: &str, begin:
             (plan.begin, plan.end, plan.route)
         }
         _ => {
-            let target_pos = match &target {
-                EndTarget::Free(x, y) => (*x, *y),
-                EndTarget::Glue(sheet, Some(n)) => editor.site(sheet, *n).map(|s| s.0.point).unwrap_or(other_pos),
-                EndTarget::Glue(sheet, None) => {
-                    let (sites, _) = editor.sites_of(sheet).ok_or_else(|| Error(format!("no shape {sheet}")))?;
-                    sites
-                        .iter()
-                        .map(|s| s.point)
-                        .min_by(|p, q| {
-                            let d = |r: &(f64, f64)| (r.0 - other_pos.0).powi(2) + (r.1 - other_pos.1).powi(2);
-                            d(p).total_cmp(&d(q))
-                        })
-                        .unwrap_or(other_pos)
-                }
-            };
+            let target_pos = editor.end_point(&target, other_pos)?;
             let (b, e) = if begin { (target_pos, other_pos) } else { (other_pos, target_pos) };
             (b, e, vec![b, e])
         }
@@ -1102,6 +1134,33 @@ impl GroupEditor {
         let (to_sites, b) = ends(to.0, to.1)?;
         let (begin, end, route, _) = route_ends(&from_sites, a, &to_sites, b).ok_or_else(|| Error("no route between these shapes".to_string()))?;
         Ok(ConnectorPlan { begin: begin.point, end: end.point, route })
+    }
+
+    /// Where a connector end `target` lies when the other end is loose at `toward`: the position, the connection point, or the
+    /// point of the shape's connection points nearest to `toward`.
+    fn end_point(&self, target: &EndTarget, toward: (f64, f64)) -> Result<(f64, f64)> {
+        Ok(match target {
+            EndTarget::Free(x, y) => (*x, *y),
+            EndTarget::Glue(sheet, Some(n)) => self.site(sheet, *n).map(|s| s.0.point).unwrap_or(toward),
+            EndTarget::Glue(sheet, None) => {
+                let (sites, _) = self.sites_of(sheet).ok_or_else(|| Error(format!("no shape {sheet}")))?;
+                sites
+                    .iter()
+                    .map(|s| s.point)
+                    .min_by(|p, q| {
+                        let d = |r: &(f64, f64)| (r.0 - toward.0).powi(2) + (r.1 - toward.1).powi(2);
+                        d(p).total_cmp(&d(q))
+                    })
+                    .unwrap_or(toward)
+            }
+        })
+    }
+
+    /// The box shape `id` covers on the page, `(left, bottom, right, top)` in inches (a turned shape: the box around it).
+    pub fn shape_page_box(&self, id: &str) -> Option<(f64, f64, f64, f64)> {
+        let chain = self.chain(id)?;
+        let frame = frame_of(chain[chain.len() - 1]).ok()?;
+        self.page_box(id, &frame).map(|r| (r.x0, r.y0, r.x1, r.y1))
     }
 
     /// Every connection point of shape `id` (the four side midpoints when it defines none) and
