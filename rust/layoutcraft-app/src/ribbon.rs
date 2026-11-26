@@ -103,6 +103,8 @@ pub enum Native {
     Flip(bool),
     /// (width, height): the other selected shapes take the first one's width and / or height
     SameSize(bool, bool),
+    /// `Engine::group_op` 6..12: union, combine, fragment, intersect, subtract, join, trim
+    ShapeOp(i32),
     /// 0 left, 1 centre, 2 right, 3 top, 4 middle, 5 bottom
     Align(u32),
     Distribute(bool),
@@ -173,6 +175,13 @@ pub fn native(id: &str) -> Option<Native> {
         "sameW" => Native::SameSize(true, false),
         "sameH" => Native::SameSize(false, true),
         "sameWH" => Native::SameSize(true, true),
+        "opUnion" => Native::ShapeOp(6),
+        "opCombine" => Native::ShapeOp(7),
+        "opFragment" => Native::ShapeOp(8),
+        "opIntersect" => Native::ShapeOp(9),
+        "opSubtract" => Native::ShapeOp(10),
+        "opJoin" => Native::ShapeOp(11),
+        "opTrim" => Native::ShapeOp(12),
         "arrL" => Native::Align(0),
         "arrCx" => Native::Align(1),
         "arrRt" => Native::Align(2),
@@ -271,6 +280,13 @@ pub fn label(id: &str) -> String {
         "sameW" => "Same Width",
         "sameH" => "Same Height",
         "sameWH" => "Same Size",
+        "opUnion" => "Union",
+        "opCombine" => "Combine",
+        "opFragment" => "Fragment",
+        "opIntersect" => "Intersect",
+        "opSubtract" => "Subtract",
+        "opJoin" => "Join",
+        "opTrim" => "Trim",
         "arrL" => "Align Left",
         "arrCx" => "Align Center",
         "arrRt" => "Align Right",
@@ -384,7 +400,7 @@ mod tests {
         web_ids.extend(ribbon.icons.keys().cloned());
         web_ids.extend(["save", "undo", "redo"].map(String::from));
         let expected = [
-            "undo", "redo", "save", "copy", "cut", "paste", "dup", "del", "grp", "ungrp", "zFront", "zBack", "zFwd", "zBwd", "rotR", "rotL", "flipH", "flipV", "sameW", "sameH", "sameWH", "arrL", "arrCx", "arrRt", "arrT",
+            "undo", "redo", "save", "copy", "cut", "paste", "dup", "del", "grp", "ungrp", "zFront", "zBack", "zFwd", "zBwd", "rotR", "rotL", "flipH", "flipV", "sameW", "sameH", "sameWH", "opUnion", "opCombine", "opFragment", "opIntersect", "opSubtract", "opJoin", "opTrim", "arrL", "arrCx", "arrRt", "arrT",
             "arrM", "arrB", "arrDistH", "arrDistV", "pageAdd", "pageDup", "pageRename", "pageDel", "pageLeft", "pageRight", "connectTool", "handTool", "snapGrid", "snapShapes", "snapGuides", "showGrid", "gridStep", "fit", "zoom100", "zin", "zout", "newBtn", "file", "docPropsBtn", "helpShortcuts", "helpAbout", "mcpInfo", "insertTextBox", "pageSetup", "showComments", "newComment", "checkDiagram", "compareBtn", "reportBtn", "exportBtn", "paneShapes", "borderStyle", "borderTitle", "borderApply", "borderRemove",
         ];
         for id in expected {
@@ -397,7 +413,7 @@ mod tests {
                 assert!(expected.contains(&id.as_str()), "{id} maps to a native command but is not in the list this test knows");
             }
         }
-        assert!(native("painter").is_none() && native("opUnion").is_none());
+        assert!(native("painter").is_none() && native("fitCurveBtn").is_none());
     }
 
     #[test]

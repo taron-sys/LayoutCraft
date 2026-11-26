@@ -115,8 +115,8 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 33 present, 18 partial,
-74 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 34 present, 19 partial,
+72 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
 ### 3.1 File / Backstage
@@ -183,7 +183,7 @@ these are row counts, not a count of every Visio button.
 | Arrange: same width / height / size | unverified | sameW sameH sameWH | present | present | To the first shape selected; connectors and group members are left out | P2 |
 | Arrange: reverse connector ends | unverified | reverseEnds | missing | present | | P2 |
 | Arrange: lock | unverified | lockShape | missing | present | | P2 |
-| Arrange: shape operations (Union, Combine, Fragment, Intersect, Subtract, Join, Trim) | S18 for Trim (Developer tab, Shape Design, Operations); the others unverified | opUnion opCombine opFragment opIntersect opSubtract opJoin opTrim | missing | present | Visio puts them on Developer (S18); LayoutCraft shows them in Home > Arrange. Engine: `shape_operation`; follow Visio's place | P1 |
+| Arrange: shape operations (Union, Combine, Fragment, Intersect, Subtract, Join, Trim) | S18 for Trim (Developer tab, Shape Design, Operations); the others unverified | opUnion opCombine opFragment opIntersect opSubtract opJoin opTrim | present | present | Visio puts them on Developer (S18); LayoutCraft shows them in Home > Arrange. Engine: `shape_operation`; follow Visio's place | P1 |
 | Editing: Select (Area Select, Lasso Select, Select All, Select by Type) | S19 | - | partial | partial | Rectangle drag and Ctrl+A exist; lasso and by-type missing | P1 |
 | Editing: Layers > Assign to Layer, Layer Properties | S22 | layersBtn | partial | present | Desktop in inspector only | P2 |
 | Editing: Change Shape | unverified | changeShapeBtn | partial | present | Desktop: stencil context menu "Replace the selected shape" | P2 |
@@ -288,7 +288,7 @@ these are row counts, not a count of every Visio button.
 | Shape Design: Geometry (Freeform, Arc, Pencil) | S14 | drawTools | missing | present | | P3 |
 | Shape Design: Shape Name | S14 | - | missing | missing | | P3 |
 | Shape Design: Behavior, Protection | S14 | - | missing | missing | | P3 |
-| Shape Design: Operations (Trim and the other operations) | S18 | opUnion ... opTrim | missing | present | | P2 |
+| Shape Design: Operations (Trim and the other operations) | S18 | opUnion ... opTrim | partial | present | Desktop has them in Home > Arrange; there is no Developer tab | P2 |
 | Stencil: new stencil | S14 | - | missing | missing | Needs stencil writer | P3 |
 | Show/Hide: Document Stencil, Drawing Explorer, Master Explorer | S14 | - | missing | missing | | P3 |
 | Code & Controls: Macros, Visual Basic | S14 | - | missing | missing | Not planned | P3 |

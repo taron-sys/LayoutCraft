@@ -427,6 +427,47 @@ mod same_size_tests {
     }
 }
 
+/// The status verb of a shape operation (`Engine::group_op` 6..12) and how many selected shapes it needs.
+fn shape_op_info(op: i32) -> (&'static str, usize) {
+    match op {
+        6 => ("Joined into one outline", 2),
+        7 => ("Combined", 2),
+        8 => ("Cut into pieces", 2),
+        9 => ("Intersected", 2),
+        10 => ("Subtracted", 2),
+        11 => ("Joined the lines", 1),
+        _ => ("Trimmed", 2),
+    }
+}
+
+#[cfg(test)]
+mod shape_op_tests {
+    use crate::ribbon::{self, Native};
+    use layoutcraft_engine::Engine;
+
+    /// The number of shapes the ribbon command `id` makes from two overlapping rectangles.
+    fn made_by(id: &str) -> usize {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let first = engine.draw(0, 0, 1.0, 1.0, 3.0, 3.0).unwrap();
+        let second = engine.draw(0, 0, 2.0, 2.0, 4.0, 4.0).unwrap();
+        let Some(Native::ShapeOp(op)) = ribbon::native(id) else { panic!("{id} is not a shape operation") };
+        let made = engine.group_op(0, op, &format!("{first}
+{second}")).unwrap();
+        serde_json::from_str::<Vec<String>>(&made).unwrap().len()
+    }
+
+    #[test]
+    fn each_ribbon_command_runs_its_own_operation() {
+        assert_eq!(made_by("opUnion"), 1);
+        assert_eq!(made_by("opIntersect"), 1);
+        assert_eq!(made_by("opSubtract"), 1);
+        assert_eq!(made_by("opCombine"), 1);
+        // the two rectangles cut each other into the overlap and the two remainders
+        assert!(made_by("opFragment") >= 3);
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -924,6 +965,8 @@ enum ArrangeCmd {
     Flip(bool),
     /// (width, height): give the other shapes the first one's width and / or height.
     SameSize(bool, bool),
+    /// `Engine::group_op` 6 union, 7 combine, 8 fragment, 9 intersect, 10 subtract, 11 join, 12 trim.
+    Shapes(i32),
 }
 
 /// What a drag on the canvas does: select / move / resize, or draw a shape.
@@ -3198,6 +3241,7 @@ impl LayoutCraftApp {
             N::RotateLeft => Action::Arrange(ArrangeCmd::RotateLeft),
             N::Flip(vertical) => Action::Arrange(ArrangeCmd::Flip(vertical)),
             N::SameSize(width, height) => Action::Arrange(ArrangeCmd::SameSize(width, height)),
+            N::ShapeOp(op) => Action::Arrange(ArrangeCmd::Shapes(op)),
             N::Align(mode) => Action::Arrange(ArrangeCmd::Align(mode)),
             N::Distribute(vertical) => Action::Arrange(ArrangeCmd::Distribute(vertical)),
             N::PageAdd => Action::PageAdd,
@@ -3444,6 +3488,8 @@ impl LayoutCraftApp {
         let list = ids.join("\n");
         let page = self.page_index;
         let need = |count: usize| ids.len() >= count;
+        // the shapes a shape operation made: all of them stay selected
+        let mut pieces: Vec<String> = Vec::new();
         let (verb, result): (&str, Result<Option<String>, String>) = match command {
             ArrangeCmd::Group if !need(2) => ("Group", Err("select two or more shapes (shift-click)".to_string())),
             ArrangeCmd::Group => ("Grouped", self.engine.group_op(page, 0, &list).map(Some)),
@@ -3458,6 +3504,14 @@ impl LayoutCraftApp {
             ArrangeCmd::RotateLeft => ("Rotated left", self.engine.edit(page, 11, &list, std::f64::consts::FRAC_PI_2, 0.0, 0.0, 0.0, 0).map(|_| None)),
             ArrangeCmd::Flip(vertical) => ("Flipped", self.engine.edit(page, 12, &list, 0.0, 0.0, 0.0, 0.0, vertical as i32).map(|_| None)),
             ArrangeCmd::SameSize(width, height) => ("Resized", self.make_same_size(&ids, width, height).map(|_| None)),
+            ArrangeCmd::Shapes(op) if !need(shape_op_info(op).1) => (shape_op_info(op).0, Err("select two or more shapes (shift-click)".to_string())),
+            ArrangeCmd::Shapes(op) => (
+                shape_op_info(op).0,
+                self.engine.group_op(page, op, &list).map(|made| {
+                    pieces = serde_json::from_str(&made).unwrap_or_default();
+                    pieces.first().cloned()
+                }),
+            ),
         };
         match result {
             Ok(new_primary) => {
@@ -3465,6 +3519,9 @@ impl LayoutCraftApp {
                     self.extra_selected.clear();
                 }
                 self.finish_edit(ctx, Ok(()), verb, new_primary.or(Some(primary)));
+                if pieces.len() > 1 {
+                    self.extra_selected = pieces.split_off(1);
+                }
             }
             Err(error) => self.status = format!("{verb} failed: {error}"),
         }
