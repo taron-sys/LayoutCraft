@@ -115,8 +115,8 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 46 present, 22 partial,
-57 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 46 present, 23 partial,
+56 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
 ### 3.1 File / Backstage
@@ -128,7 +128,7 @@ these are row counts, not a count of every Visio button.
 | Save | S16 | save | partial | present | Desktop Ctrl+S saves a copy (`save_copy`), not in place | P0 |
 | Save As | unverified | save | present | present | | P1 |
 | Export | unverified | exportBtn | present | present | | P2 |
-| Copy as picture | unverified | copyImgBtn | missing | present | | P3 |
+| Copy as picture | unverified | copyImgBtn | partial | present | Desktop: the whole page; not a selection | P3 |
 | Print | S1 (Ctrl+P is a web shortcut) | print | missing | present | Browser prints through the page | P1 |
 | Info / document properties | unverified | docPropsBtn | present | present | | P2 |
 | Options (Customize Ribbon, Advanced) | S16, S11 | - | missing | missing | | P2 |

@@ -2034,6 +2034,31 @@ mod equal_gap_tests {
     }
 }
 
+/// The picture "Copy as Picture" puts on the clipboard: the page drawn at twice its size (less for a very large page).
+fn page_picture(scene: &Scene) -> Result<egui::ColorImage, String> {
+    let (width, height) = scene.raster_size();
+    let scale = LayoutCraftApp::raster_scale_for(width as f64, height as f64, 2.0);
+    let (width, height, rgba) = render_rgba(scene, scale).map_err(|error| error.to_string())?;
+    Ok(egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba))
+}
+
+#[cfg(test)]
+mod page_picture_tests {
+    use super::page_picture;
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn the_picture_is_sharper_than_the_page_and_shows_its_shapes() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        engine.draw(0, 0, 1.0, 1.0, 3.0, 2.0).unwrap();
+        let scene = layoutcraft_render::scene_from_document(engine.document().unwrap(), 0).unwrap();
+        let picture = page_picture(&scene).unwrap();
+        assert!(picture.size[0] > scene.raster_size().0 as usize);
+        assert!(picture.pixels.iter().any(|pixel| *pixel != picture.pixels[0]), "the picture is not one flat colour");
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -5128,6 +5153,7 @@ impl LayoutCraftApp {
             N::HelpShortcuts => Action::HelpShortcuts,
             N::Hyperlink => Action::Hyperlink,
             N::Layers => Action::Layers,
+            N::CopyPicture => Action::CopyPicture,
             N::ShapeFormulas => Action::ShapeFormulas,
             N::FullScreen => Action::FullScreen,
             N::ShapeData => Action::ShapeData,
@@ -6281,6 +6307,22 @@ impl LayoutCraftApp {
             ui.label(egui::RichText::new("Connectors always attach to the shape or connection point they are dropped on.").small());
         });
         self.snap_open = open && !(!ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
+    }
+
+    /// Send a picture of the shown page to the system clipboard. The toolkit does not report whether the clipboard took it.
+    fn copy_page_picture(&mut self, ctx: &egui::Context) {
+        let Some(scene) = self.scene.as_ref() else {
+            self.status = "Open a drawing first.".to_string();
+            return;
+        };
+        match page_picture(scene) {
+            Ok(picture) => {
+                let [width, height] = picture.size;
+                ctx.copy_image(picture);
+                self.status = format!("Sent a {width} x {height} picture of the page to the clipboard.");
+            }
+            Err(error) => self.status = format!("Could not draw the picture: {error}"),
+        }
     }
 
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
@@ -7982,6 +8024,7 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
             Some(Action::Hyperlink) => self.open_links(),
             Some(Action::Layers) => self.layers_open = !self.layers_open,
+            Some(Action::CopyPicture) => self.copy_page_picture(&ctx),
             // as a dropped file: unsaved changes are asked about first
             Some(Action::OpenRecent(ref path)) => {
                 self.path_input = path.display().to_string();
@@ -8100,6 +8143,7 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    CopyPicture,
     /// Open a drawing of the Recent menu.
     OpenRecent(std::path::PathBuf),
     /// Show or hide the Shape Formulas window.
