@@ -1,10 +1,42 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- MIME type of .vsdx files for the desktop's shared-mime-info database, so that file managers offer LayoutCraft for them.
-     The type name is the registered media type of these files; this file only describes it and does not make LayoutCraft the default application. -->
+<!-- The file types LayoutCraft opens, for the desktop's shared-mime-info database, so that file managers offer LayoutCraft for them.
+     The type names are those a current shared-mime-info already uses (repeating one adds to it); they are listed here for systems
+     that do not know them. application/x-visio-xml is our own name: the XML formats had none. This file does not make LayoutCraft
+     the default application. Stencils in the zipped format (.vssx, .vssm) are left out: the app opens them from its Shapes panel,
+     not as a drawing. Keep layoutcraft.desktop's MimeType in step. -->
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
-  <mime-type type="application/vnd.ms-visio.drawing">
+  <mime-type type="application/vnd.ms-visio.drawing.main+xml">
     <comment>Drawing file (.vsdx)</comment>
     <glob pattern="*.vsdx"/>
     <sub-class-of type="application/zip"/>
+  </mime-type>
+  <mime-type type="application/vnd.ms-visio.drawing.macroEnabled.main+xml">
+    <comment>Drawing file with macros (.vsdm)</comment>
+    <glob pattern="*.vsdm"/>
+    <sub-class-of type="application/zip"/>
+  </mime-type>
+  <mime-type type="application/vnd.ms-visio.template.main+xml">
+    <comment>Drawing template (.vstx)</comment>
+    <glob pattern="*.vstx"/>
+    <sub-class-of type="application/zip"/>
+  </mime-type>
+  <mime-type type="application/vnd.ms-visio.template.macroEnabled.main+xml">
+    <comment>Drawing template with macros (.vstm)</comment>
+    <glob pattern="*.vstm"/>
+    <sub-class-of type="application/zip"/>
+  </mime-type>
+  <mime-type type="application/vnd.visio">
+    <comment>Older drawing, template or stencil file (.vsd, .vst, .vss)</comment>
+    <glob pattern="*.vsd"/>
+    <glob pattern="*.vst"/>
+    <glob pattern="*.vss"/>
+    <sub-class-of type="application/x-ole-storage"/>
+  </mime-type>
+  <mime-type type="application/x-visio-xml">
+    <comment>XML drawing, template or stencil file (.vdx, .vtx, .vsx)</comment>
+    <glob pattern="*.vdx"/>
+    <glob pattern="*.vtx"/>
+    <glob pattern="*.vsx"/>
+    <sub-class-of type="application/xml"/>
   </mime-type>
 </mime-info>
