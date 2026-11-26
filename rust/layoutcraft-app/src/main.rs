@@ -2187,6 +2187,16 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
             self.frames(2);
         }
 
+        /// Typed characters, as the keyboard sends them to a focused field.
+        fn write(&mut self, typed: &str) {
+            self.run(vec![Event::Text(typed.to_string())]);
+            self.frames(1);
+        }
+
+        fn width_in(&self, id: &str) -> f64 {
+            self.app.doc_shape(id).expect("the shape exists").w / super::DPI
+        }
+
         /// Where the middle of a shape is on the screen.
         fn middle_of(&self, id: &str) -> egui::Pos2 {
             let image = self.app.image_rect(self.app.last_viewport);
@@ -2317,6 +2327,55 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert_eq!(driver.app.page_index, 1, "{}", driver.app.status);
         driver.key(Key::PageUp, Modifiers::NONE);
         assert_eq!(driver.app.page_index, 0);
+    }
+
+    #[test]
+    fn find_selects_match_after_match_and_escape_closes_it() {
+        let (mut driver, ids) = Driver::new();
+        driver.key(Key::F, CTRL);
+        assert!(driver.app.find.is_some());
+        driver.write("label");
+        driver.key(Key::Enter, Modifiers::NONE);
+        let first = driver.app.selected.clone().unwrap_or_default();
+        driver.key(Key::Enter, Modifiers::NONE);
+        let second = driver.app.selected.clone().unwrap_or_default();
+        assert!(ids.contains(&first) && ids.contains(&second) && first != second, "{first} {second}");
+        driver.key(Key::Escape, Modifiers::NONE);
+        assert!(driver.app.find.is_none());
+        assert_eq!(driver.app.selected, Some(second), "closing the window keeps the shape that was found");
+    }
+
+    #[test]
+    fn a_size_field_applies_on_enter_and_escape_only_leaves_it() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        // what a click on the status bar's size does: the Width field takes the keyboard
+        driver.app.size_pos.focus = Some(2);
+        driver.frames(2);
+        driver.key(Key::A, CTRL);
+        driver.write("3");
+        driver.key(Key::Enter, Modifiers::NONE);
+        assert!((driver.width_in(&ids[0]) - 3.0).abs() < 0.01, "{} {}", driver.width_in(&ids[0]), driver.app.status);
+        driver.app.size_pos.focus = Some(2);
+        driver.frames(2);
+        driver.key(Key::A, CTRL);
+        driver.write("9");
+        driver.key(Key::Escape, Modifiers::NONE);
+        assert!((driver.width_in(&ids[0]) - 3.0).abs() < 0.01, "{}", driver.width_in(&ids[0]));
+        assert_eq!(driver.app.selected, Some(ids[0].clone()), "Esc in a field does not deselect the shape");
+    }
+
+    #[test]
+    fn escape_still_closes_the_text_editor() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(2);
+        driver.key(Key::F2, Modifiers::NONE);
+        assert!(driver.app.text_editor.is_some(), "{}", driver.app.status);
+        driver.frames(2);
+        driver.key(Key::Escape, Modifiers::NONE);
+        assert!(driver.app.text_editor.is_none());
     }
 }
 
@@ -3057,6 +3116,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// A widget had the keyboard when this frame began.
+    focus_at_frame_start: bool,
     /// The Snap and Attach window is open.
     snap_open: bool,
     /// The Shapes panel is narrowed to a column.
@@ -3212,6 +3273,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            focus_at_frame_start: false,
             snap_open: false,
             shapes_minimised: false,
             open_stencil_shown: None,
@@ -6568,7 +6630,7 @@ impl LayoutCraftApp {
             });
             ui.label(egui::RichText::new("Connectors always attach to the shape or connection point they are dropped on.").small());
         });
-        self.snap_open = open && !(!ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
+        self.snap_open = open && !(!self.focus_at_frame_start && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
     }
 
     /// Send a picture of the shown page to the system clipboard. The toolkit does not report whether the clipboard took it.
@@ -6713,6 +6775,8 @@ impl eframe::App for LayoutCraftApp {
     /// While the canvas has the keyboard and a shape is selected, Tab steps through the shapes instead of through the
     /// buttons; Esc clears the selection and gives Tab back.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // read here, before the toolkit takes the focus away for an Esc: such an Esc is for the field alone
+        self.focus_at_frame_start = ctx.memory(|memory| memory.focused()).is_some();
         if self.canvas_keys && self.selected.is_some() && ctx.memory(|memory| memory.focused()).is_none() {
             self.tab_cycle = take_shape_tab(&mut raw_input.events).or(self.tab_cycle);
         }
@@ -6866,14 +6930,17 @@ impl eframe::App for LayoutCraftApp {
                     None => {}
                 }
             }
-            if self.full_screen && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            if self.full_screen && !self.focus_at_frame_start && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 action = Some(Action::FullScreen);
             }
             if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
-                self.selected_guide = None;
-                self.guide_drag = None;
-                self.selected = None;
                 self.text_editor = None;
+                // an Esc that left a text field (or a focused button) does not also drop the selection
+                if !self.focus_at_frame_start {
+                    self.selected_guide = None;
+                    self.guide_drag = None;
+                    self.selected = None;
+                }
             }
         }
 
@@ -7110,7 +7177,7 @@ impl eframe::App for LayoutCraftApp {
                 self.layer_controls(ui, &mut action);
             });
             // Esc closes it, unless a text field has the keyboard (then Esc only leaves the field)
-            self.layers_open = open && !(!ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
+            self.layers_open = open && !(!self.focus_at_frame_start && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
         }
 
         if ctx.input(|input| input.key_pressed(egui::Key::Escape)) && self.armed_master.is_some() {
