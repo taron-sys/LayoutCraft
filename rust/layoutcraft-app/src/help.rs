@@ -20,7 +20,7 @@ pub const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+X / Ctrl+C / Ctrl+V", "Cut / copy / paste"),
             ("Ctrl+D", "Duplicate"),
             ("Delete or Backspace", "Delete the selection"),
-            ("Ctrl+E", "Edit the text of the selected shape"),
+            ("F2 or Ctrl+E", "Edit the text of the selected shape"),
             ("Ctrl+S", "Save a copy"),
         ],
     ),
@@ -30,9 +30,21 @@ pub const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Click, Shift+click", "Select, add to or remove from the selection"),
             ("Drag a shape", "Move it"),
             ("Drag a corner handle", "Resize it"),
+            ("Ctrl+A", "Select all"),
+            ("Arrow keys, with Shift", "Move the selection a small or a large step"),
         ],
     ),
-    ("View", &[("Mouse wheel", "Zoom"), ("Drag the empty page", "Pan the page")]),
+    (
+        "Arrange",
+        &[
+            ("Ctrl+G or Ctrl+Shift+G", "Group"),
+            ("Ctrl+Shift+U", "Ungroup"),
+            ("Ctrl+Shift+F / Ctrl+Shift+B", "Bring to front / send to back"),
+            ("Ctrl+L / Ctrl+R, or [ / ]", "Turn left / right"),
+            ("Ctrl+H / Ctrl+J, or H / V", "Flip horizontally / vertically"),
+        ],
+    ),
+    ("View", &[("Ctrl+Plus / Ctrl+Minus", "Zoom in / out"), ("Mouse wheel", "Zoom"), ("Drag the empty page", "Pan the page")]),
 ];
 
 #[cfg(test)]
@@ -42,7 +54,7 @@ mod tests {
     #[test]
     fn the_table_lists_every_shortcut_the_app_handles() {
         let keys: Vec<&str> = SHORTCUTS.iter().flat_map(|(_, rows)| rows.iter().map(|(keys, _)| *keys)).collect();
-        for handled in ["Ctrl+Z", "Ctrl+Y or Ctrl+Shift+Z", "Ctrl+X / Ctrl+C / Ctrl+V", "Ctrl+D", "Delete or Backspace", "Ctrl+E", "Ctrl+S"] {
+        for handled in ["Ctrl+Z", "Ctrl+Y or Ctrl+Shift+Z", "Ctrl+X / Ctrl+C / Ctrl+V", "Ctrl+D", "Delete or Backspace", "F2 or Ctrl+E", "Ctrl+S", "Ctrl+Shift+U", "Ctrl+L / Ctrl+R, or [ / ]"] {
             assert!(keys.contains(&handled), "{handled} is listed");
         }
     }
