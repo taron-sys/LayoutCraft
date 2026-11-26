@@ -53,7 +53,20 @@ fn decode(bytes: &[u8]) -> Option<String> {
 pub(super) fn looks_like_vdx(bytes: &[u8]) -> bool {
     let head = &bytes[..bytes.len().min(4096) & !1];
     let Some(text) = decode(head).or_else(|| Some(String::from_utf8_lossy(head).into_owned())) else { return false };
-    text.trim_start_matches('\u{feff}').trim_start().starts_with('<') && text.contains("<VisioDocument") && text.contains(NAMESPACE)
+    let text = text.trim_start_matches('\u{feff}').trim_start();
+    text.starts_with('<') && ((text.contains("<VisioDocument") && text.contains(NAMESPACE)) || unqualified_root(text))
+}
+
+/// Some programs write these drawings without any namespace: then the first element must be a `VisioDocument` with content and
+/// no default namespace of its own (`.vsdx` parts name theirs).
+fn unqualified_root(mut text: &str) -> bool {
+    // the XML declaration, other processing instructions and comments come before the root
+    while let Some(end) = if text.starts_with("<?") { Some("?>") } else { text.starts_with("<!--").then_some("-->") } {
+        let Some((_, rest)) = text.split_once(end) else { return false };
+        text = rest.trim_start();
+    }
+    let Some((attributes, _)) = text.strip_prefix("<VisioDocument").and_then(|rest| rest.split_once('>')) else { return false };
+    (attributes.is_empty() || attributes.starts_with(char::is_whitespace)) && !attributes.ends_with('/') && !attributes.contains("xmlns=")
 }
 
 /// Visio writes some control characters as character references that XML 1.0 forbids; they are removed so the file parses.

@@ -196,8 +196,21 @@ fn an_xml_drawing_becomes_a_package_with_colours_fonts_formulas_and_text() {
 }
 
 #[test]
+fn an_xml_drawing_without_a_namespace_opens_too() {
+    let plain = XML.replace(" xmlns=\"http://schemas.microsoft.com/visio/2003/core\"", " xml:space=\"preserve\"");
+    let commented = plain.replace("<VisioDocument", "<!-- written by another program -->\n<VisioDocument");
+    for xml in [plain, commented] {
+        assert_eq!(legacy::detect(xml.as_bytes()), Some(legacy::LegacyKind::Xml), "{xml}");
+        let (package, _) = converted(xml.as_bytes());
+        assert_eq!(import_document(&package).unwrap().pages[0].shapes[0].label, "Hello world");
+    }
+}
+
+#[test]
 fn other_files_are_not_taken_for_old_drawings() {
-    for bytes in [&b""[..], b"PK\x03\x04", b"<mxfile></mxfile>", b"<VisioDocument/>"] {
+    let other_namespace = b"<VisioDocument xmlns='http://schemas.microsoft.com/office/visio/2012/main'><Pages/></VisioDocument>";
+    let inside = b"<notes><VisioDocument><Pages/></VisioDocument></notes>";
+    for bytes in [&b""[..], b"PK\x03\x04", b"<mxfile></mxfile>", b"<VisioDocument/>", other_namespace, inside, b"<VisioDocumentation></VisioDocumentation>"] {
         assert_eq!(legacy::detect(bytes), None, "{bytes:?}");
     }
 }
