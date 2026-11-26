@@ -6,3 +6,4 @@
 mod hostile;
 mod legacy;
 mod regress;
+mod stencil_styles;

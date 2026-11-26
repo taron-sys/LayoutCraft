@@ -147,12 +147,37 @@ fn style_sheets(document_xml: &str) -> Vec<(String, String, String)> {
     out
 }
 
+/// Whether the style sheet `id`, or one it inherits from, takes values from the drawing's theme.
+fn takes_theme(sheets: &[(String, String, String)], id: &str) -> bool {
+    let mut queue = vec![id.to_string()];
+    let mut seen = BTreeSet::new();
+    while let Some(id) = queue.pop() {
+        if !seen.insert(id.clone()) {
+            continue;
+        }
+        let Some((_, _, element)) = sheets.iter().find(|(i, _, _)| *i == id) else { continue };
+        if element.contains("THEMEVAL(") || element.contains("THEME(") {
+            return true;
+        }
+        queue.extend(style_references(&element[..element.find('>').map_or(element.len(), |n| n + 1)]));
+    }
+    false
+}
+
+/// What a style sheet element holds between its tags.
+fn sheet_body(element: &str) -> &str {
+    let from = element.find('>').map_or(element.len(), |n| n + 1);
+    &element[from..element.rfind("</StyleSheet>").unwrap_or(from).max(from)]
+}
+
 /// Copy the style sheets that `used` (and the sheets they inherit from) name from the stencil's document
-/// part into the drawing's. A sheet the drawing has under the same id and name is shared; any other is
-/// copied under a new id. Returns the XML to add before `</StyleSheets>` and the old id -> new id map.
+/// part into the drawing's. A sheet the drawing has under the same id and name is shared, unless the drawing's takes its
+/// values from the theme and the stencil's does not (the shape would lose its own colours: black line art on white turns
+/// into one theme colour). Any other is copied under a new id, with a new name when the name is taken. Returns the XML to add before `</StyleSheets>` and the old id -> new id map.
 fn import_styles(target_document: &str, stencil_document: &str, used: BTreeSet<String>) -> (String, BTreeMap<String, String>) {
     let theirs = style_sheets(stencil_document);
-    let ours: BTreeMap<String, String> = style_sheets(target_document).into_iter().map(|(id, name, _)| (id, name)).collect();
+    let our_sheets = style_sheets(target_document);
+    let ours: BTreeMap<String, String> = our_sheets.iter().map(|(id, name, _)| (id.clone(), name.clone())).collect();
     // The sheets to bring: what is used and what those inherit from.
     let mut wanted: BTreeSet<String> = BTreeSet::new();
     let mut queue: Vec<String> = used.into_iter().collect();
@@ -167,13 +192,21 @@ fn import_styles(target_document: &str, stencil_document: &str, used: BTreeSet<S
     }
     let mut next = ours.keys().filter_map(|id| id.parse::<u64>().ok()).max().unwrap_or(0) + 1;
     let mut map: BTreeMap<String, String> = BTreeMap::new();
+    // Sheets that an earlier drop copied already.
+    let mut copied: BTreeSet<String> = BTreeSet::new();
     for id in &wanted {
-        let Some((_, name, _)) = theirs.iter().find(|(i, _, _)| i == id) else {
+        let Some((_, name, element)) = theirs.iter().find(|(i, _, _)| i == id) else {
             map.insert(id.clone(), id.clone());
             continue;
         };
-        if ours.get(id).is_some_and(|ours_name| ours_name == name) {
+        let same_sheet = ours.get(id).is_some_and(|ours_name| ours_name == name);
+        if same_sheet && (takes_theme(&theirs, id) || !takes_theme(&our_sheets, id)) {
             map.insert(id.clone(), id.clone());
+        } else if let Some((existing, _, _)) = our_sheets.iter().find(|(_, other, sheet)| {
+            other.strip_prefix(name.as_str()).is_some_and(|rest| rest.starts_with('.')) && sheet_body(sheet) == sheet_body(element)
+        }) {
+            copied.insert(id.clone());
+            map.insert(id.clone(), existing.clone());
         } else {
             map.insert(id.clone(), next.to_string());
             next += 1;
@@ -182,12 +215,21 @@ fn import_styles(target_document: &str, stencil_document: &str, used: BTreeSet<S
     let mut add = String::new();
     for id in &wanted {
         let new_id = &map[id];
-        if new_id == id && ours.contains_key(id) {
+        if copied.contains(id) || (new_id == id && ours.contains_key(id)) {
             continue;
         }
-        let Some((_, _, element)) = theirs.iter().find(|(i, _, _)| i == id) else { continue };
+        let Some((_, name, element)) = theirs.iter().find(|(i, _, _)| i == id) else { continue };
         let open_end = element.find('>').map_or(element.len(), |n| n + 1);
-        let open = set_attr(&element[..open_end], "ID", new_id);
+        let mut open = set_attr(&element[..open_end], "ID", new_id);
+        // Style names are unique in a drawing.
+        if ours.values().any(|other| other == name) {
+            let renamed = format!("{name}.{new_id}");
+            for attribute in ["NameU", "Name"] {
+                if attr(&open, attribute).is_some() {
+                    open = set_attr(&open, attribute, &renamed);
+                }
+            }
+        }
         let element = format!("{open}{}", &element[open_end..]);
         add.push_str(&rewrite_style_references(&element, &mut |old| map.get(old).cloned().unwrap_or_else(|| old.to_string())));
     }
