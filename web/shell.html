@@ -148,7 +148,7 @@
  #gradStops .gradstop{margin:2px 0;font-size:12px} #gradStops input[type=color]{width:2.2em;height:1.6em;padding:0}
 </style></head><body>
 <header>
- <button id="newBtn" title="Create a new, empty drawing (Ctrl+Alt+N)">New</button> <input type="file" id="file" accept=".vsdx,.vssx,.vstx,.excalidraw,.drawio" aria-label="Open a Visio, Excalidraw or draw.io file">
+ <button id="newBtn" title="Create a new, empty drawing (Ctrl+Alt+N)">New</button> <input type="file" id="file" accept=".vsdx,.vssx,.vstx,.vsd,.vss,.vst,.vdx,.vsx,.vtx,.excalidraw,.drawio" aria-label="Open a Visio, Excalidraw or draw.io file">
  <span id="tabs"></span><span id="pageTools"><button id="pageAdd" title="Add a page after this one">+ Page</button><button id="pageDup" title="Duplicate this page">Copy page</button><button id="pageRename" title="Rename this page">Rename</button><button id="pageSetup" title="Page size and orientation of this page">Page setup...</button><button id="docPropsBtn" title="Title, author, keywords and other properties of the drawing">Properties...</button><button id="layersBtn" title="Layers of this page: visibility, printing, lock, add, rename, assign the selection">Layers...</button><button id="pageDel" title="Delete this page">Delete page</button><button id="pageLeft" title="Move this page left" aria-label="Move page left">&#9664;</button><button id="pageRight" title="Move this page right" aria-label="Move page right">&#9654;</button></span>
  <label><input type="checkbox" id="print"> Print preview</label>
  <label title="Show the whole page rectangle instead of fitting the view to the shapes"><input type="checkbox" id="fixedPage"> Fixed page</label>
@@ -185,7 +185,7 @@
  <span id="msg" role="status" aria-live="polite"></span>
 </header>
 <main><aside id="stencil"><b>Shapes</b>
- <p id="stencilBar"><select id="stencilSource" aria-label="Shape source"><option value="doc">This drawing</option><option value="fav">Favourites</option></select> <button id="addStencil" title="Open a .vssx / .vstx stencil file">Add stencil...</button> <button id="closeStencil" title="Close the shown stencil file (it is also forgotten after a reload)">Close stencil</button><input type="file" id="stencilFile" accept=".vssx,.vstx,.vsdx" hidden></p>
+ <p id="stencilBar"><select id="stencilSource" aria-label="Shape source"><option value="doc">This drawing</option><option value="fav">Favourites</option></select> <button id="addStencil" title="Open a .vssx / .vstx (or old .vss / .vsx) stencil file">Add stencil...</button> <button id="closeStencil" title="Close the shown stencil file (it is also forgotten after a reload)">Close stencil</button><input type="file" id="stencilFile" accept=".vssx,.vstx,.vsdx,.vsd,.vss,.vst,.vdx,.vsx,.vtx" hidden></p>
  <input id="stencilFilter" placeholder="Search shapes" aria-label="Search shapes"> <label title="Search the drawing and every opened stencil, not only the shown source"><input type="checkbox" id="stencilAll" checked> in all stencils</label>
  <ul id="masters"></ul><p id="stencilHint"></p></aside>
 <div id="stage" tabindex="0" role="group" aria-label="Drawing page. Tab and Shift+Tab select the next or previous shape; arrow keys move it; Tab on a selected shape reaches its handles, where arrow keys resize or rotate.">Open a Visio file. Click a shape to select it; drag a grouped shape to move it.</div>

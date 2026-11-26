@@ -66,6 +66,15 @@ pub unsafe extern "C" fn vl_import(ptr: *const u8, len: usize) -> i32 {
     }
 }
 
+/// The message for the user when the open drawing was converted from an old format (`.vsd`, `.vdx`, ...), in the output
+/// buffer; empty for any other drawing. Returns 0.
+#[no_mangle]
+pub extern "C" fn vl_conversion() -> i32 {
+    let message = STATE.with(|state| state.borrow().engine.conversion.as_ref().map_or_else(String::new, |conversion| conversion.message()));
+    set_out(message);
+    0
+}
+
 /// Start a NEW, empty drawing: one page of `width` x `height` inches (shown in millimetres when `metric` is
 /// non-zero) named by the UTF-8 name at `name_ptr`. Replaces the open drawing (undo history and clipboard are
 /// cleared, opened stencils stay). Returns 0, or 1 with the error in the output buffer.
@@ -928,5 +937,48 @@ pub unsafe extern "C" fn vl_group(page: i32, op: i32, ptr: *const u8, len: usize
             0
         }
         Err(message) => fail(message),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const OLD_XML: &str = "<VisioDocument xmlns='http://schemas.microsoft.com/visio/2003/core'><Pages><Page ID='0' NameU='Plan'><PageSheet><PageProps><PageWidth>8</PageWidth><PageHeight>6</PageHeight></PageProps></PageSheet></Page></Pages></VisioDocument>";
+
+    fn import(bytes: &[u8]) -> i32 {
+        unsafe { vl_import(bytes.as_ptr(), bytes.len()) }
+    }
+
+    fn output() -> String {
+        STATE.with(|state| String::from_utf8_lossy(&state.borrow().out).into_owned())
+    }
+
+    #[test]
+    fn a_converted_drawing_says_so_and_another_one_does_not() {
+        assert_eq!(import(OLD_XML.as_bytes()), 0, "{}", output());
+        assert_eq!(vl_conversion(), 0);
+        assert!(output().contains("original file is not changed"), "{}", output());
+        assert_eq!(unsafe { vl_new(8.0, 6.0, 0, "Page".as_ptr(), 4) }, 0);
+        assert_eq!(vl_conversion(), 0);
+        assert_eq!(output(), "");
+    }
+
+    /// The browser shell must offer what the engine opens, in both file pickers and for dropped files.
+    #[test]
+    fn the_shell_offers_the_old_formats() {
+        let page = include_str!("../../../web/shell.html");
+        let script = include_str!("../../../web/shell.js");
+        let accepted = |id: &str| {
+            let tag = page.split(&format!("id=\"{id}\" accept=\"")).nth(1).unwrap_or_else(|| panic!("no file input {id}"));
+            tag.split('"').next().unwrap_or("").split(',').collect::<Vec<_>>()
+        };
+        let dropped = script.split("const DRAWING_FILE = /\\.(").nth(1).and_then(|rest| rest.split(')').next()).expect("DRAWING_FILE");
+        for extension in ["vsd", "vss", "vst", "vdx", "vsx", "vtx"] {
+            for id in ["file", "stencilFile"] {
+                assert!(accepted(id).contains(&format!(".{extension}").as_str()), "{id} does not offer .{extension}");
+            }
+            assert!(dropped.split('|').any(|e| e == extension), "a dropped .{extension} is refused");
+        }
     }
 }

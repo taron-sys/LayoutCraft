@@ -11,8 +11,8 @@ other drawing, so rendering, editing, undo, export and saving need no second cod
 | Visio 2003 XML | `.vdx` `.vsx` `.vtx` | read |
 
 The format is recognised by content, not by name. `Engine::open` and `Engine::stencil_open` convert, so the desktop app and the MCP
-server get the same result; `Engine::conversion` holds the message the host shows. The web shell does not offer these extensions in its
-file pickers yet.
+server get the same result; `Engine::conversion` holds the message the host shows. The web shell offers these extensions in
+its file pickers and takes them when dropped, and shows the same message.
 
 ## What is carried over
 

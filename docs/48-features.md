@@ -41,8 +41,7 @@ What LayoutCraft does today. For what is missing or inexact, see [Known gaps](07
 ## Browser version
 
 A few commands are not in the desktop app yet. They appear greyed out in its ribbon with the hover text
-"not in the native app yet". PNG export and copy as image are in the browser shell. The browser shell does not offer the older
-`.vsd` / `.vdx` formats in its file pickers yet.
+"not in the native app yet". PNG export and copy as image are in the browser shell.
 
 ## AI assistant
 
