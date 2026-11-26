@@ -2367,6 +2367,20 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_text_editor_takes_typing_at_once_and_ctrl_enter_applies_it() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(2);
+        driver.key(Key::F2, Modifiers::NONE);
+        // no click: the characters go straight into the editor
+        driver.write("typed");
+        assert!(driver.app.text_editor.as_ref().is_some_and(|editor| editor.text.contains("typed")), "{}", driver.app.status);
+        driver.key(Key::Enter, CTRL);
+        assert!(driver.app.text_editor.is_none());
+        assert!(driver.app.doc_shape(&ids[0]).is_some_and(|shape| shape.label.contains("typed")), "{}", driver.app.status);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -2376,6 +2390,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         driver.frames(2);
         driver.key(Key::Escape, Modifiers::NONE);
         assert!(driver.app.text_editor.is_none());
+        assert_eq!(driver.app.selected, Some(ids[0].clone()), "the shape stays selected");
     }
 }
 
@@ -3053,6 +3068,8 @@ struct TextEditor {
     font_pt: f64,
     /// bold, italic, underline and size as the shape had them when the editor opened (only changes are written)
     initial: (bool, bool, bool, f64),
+    /// Give the text field the keyboard on the next frame (once, when the editor opens).
+    focus: bool,
 }
 
 struct LayoutCraftApp {
@@ -4870,7 +4887,7 @@ impl LayoutCraftApp {
         let (bold, italic, underline) = (shape.bold.unwrap_or(false), shape.italic.unwrap_or(false), shape.underline.unwrap_or(false));
         // the model keeps the size in px (96 per inch); the editor shows points
         let font_pt = (shape.font_size.unwrap_or(12.0 * 96.0 / 72.0) * 72.0 / 96.0 * 10.0).round() / 10.0;
-        self.text_editor = Some(TextEditor { visio_id: id, text, bold, italic, underline, font_pt, initial: (bold, italic, underline, font_pt) });
+        self.text_editor = Some(TextEditor { visio_id: id, text, bold, italic, underline, font_pt, initial: (bold, italic, underline, font_pt), focus: true });
     }
 
     /// Write the text (op 8) and, when given, the character format (op 10 style JSON) as ONE undo step.
@@ -7818,11 +7835,14 @@ impl eframe::App for LayoutCraftApp {
                 .collapsible(false)
                 .resizable(true)
                 .show(&ctx, |ui| {
-                    ui.add(
+                    let field = ui.add(
                         egui::TextEdit::multiline(&mut editor.text)
                             .desired_width(360.0)
                             .desired_rows(4),
                     );
+                    if std::mem::take(&mut editor.focus) {
+                        field.request_focus();
+                    }
                     ui.horizontal(|ui| {
                         ui.toggle_value(&mut editor.bold, egui::RichText::new("B").strong());
                         ui.toggle_value(&mut editor.italic, egui::RichText::new("I").italics());
