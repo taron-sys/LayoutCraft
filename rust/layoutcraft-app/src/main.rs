@@ -1669,6 +1669,62 @@ mod shape_tab_tests {
     }
 }
 
+/// What a key that works on the selection asks for.
+#[derive(Clone, Copy, PartialEq)]
+enum EditKey {
+    Arrange(ArrangeCmd),
+    /// Text alignment: the `HorzAlign` cell value.
+    Align(&'static str),
+    /// Switch bold, italic or underline (the `Engine::edit` op 10 name).
+    Style(&'static str),
+}
+
+/// Text alignment keys. They are taken before the arrange keys: egui ignores an extra Shift when it matches a shortcut, so
+/// Ctrl+J (flip) would otherwise swallow Ctrl+Shift+J.
+const ALIGN_KEYS: [(egui::Key, &str); 4] = [(egui::Key::L, "0"), (egui::Key::C, "1"), (egui::Key::R, "2"), (egui::Key::J, "3")];
+/// Text style keys. They are taken after the arrange keys, which own Ctrl+Shift+B and Ctrl+Shift+U.
+const STYLE_KEYS: [(egui::Key, &str); 3] = [(egui::Key::B, "bold"), (egui::Key::I, "italic"), (egui::Key::U, "underline")];
+
+/// Takes the first selection shortcut pressed in this frame out of the input.
+fn consume_edit_key(input: &mut egui::InputState) -> Option<EditKey> {
+    if let Some((_, cell)) = ALIGN_KEYS.iter().find(|(key, _)| input.consume_key(CTRL_SHIFT, *key)) {
+        return Some(EditKey::Align(cell));
+    }
+    if let Some(command) = consume_arrange_key(input) {
+        return Some(EditKey::Arrange(command));
+    }
+    STYLE_KEYS.iter().find(|(key, _)| input.consume_key(egui::Modifiers::CTRL, *key)).map(|(_, name)| EditKey::Style(name))
+}
+
+#[cfg(test)]
+mod edit_key_tests {
+    use super::{consume_edit_key, ArrangeCmd, EditKey};
+    use eframe::egui::{self, Key, Modifiers};
+
+    fn press(key: Key, shift: bool) -> Option<EditKey> {
+        let modifiers = Modifiers { alt: false, ctrl: true, shift, mac_cmd: false, command: true };
+        let mut input = egui::InputState::default();
+        input.events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+        consume_edit_key(&mut input)
+    }
+
+    #[test]
+    fn keys_that_differ_only_by_shift_do_not_swallow_each_other() {
+        for (key, plain, shifted) in [
+            (Key::J, EditKey::Arrange(ArrangeCmd::Flip(true)), EditKey::Align("3")),
+            (Key::L, EditKey::Arrange(ArrangeCmd::RotateLeft), EditKey::Align("0")),
+            (Key::R, EditKey::Arrange(ArrangeCmd::RotateQuarter), EditKey::Align("2")),
+            (Key::B, EditKey::Style("bold"), EditKey::Arrange(ArrangeCmd::Order(3))),
+            (Key::U, EditKey::Style("underline"), EditKey::Arrange(ArrangeCmd::Ungroup)),
+        ] {
+            assert!(press(key, false) == Some(plain));
+            assert!(press(key, true) == Some(shifted));
+        }
+        assert!(press(Key::C, true) == Some(EditKey::Align("1")));
+        assert!(press(Key::I, false) == Some(EditKey::Style("italic")));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -5975,9 +6031,22 @@ impl eframe::App for LayoutCraftApp {
             {
                 action = Some(Action::DeleteGuide);
             }
-            // arrange commands (ARRANGE_KEYS), then select all, zoom, F2 and the arrow nudge
-            if let Some(command) = ctx.input_mut(consume_arrange_key) {
-                action = Some(Action::Arrange(command));
+            // text and arrange keys (`consume_edit_key`), then select all, zoom, F2 and the arrow nudge
+            if let Some(command) = ctx.input_mut(consume_edit_key) {
+                action = Some(match command {
+                    EditKey::Arrange(command) => Action::Arrange(command),
+                    EditKey::Align(cell) => Action::FormatText(serde_json::json!({ "para": { "HorzAlign": cell } })),
+                    EditKey::Style(name) => {
+                        // switched off only when the first selected shape has it
+                        let shape = self.selected.as_deref().and_then(|id| self.doc_shape(id));
+                        let on = shape.is_some_and(|shape| match name {
+                            "bold" => shape.bold == Some(true),
+                            "italic" => shape.italic == Some(true),
+                            _ => shape.underline == Some(true),
+                        });
+                        Action::StyleSelected(serde_json::json!({ name: !on }).to_string())
+                    }
+                });
             } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::A)) {
                 self.select_all();
             } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Equals) || input.consume_key(egui::Modifiers::CTRL, egui::Key::Plus)) {

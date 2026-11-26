@@ -378,15 +378,15 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Help pane | F1 | none (Ctrl+F1 collapses the ribbon, the same as Office) | same | none |
 | Key tips | Alt, then letters (Alt+H is Home) | none on desktop | Alt shows tips | none (desktop) |
 | Open context menu from keyboard | Shift+F10 | none | none | none |
-| Bold / italic / underline | Ctrl+B / I / U | none on desktop | Ctrl+B / I / U | none (desktop) |
-| Text alignment | Ctrl+Shift+L / C / R / J (web table uses S for centre) | none | none | none |
+| Bold / italic / underline | Ctrl+B / I / U | Ctrl+B / I / U (selected shapes) | Ctrl+B / I / U | same on desktop |
+| Text alignment | Ctrl+Shift+L / C / R / J (web table uses S for centre) | Ctrl+Shift+L / C / R / J | none | same on desktop |
 | Edit text stop | Esc | Esc | Esc / Ctrl+Enter | same |
 | Delete | Delete | Delete or Backspace | same | same |
 | Save | Ctrl+S (assumed standard, not in S1) | Ctrl+S (saves a copy) | Ctrl+S | partial |
 | Find | Ctrl+F (web `findBtn`) | Ctrl+F | Ctrl+F | same on desktop |
 | Hyperlink | Ctrl+K (unverified in S1) | Ctrl+K | Ctrl+K | same on desktop |
 
-Count of the 41 rows above: same 20, diff 2, partial 2, none 17. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 22, diff 2, partial 2, none 15. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 
