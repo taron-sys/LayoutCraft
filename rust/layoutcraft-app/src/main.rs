@@ -1451,6 +1451,54 @@ mod tab_tests {
     }
 }
 
+/// The status bar's zoom slider over `percent` of actual size; the new percentage when the user moves it. A zoom outside
+/// the slider's range (a very small fitted page) is left alone.
+fn zoom_slider(ui: &mut egui::Ui, percent: f64) -> Option<u32> {
+    let mut value = percent;
+    let slider = egui::Slider::new(&mut value, 10.0..=800.0).logarithmic(true).show_value(false).clamping(egui::SliderClamping::Edits);
+    let response = ui.add(slider).on_hover_text("Zoom");
+    (response.changed() && (value - percent).abs() >= 0.5).then(|| value.round() as u32)
+}
+
+#[cfg(test)]
+mod zoom_slider_tests {
+    use super::zoom_slider;
+    use eframe::egui::{self, Event, Key, Modifiers};
+
+    /// One frame with the slider; what it asks for.
+    fn frame(ctx: &egui::Context, percent: f64, events: Vec<Event>) -> Option<u32> {
+        let mut asked = None;
+        let output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+            asked = zoom_slider(ui, percent);
+        });
+        // nothing paints here: the texture changes of the frame are not applied, so the output must not be dropped
+        std::mem::forget(output);
+        asked
+    }
+
+    fn press(key: Key) -> Vec<Event> {
+        vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]
+    }
+
+    #[test]
+    fn showing_the_slider_changes_nothing_also_outside_its_range() {
+        for percent in [3.0, 100.0, 1200.0] {
+            let ctx = egui::Context::default();
+            assert_eq!(frame(&ctx, percent, Vec::new()), None);
+            assert_eq!(frame(&ctx, percent, Vec::new()), None);
+        }
+    }
+
+    #[test]
+    fn tab_reaches_the_slider_and_an_arrow_key_zooms_in() {
+        let ctx = egui::Context::default();
+        frame(&ctx, 100.0, Vec::new());
+        frame(&ctx, 100.0, press(Key::Tab));
+        frame(&ctx, 100.0, Vec::new());
+        assert!(frame(&ctx, 100.0, press(Key::ArrowRight)).is_some_and(|percent| percent > 100));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -5749,7 +5797,16 @@ impl eframe::App for LayoutCraftApp {
                 ui.separator();
                 ui.label(&self.status);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("zoom {:.0}%", zoom_percent(self.zoom, self.raster_scale)));
+                    if ui.add_enabled(self.texture.is_some(), egui::Button::new("Fit")).on_hover_text("Fit the page to the window (Ctrl+Shift+W)").clicked() {
+                        action = Some(Action::Fit);
+                    }
+                    let percent = zoom_percent(self.zoom, self.raster_scale);
+                    ui.label(format!("zoom {percent:.0}%"));
+                    ui.add_enabled_ui(self.texture.is_some(), |ui| {
+                        if let Some(level) = zoom_slider(ui, percent) {
+                            action = Some(Action::ZoomTo(level));
+                        }
+                    });
                     if self.dirty {
                         ui.colored_label(egui::Color32::from_rgb(255, 196, 0), "modified");
                     }
