@@ -1466,9 +1466,44 @@ fn zoom_for_percent(percent: f64, raster_scale: f64) -> f32 {
     ((percent / 100.0 / raster_scale.max(1e-6)) as f32).clamp(0.05, 16.0)
 }
 
+/// The zoom window: what was typed, why it was refused, and whether the field still has to take the keyboard.
+#[derive(Default)]
+struct ZoomDraft {
+    text: String,
+    refused: Option<String>,
+    focus: bool,
+}
+
+/// A typed zoom level ("150" or "150 %") as a percentage the app can show; otherwise what to type instead.
+fn typed_zoom(text: &str, raster_scale: f64) -> Result<f64, String> {
+    let (least, most) = (zoom_percent(0.05, raster_scale).ceil(), zoom_percent(16.0, raster_scale).floor());
+    let number = text.trim().trim_end_matches('%').trim_end();
+    match number.parse::<f64>() {
+        Ok(percent) if (least..=most).contains(&percent) => Ok(percent),
+        _ => Err(format!("Type a number from {least:.0} to {most:.0}.")),
+    }
+}
+
 #[cfg(test)]
 mod zoom_tests {
-    use super::{zoom_for_percent, zoom_percent, ZOOM_PERCENTS};
+    use super::{typed_zoom, zoom_for_percent, zoom_percent, ZOOM_PERCENTS};
+
+    #[test]
+    fn a_typed_level_is_taken_only_when_the_app_can_show_it() {
+        assert_eq!(typed_zoom(" 125 % ", 1.0), Ok(125.0));
+        assert_eq!(typed_zoom("62.5", 1.0), Ok(62.5));
+        for refused in ["", "%", "big", "0", "-50", "1000000", "NaN", "inf"] {
+            assert!(typed_zoom(refused, 1.0).is_err(), "{refused:?}");
+        }
+        // what is accepted is shown as typed, not cut to the app's zoom range
+        for raster_scale in [0.4, 2.5] {
+            for percent in 1..5000 {
+                if let Ok(percent) = typed_zoom(&percent.to_string(), raster_scale) {
+                    assert!((zoom_percent(zoom_for_percent(percent, raster_scale), raster_scale) - percent).abs() < 0.01, "{percent}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn a_percentage_means_the_same_size_whatever_the_image_resolution() {
@@ -2463,6 +2498,31 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_zoom_level_can_be_typed_in_the_zoom_window() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        let open = |driver: &mut Driver| {
+            driver.app.zoom_draft = Some(super::ZoomDraft { focus: true, ..super::ZoomDraft::default() });
+            driver.frames(3);
+        };
+        let shown = |driver: &Driver| super::zoom_percent(driver.app.zoom, driver.app.raster_scale);
+        open(&mut driver);
+        driver.write("250");
+        driver.key(Key::Enter, Modifiers::NONE);
+        assert!(driver.app.zoom_draft.is_none() && (shown(&driver) - 250.0).abs() < 0.01, "{}", shown(&driver));
+        // a level that cannot be shown is refused, and said so
+        open(&mut driver);
+        driver.write("0");
+        driver.key(Key::Enter, Modifiers::NONE);
+        assert!(driver.app.zoom_draft.as_ref().is_some_and(|draft| draft.refused.is_some()));
+        assert!((shown(&driver) - 250.0).abs() < 0.01);
+        // Esc closes the window and nothing else
+        driver.key(Key::Escape, Modifiers::NONE);
+        assert!(driver.app.zoom_draft.is_none() && driver.app.selected == Some(ids[0].clone()));
+        assert!(driver.app.doc_shape(&ids[0]).is_some_and(|shape| !shape.label.contains("250")));
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -3226,6 +3286,8 @@ struct LayoutCraftApp {
     focus_at_frame_start: bool,
     /// The Snap and Attach window is open.
     snap_open: bool,
+    /// The zoom window, while it is open.
+    zoom_draft: Option<ZoomDraft>,
     /// The Shapes panel is narrowed to a column.
     shapes_minimised: bool,
     /// The one stencil of the Shapes panel that is open (its engine slot).
@@ -3381,6 +3443,7 @@ impl LayoutCraftApp {
             help_shortcuts_open: false,
             focus_at_frame_start: false,
             snap_open: false,
+            zoom_draft: None,
             shapes_minimised: false,
             open_stencil_shown: None,
             sheet_pane: None,
@@ -6574,6 +6637,10 @@ impl LayoutCraftApp {
                         ui.close();
                     }
                 }
+                if ui.button("Custom zoom...").clicked() {
+                    *action = Some(Action::ZoomDialog);
+                    ui.close();
+                }
                 ui.separator();
                 for (name, command) in [("Fit page to window", Action::Fit), ("Page width", Action::FitWidth)] {
                     if ui.button(name).clicked() {
@@ -6706,6 +6773,48 @@ impl LayoutCraftApp {
         });
         if open {
             self.sheet_pane = Some(pane);
+        }
+    }
+
+    /// The zoom window: type a percentage; Enter or Apply shows the page at it, Esc or Cancel leaves the view as it is.
+    fn draw_zoom_window(&mut self, ctx: &egui::Context) {
+        let now = zoom_percent(self.zoom, self.raster_scale);
+        let raster_scale = self.raster_scale;
+        let Some(draft) = self.zoom_draft.as_mut() else {
+            return;
+        };
+        let (mut open, mut apply, mut cancel) = (true, false, false);
+        egui::Window::new("Zoom").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+            let label = ui.label("Percent of actual size");
+            let field = ui.add(egui::TextEdit::singleline(&mut draft.text).hint_text(format!("{now:.0}")).desired_width(100.0)).labelled_by(label.id);
+            if std::mem::take(&mut draft.focus) {
+                field.request_focus();
+            }
+            apply = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            if let Some(refused) = &draft.refused {
+                ui.colored_label(appearance::chrome(ui.visuals().dark_mode).warning, refused);
+            }
+            ui.horizontal(|ui| {
+                apply |= ui.button("Apply").clicked();
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
+        if apply {
+            match typed_zoom(&draft.text, raster_scale) {
+                Ok(percent) => {
+                    self.zoom = zoom_for_percent(percent, raster_scale);
+                    self.fit_pending = false;
+                    self.fit_width_pending = false;
+                    cancel = true;
+                }
+                Err(refused) => {
+                    draft.refused = Some(refused);
+                    draft.focus = true;
+                }
+            }
+        }
+        if cancel || !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.zoom_draft = None;
         }
     }
 
@@ -8341,6 +8450,7 @@ impl eframe::App for LayoutCraftApp {
         self.draw_find(&ctx);
         self.draw_links(&ctx);
         self.draw_snap_window(&ctx);
+        self.draw_zoom_window(&ctx);
         self.draw_sheet_pane(&ctx);
         self.draw_data_pane(&ctx);
         if self.help_shortcuts_open {
@@ -8572,6 +8682,7 @@ impl eframe::App for LayoutCraftApp {
                 self.pan = egui::Vec2::ZERO;
                 self.fit_pending = false;
             }
+            Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
                 self.zoom = zoom_for_percent(f64::from(percent), self.raster_scale);
                 self.fit_pending = false;
@@ -8611,6 +8722,7 @@ enum Action {
     PageReorder(usize, usize),
     /// Show the page at this percentage of actual size.
     ZoomTo(u32),
+    ZoomDialog,
     DeleteGuide,
     /// Make the page as wide as the view.
     FitWidth,
