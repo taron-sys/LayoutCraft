@@ -376,6 +376,7 @@ enum ViewKey {
     Find,
     Hyperlink,
     FullScreen,
+    SnapDialog,
 }
 
 /// Tool and view shortcuts for features the app has, with Visio's documented keys (`docs/43-ui-parity.md` 4.1). The draw
@@ -392,6 +393,7 @@ const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
     (egui::Modifiers::CTRL, egui::Key::F, ViewKey::Find),
     (egui::Modifiers::CTRL, egui::Key::K, ViewKey::Hyperlink),
     (egui::Modifiers::NONE, egui::Key::F5, ViewKey::FullScreen),
+    (egui::Modifiers::ALT, egui::Key::F9, ViewKey::SnapDialog),
 ];
 
 /// Takes the first tool or view shortcut pressed in this frame out of the input.
@@ -430,6 +432,11 @@ mod view_key_tests {
         assert!(press(Key::F, true, false) == Some(ViewKey::Find));
         assert!(press(Key::K, true, false) == Some(ViewKey::Hyperlink));
         assert!(press(Key::F5, false, false) == Some(ViewKey::FullScreen));
+        // F9 opens the snap window only with Alt
+        assert!(press(Key::F9, false, false).is_none());
+        let mut input = egui::InputState::default();
+        input.events.push(egui::Event::Key { key: Key::F9, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::ALT });
+        assert!(consume_view_key(&mut input) == Some(ViewKey::SnapDialog));
     }
 }
 
@@ -2591,6 +2598,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Snap and Attach window is open.
+    snap_open: bool,
     /// The Shapes panel is narrowed to a column.
     shapes_minimised: bool,
     /// The one stencil of the Shapes panel that is open (its engine slot).
@@ -2742,6 +2751,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            snap_open: false,
             shapes_minimised: false,
             open_stencil_shown: None,
             sheet_pane: None,
@@ -6015,6 +6025,36 @@ impl LayoutCraftApp {
         }
     }
 
+    /// The Snap and Attach window: what dragged shapes snap to, and the grid. Changes apply at once; Esc closes.
+    fn draw_snap_window(&mut self, ctx: &egui::Context) {
+        if !self.snap_open {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("Snap and Attach").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+            ui.label("Dragged and drawn shapes snap to:");
+            ui.checkbox(&mut self.snap_grid, "The grid");
+            ui.checkbox(&mut self.snap_shapes, "Edges and centres of other shapes");
+            ui.checkbox(&mut self.snap_guides, "Ruler guides");
+            ui.separator();
+            ui.checkbox(&mut self.show_grid, "Show the grid");
+            ui.horizontal(|ui| {
+                let label = ui.label("Grid spacing");
+                egui::ComboBox::from_id_salt("snap-grid-step")
+                    .selected_text(format!("{} in", self.grid_step))
+                    .show_ui(ui, |ui| {
+                        for step in [0.125, 0.25, 0.5, 1.0] {
+                            ui.selectable_value(&mut self.grid_step, step, format!("{step} in"));
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id);
+            });
+            ui.label(egui::RichText::new("Connectors always attach to the shape or connection point they are dropped on.").small());
+        });
+        self.snap_open = open && !(!ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -6261,6 +6301,7 @@ impl eframe::App for LayoutCraftApp {
                 Some(ViewKey::Find) => action = Some(Action::Find),
                 Some(ViewKey::Hyperlink) => action = Some(Action::Hyperlink),
                 Some(ViewKey::FullScreen) => action = Some(Action::FullScreen),
+                Some(ViewKey::SnapDialog) => self.snap_open = !self.snap_open,
                 None => {}
             }
             if self.selected.is_some() {
@@ -6848,6 +6889,10 @@ impl eframe::App for LayoutCraftApp {
                         ui.checkbox(&mut self.snap_grid, "Snap to grid");
                         ui.checkbox(&mut self.snap_shapes, "Snap to shapes");
                         ui.checkbox(&mut self.snap_guides, "Snap to guides");
+                        if ui.button("Snap and Attach...").clicked() {
+                            self.snap_open = true;
+                            ui.close();
+                        }
                     }
                 });
                 let mut dropped_now = false;
@@ -7556,6 +7601,7 @@ impl eframe::App for LayoutCraftApp {
         }
         self.draw_find(&ctx);
         self.draw_links(&ctx);
+        self.draw_snap_window(&ctx);
         self.draw_sheet_pane(&ctx);
         self.draw_data_pane(&ctx);
         if self.help_shortcuts_open {

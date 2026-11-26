@@ -272,7 +272,7 @@ these are row counts, not a count of every Visio button.
 | Zoom: Fit Page to Window (Ctrl+Shift+W) | S11, S1 | fit | present | present | | P0 |
 | Zoom: 100%, Page Width | unverified | zoom100 zoomWidth | present | present | | P2 |
 | Zoom: zoom in / out (Alt+F6, Alt+Shift+F6 desktop; Ctrl+Plus/Minus web) | S1 | zin zout | present | present | LC uses Ctrl+= / Ctrl+- (web style) | P1 |
-| Visual Aids: Snap & Glue (dialog Alt+F9) | S1 | snapGrid snapShapes snapGuides gridStep | partial | present | Desktop has toggles but no dialog or key | P1 |
+| Visual Aids: Snap & Glue (dialog Alt+F9) | S1 | snapGrid snapShapes snapGuides gridStep | partial | present | Desktop: window (Alt+F9) for what is snapped to and the grid; no glue settings, no snap strength | P1 |
 | Visual Aids: Dynamic Grid (alignment, spacing, resizing guides; snap strength) | S10 | snapShapes | partial | partial | Desktop snaps to shapes and draws a guide (`snap_guide`); spacing guides and resize guides unverified | P0 |
 | Visual Aids: AutoConnect | S6, S4 | autoConnectToggle | missing | present | | P0 |
 | Window: New Window | unverified | newWindow | missing | present | | P3 |
@@ -326,7 +326,7 @@ Compare File (`compareBtn`: present on both), AI assistant info (`mcpInfo`: pres
 | Nudge: arrows move to the next snap position, Shift+arrow one pixel | S19, S1 | 0.05 in step, Shift 0.5 in (`nudge_delta`) | Same | Reverse the Shift meaning: P1 |
 | Glue: connectors glue to shape or a connection point; connection points drawn on hover | S6 (caption mentions a point connection at each end) | Release on a shape glues to the whole shape or to a connection point within reach; end handles can be dragged | Same plus Connection Point tool | Glue indicators; per-layer Glue switch: P1 |
 | Dynamic Grid: guides while moving near other shapes or page/container margins; spacing guides; snap strength in Visual Aids dialog | S10 | Snap to grid / shapes / guides with a drawn guide line | Same | Spacing and resize guides; snap strength; margin guides: P0 |
-| Snap & Glue dialog (what snaps, what glues) | S1 | Three toggles in View and the empty-page menu | Same | Dialog: P1 |
+| Snap & Glue dialog (what snaps, what glues) | S1 | Toggles in View and the empty-page menu, and a window (Alt+F9) | Same | Glue settings: P1 |
 | AutoConnect: pointing at a shape shows four arrows; hovering an arrow shows a mini toolbar of up to four Quick Shapes; click adds and connects; dropping a Shapes-window item on an arrow also works; per-file setting, toggled in View | S3, S6, S7 | none | Arrows place the picked stencil shape or a copy of the shape and connect | Desktop P0; port the Quick Shapes picker too |
 | Drag from stencil: drag a master onto the page creates an instance; the master stays | S5, S2 | Drag from pane (ghost label), click-then-click placement, Esc cancels | Drag | Done, plus drop on a shape to glue/replace: P3 |
 | Right-click menus | S5, S9 | See section 2 | See section 2 | P1 |
@@ -361,7 +361,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Format Painter | Ctrl+Shift+P | none | none | none |
 | Format Shape pane | F3 | none | none | none |
 | Text dialog | F11 | none | none | none |
-| Snap & Glue dialog | Alt+F9 | none | none | none |
+| Snap & Glue dialog | Alt+F9 | Alt+F9 (no glue settings) | none | same on desktop |
 | Full-screen view / exit | F5 / Esc | F5 / Esc | no key | same on desktop |
 | Fit page to window | Ctrl+Shift+W | Ctrl+Shift+W | none | same on desktop |
 | Zoom in / out | Alt+F6 / Alt+Shift+F6 (web: Ctrl+Plus / Ctrl+Minus) | Ctrl+= or Ctrl++ / Ctrl+- | same | diff on desktop key set; matches the web variant |
@@ -386,7 +386,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Find | Ctrl+F (web `findBtn`) | Ctrl+F | Ctrl+F | same on desktop |
 | Hyperlink | Ctrl+K (unverified in S1) | Ctrl+K | Ctrl+K | same on desktop |
 
-Count of the 41 rows above: same 22, diff 2, partial 2, none 15. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 23, diff 2, partial 2, none 14. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 
