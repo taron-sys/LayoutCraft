@@ -1055,6 +1055,28 @@ struct DataPane {
     key: Option<(usize, String, usize)>,
     rows: Vec<DataRow>,
     new_label: String,
+    /// The new field's type (an entry of `NEW_FIELD_TYPES`), prompt and, for a list, its choices.
+    new_type: u32,
+    new_prompt: String,
+    new_choices: String,
+}
+
+/// The types a new field can be given, with the numbers the file stores (`Prop.Type`).
+const NEW_FIELD_TYPES: [(u32, &str); 3] = [(0, "Text"), (3, "Yes or no"), (1, "List")];
+
+/// A new row given its type and prompt: a yes-or-no field starts as no, a list at its first choice. `choices` are separated
+/// by ";"; a list without any is refused with what to type.
+fn typed_data_row(mut row: DataRow, kind: u32, choices: &str, prompt: &str) -> Result<DataRow, String> {
+    row.r#type = kind;
+    row.prompt = prompt.trim().to_string();
+    if kind == 3 {
+        row.value = "0".to_string();
+    } else if kind == 1 {
+        let items: Vec<&str> = choices.split(';').map(str::trim).filter(|item| !item.is_empty()).collect();
+        row.value = items.first().ok_or_else(|| "Type the choices of the list, separated by \";\".".to_string())?.to_string();
+        row.format = items.join(";");
+    }
+    Ok(row)
 }
 
 /// Write one Shape Data row (`Engine::edit` op 17; the row's own name says which). All fields are sent as they are.
@@ -2832,6 +2854,34 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         let before = counts(&driver);
         drag_to(&mut driver, &|frame| pos2(frame.center().x, frame.bottom() + 120.0));
         assert_eq!(counts(&driver), (before.0 + 1, before.1), "{}", driver.app.status);
+    }
+
+    #[test]
+    fn a_new_field_takes_a_type_and_a_prompt() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.app.data_pane = Some(DataPane::default());
+        driver.frames(4);
+        let add = |driver: &mut Driver, label: &str, kind: u32, choices: &str| {
+            let pane = driver.app.data_pane.as_mut().unwrap();
+            (pane.new_label, pane.new_type, pane.new_choices, pane.new_prompt) = (label.to_string(), kind, choices.to_string(), " Who? ".to_string());
+            driver.frames(3);
+            let button = *driver.texts("Add").first().expect("the Add button");
+            driver.click(button.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let rows = |driver: &Driver| driver.app.doc_shape(&ids[0]).map(|shape| shape.data.clone()).unwrap_or_default();
+        add(&mut driver, "Approved", 3, "");
+        let first = rows(&driver);
+        assert_eq!((first.len(), first[0].r#type, first[0].value.as_str(), first[0].prompt.as_str()), (1, 3, "0", "Who?"), "{}", driver.app.status);
+        // a list needs choices; without them nothing is written and the typing stays
+        add(&mut driver, "Colour", 1, " ; ");
+        assert_eq!(rows(&driver).len(), 1);
+        assert!(driver.app.status.contains("choices") && driver.app.data_pane.as_ref().unwrap().new_label == "Colour", "{}", driver.app.status);
+        add(&mut driver, "Colour", 1, "Red; Green ;");
+        let all = rows(&driver);
+        let colour = all.iter().find(|row| row.label == "Colour").expect("the list field");
+        assert_eq!((colour.r#type, colour.format.as_str(), colour.value.as_str()), (1, "Red;Green", "Red"));
     }
 
     #[test]
@@ -6672,6 +6722,7 @@ impl LayoutCraftApp {
         let mut write: Option<DataRow> = None;
         let mut reread = false;
         let mut remove: Option<String> = None;
+        let mut refused: Option<String> = None;
         egui::Window::new("Shape Fields").open(&mut open).collapsible(true).default_width(360.0).show(ctx, |ui| {
             if shape.is_none() {
                 ui.label("Select one shape to see its fields.");
@@ -6728,13 +6779,43 @@ impl LayoutCraftApp {
                 let edit = ui.text_edit_singleline(&mut pane.new_label).labelled_by(label.id);
                 let entered = edit.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
                 if ui.button("Add").clicked() || entered {
-                    write = new_data_row(&pane.new_label, &pane.rows);
-                    if write.is_some() {
-                        pane.new_label.clear();
+                    match new_data_row(&pane.new_label, &pane.rows).map(|row| typed_data_row(row, pane.new_type, &pane.new_choices, &pane.new_prompt)) {
+                        Some(Ok(row)) => {
+                            write = Some(row);
+                            pane.new_label.clear();
+                            pane.new_prompt.clear();
+                            pane.new_choices.clear();
+                        }
+                        Some(Err(why)) => refused = Some(why),
+                        None => {}
                     }
                 }
             });
+            ui.horizontal(|ui| {
+                let label = ui.label("Type");
+                let shown = NEW_FIELD_TYPES.iter().find(|kind| kind.0 == pane.new_type).map_or("", |kind| kind.1);
+                egui::ComboBox::from_id_salt("data-new-type")
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
+                        for (kind, name) in NEW_FIELD_TYPES {
+                            ui.selectable_value(&mut pane.new_type, kind, name);
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id);
+                let label = ui.label("Prompt");
+                ui.add(egui::TextEdit::singleline(&mut pane.new_prompt).desired_width(140.0)).labelled_by(label.id).on_hover_text("Shown when the pointer rests on the field's name");
+            });
+            if pane.new_type == 1 {
+                ui.horizontal(|ui| {
+                    let label = ui.label("Choices, separated by ;");
+                    ui.text_edit_singleline(&mut pane.new_choices).labelled_by(label.id);
+                });
+            }
         });
+        if let Some(why) = refused {
+            self.status = why;
+        }
         if let Some(shape) = shape {
             // leaving a field without a change writes nothing
             let write = write.filter(|row| {
