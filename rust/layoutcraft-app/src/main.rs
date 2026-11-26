@@ -371,6 +371,220 @@ mod view_key_tests {
     }
 }
 
+/// The resizes of "same width / height": every other page-level shape of the selection takes the width and / or height of the
+/// FIRST one (the rule of `web/shell.js` `sameSize`). `frames` is `Engine::group_info_json`; connectors, group members and
+/// shapes without an editable frame are left out. Returns (id, width, height) in inches.
+fn same_size_plan(frames: &str, ids: &[String], is_connector: impl Fn(&str) -> bool, width: bool, height: bool) -> Result<Vec<(String, f64, f64)>, String> {
+    let frames: Vec<serde_json::Value> = serde_json::from_str(frames).map_err(|error| error.to_string())?;
+    let sizes: Vec<(&String, f64, f64)> = ids
+        .iter()
+        .filter(|id| !is_connector(id))
+        .filter_map(|id| {
+            let frame = frames.iter().find(|frame| frame["id"].as_str() == Some(id.as_str()))?;
+            if !frame["parentId"].is_null() || frame["editable"].as_bool() != Some(true) {
+                return None;
+            }
+            Some((id, frame["size"][0].as_f64()?, frame["size"][1].as_f64()?))
+        })
+        .collect();
+    let [(_, first_w, first_h), rest @ ..] = sizes.as_slice() else {
+        return Err("select two or more shapes of the page (shift-click)".to_string());
+    };
+    if rest.is_empty() {
+        return Err("select two or more shapes of the page (shift-click)".to_string());
+    }
+    Ok(rest.iter().map(|(id, w, h)| ((*id).clone(), if width { *first_w } else { *w }, if height { *first_h } else { *h })).collect())
+}
+
+#[cfg(test)]
+mod same_size_tests {
+    use super::same_size_plan;
+
+    const FRAMES: &str = r#"[
+        {"id":"1","parentId":null,"editable":true,"size":[2.0,1.0]},
+        {"id":"2","parentId":null,"editable":true,"size":[3.0,4.0]},
+        {"id":"3","parentId":"2","editable":true,"size":[5.0,5.0]},
+        {"id":"4","parentId":null,"editable":true,"size":[6.0,7.0]}
+    ]"#;
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|id| id.to_string()).collect()
+    }
+
+    #[test]
+    fn the_others_take_the_size_of_the_first_selected() {
+        let plan = same_size_plan(FRAMES, &ids(&["2", "1", "4"]), |_| false, true, false).unwrap();
+        assert_eq!(plan, vec![("1".to_string(), 3.0, 1.0), ("4".to_string(), 3.0, 7.0)]);
+        let plan = same_size_plan(FRAMES, &ids(&["1", "2"]), |_| false, true, true).unwrap();
+        assert_eq!(plan, vec![("2".to_string(), 2.0, 1.0)]);
+    }
+
+    #[test]
+    fn connectors_and_group_members_are_left_out() {
+        let plan = same_size_plan(FRAMES, &ids(&["4", "1", "3", "2"]), |id| id == "4", false, true).unwrap();
+        assert_eq!(plan, vec![("2".to_string(), 3.0, 1.0)]);
+        assert!(same_size_plan(FRAMES, &ids(&["1", "3"]), |_| false, true, true).is_err());
+    }
+}
+
+/// The status verb of a shape operation (`Engine::group_op` 6..12) and how many selected shapes it needs.
+fn shape_op_info(op: i32) -> (&'static str, usize) {
+    match op {
+        6 => ("Joined into one outline", 2),
+        7 => ("Combined", 2),
+        8 => ("Cut into pieces", 2),
+        9 => ("Intersected", 2),
+        10 => ("Subtracted", 2),
+        11 => ("Joined the lines", 1),
+        _ => ("Trimmed", 2),
+    }
+}
+
+#[cfg(test)]
+mod shape_op_tests {
+    use crate::ribbon::{self, Native};
+    use layoutcraft_engine::Engine;
+
+    /// The number of shapes the ribbon command `id` makes from two overlapping rectangles.
+    fn made_by(id: &str) -> usize {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let first = engine.draw(0, 0, 1.0, 1.0, 3.0, 3.0).unwrap();
+        let second = engine.draw(0, 0, 2.0, 2.0, 4.0, 4.0).unwrap();
+        let Some(Native::ShapeOp(op)) = ribbon::native(id) else { panic!("{id} is not a shape operation") };
+        let made = engine.group_op(0, op, &format!("{first}
+{second}")).unwrap();
+        serde_json::from_str::<Vec<String>>(&made).unwrap().len()
+    }
+
+    #[test]
+    fn each_ribbon_command_runs_its_own_operation() {
+        assert_eq!(made_by("opUnion"), 1);
+        assert_eq!(made_by("opIntersect"), 1);
+        assert_eq!(made_by("opSubtract"), 1);
+        assert_eq!(made_by("opCombine"), 1);
+        // the two rectangles cut each other into the overlap and the two remainders
+        assert!(made_by("opFragment") >= 3);
+    }
+}
+
+/// (owner id, length in characters) of the text each of the shapes shows; shapes without text are left out.
+fn text_targets(engine: &Engine, page: usize, ids: &[String]) -> Vec<(String, usize)> {
+    ids.iter()
+        .filter_map(|id| {
+            let info: serde_json::Value = serde_json::from_str(&engine.text_info_json(page, id).ok()?).ok()?;
+            let length = info["text"].as_str()?.chars().count();
+            let owner = info["owner"].as_str()?.to_string();
+            (length > 0).then_some((owner, length))
+        })
+        .collect()
+}
+
+/// Format the whole text of the shapes (`Engine::edit` op 13 with `spec`, a JSON object of `cells` and / or `para`) as one
+/// undo step, all or nothing. Returns the number of texts changed.
+fn format_whole_text(engine: &mut Engine, page: usize, ids: &[String], spec: &serde_json::Value) -> Result<usize, String> {
+    let targets = text_targets(engine, page, ids);
+    if targets.is_empty() {
+        return Err("the selection has no text".to_string());
+    }
+    let depth = engine.undo_depth();
+    let result = targets.iter().try_for_each(|(owner, length)| {
+        let mut job = spec.clone();
+        job["start"] = serde_json::json!(0);
+        job["end"] = serde_json::json!(length);
+        engine.edit(page, 13, &format!("{owner}\n{job}"), 0.0, 0.0, 0.0, 0.0, 0)
+    });
+    engine.collapse_history(depth);
+    if result.is_err() && engine.undo_depth() > depth {
+        let _ = engine.undo();
+    }
+    result.map(|()| targets.len())
+}
+
+/// Whether the whole text of every one of the shapes that has text is struck through.
+fn all_struck(engine: &Engine, page: usize, ids: &[String]) -> bool {
+    let targets = text_targets(engine, page, ids);
+    !targets.is_empty()
+        && targets.iter().all(|(owner, length)| {
+            engine
+                .text_state_json(page, owner, 0, *length)
+                .ok()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+                .is_some_and(|state| state["char"]["Strikethru"].as_str() == Some("1"))
+        })
+}
+
+#[cfg(test)]
+mod text_format_tests {
+    use super::{all_struck, format_whole_text};
+    use layoutcraft_engine::Engine;
+
+    fn two_boxes() -> (Engine, Vec<String>) {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let ids: Vec<String> = [1.0, 5.0].iter().map(|x| engine.draw(0, 0, *x, 1.0, x + 2.0, 3.0).unwrap()).collect();
+        (engine, ids)
+    }
+
+    #[test]
+    fn strikethrough_covers_every_text_in_one_undo_step() {
+        let (mut engine, ids) = two_boxes();
+        for id in &ids {
+            engine.edit(0, 8, &format!("{id}\nlabel"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+        }
+        assert!(!all_struck(&engine, 0, &ids));
+        let depth = engine.undo_depth();
+        assert_eq!(format_whole_text(&mut engine, 0, &ids, &serde_json::json!({ "cells": { "Strikethru": "1" } })), Ok(2));
+        assert!(all_struck(&engine, 0, &ids));
+        assert_eq!(engine.undo_depth(), depth + 1);
+        let _ = engine.undo();
+        assert!(!all_struck(&engine, 0, &ids[..1]) && !all_struck(&engine, 0, &ids[1..]));
+    }
+
+    #[test]
+    fn a_selection_without_text_is_reported_and_changes_nothing() {
+        let (mut engine, ids) = two_boxes();
+        let depth = engine.undo_depth();
+        assert!(format_whole_text(&mut engine, 0, &ids, &serde_json::json!({ "para": { "HorzAlign": "2" } })).is_err());
+        assert_eq!(engine.undo_depth(), depth);
+    }
+}
+
+/// The left indents the Paragraph group offers (inches) and the line spacings (multiples of the line height).
+const INDENTS_IN: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+const LINE_SPACINGS: [f64; 4] = [1.0, 1.15, 1.5, 2.0];
+
+/// `Engine::edit` op 13 specs: `IndLeft` is in inches, `SpLine` is a negative multiple of the line height (as `web/shell.js`).
+fn indent_spec(inches: f64) -> serde_json::Value {
+    serde_json::json!({ "para": { "IndLeft": inches.to_string() } })
+}
+
+fn line_spacing_spec(multiple: f64) -> serde_json::Value {
+    serde_json::json!({ "para": { "SpLine": (-multiple).to_string() } })
+}
+
+#[cfg(test)]
+mod paragraph_tests {
+    use super::{format_whole_text, indent_spec, line_spacing_spec};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn indent_and_spacing_reach_the_paragraph() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let id = engine.draw(0, 0, 1.0, 1.0, 3.0, 3.0).unwrap();
+        engine.edit(0, 8, &format!("{id}\ntwo words"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+        let ids = [id.clone()];
+        format_whole_text(&mut engine, 0, &ids, &indent_spec(0.5)).unwrap();
+        format_whole_text(&mut engine, 0, &ids, &line_spacing_spec(1.5)).unwrap();
+        let state: serde_json::Value = serde_json::from_str(&engine.text_state_json(0, &id, 0, 9).unwrap()).unwrap();
+        let cell = |name: &str| state["para"][name].as_str().and_then(|value| value.parse::<f64>().ok()).unwrap();
+        // a left indent to the right of the margin, and a relative (negative) spacing wider than single
+        assert!(cell("IndLeft") > 0.0);
+        assert!(cell("SpLine") < -1.0);
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -866,6 +1080,10 @@ enum ArrangeCmd {
     RotateLeft,
     /// `true` = about the horizontal axis
     Flip(bool),
+    /// (width, height): give the other shapes the first one's width and / or height.
+    SameSize(bool, bool),
+    /// `Engine::group_op` 6 union, 7 combine, 8 fragment, 9 intersect, 10 subtract, 11 join, 12 trim.
+    Shapes(i32),
 }
 
 /// What a drag on the canvas does: select / move / resize, or draw a shape.
@@ -1090,6 +1308,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// (selected ids, whether all their text is struck through) for the Strike button.
+    struck_cache: Option<(String, bool)>,
     page_setup_open: bool,
     check_open: bool,
     shapes_open: bool,
@@ -1199,6 +1419,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            struck_cache: None,
             page_setup_open: false,
             check_open: false,
             shapes_open: true,
@@ -1355,6 +1576,7 @@ impl LayoutCraftApp {
     fn build_page(&mut self, ctx: &egui::Context, reset_view: bool) {
         let _timer = Timer::new("build_page (whole)", 0.0);
         self.sites_cache.clear();
+        self.struck_cache = None;
         *self.routes_cache.borrow_mut() = None;
         let (Some(package), Some(document)) = (self.engine.package.as_ref(), self.engine.document.as_ref())
         else {
@@ -2971,7 +3193,7 @@ impl LayoutCraftApp {
             }
             return;
         }
-        if matches!(id, "p:bold" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor") {
+        if matches!(id, "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor") {
             self.ribbon_format_controls(ui, id, action);
             return;
         }
@@ -3037,6 +3259,48 @@ impl LayoutCraftApp {
                         *action = Some(Action::StyleSelected(serde_json::json!({ key: !on }).to_string()));
                     }
                 }
+            }
+            "p:strike" => {
+                let on = enabled && self.selection_struck();
+                if ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("Strike").strikethrough()).selected(on)).on_hover_text("Strikethrough of the whole text").clicked() {
+                    *action = Some(Action::FormatText(serde_json::json!({ "cells": { "Strikethru": if on { "0" } else { "1" } } })));
+                }
+            }
+            "p:alignL" => {
+                let current = primary.as_ref().and_then(|shape| shape.align.clone());
+                for (label, model, cell, tip) in [("Left", "left", "0", "Align text left"), ("Centre", "center", "1", "Centre text"), ("Right", "right", "2", "Align text right"), ("Justify", "justify", "3", "Justify text")] {
+                    if ui.add_enabled(enabled, egui::Button::new(label).selected(current.as_deref() == Some(model))).on_hover_text(tip).clicked() {
+                        *action = Some(Action::FormatText(serde_json::json!({ "para": { "HorzAlign": cell } })));
+                    }
+                }
+            }
+            "p:indLeft" => {
+                ui.add_enabled_ui(enabled, |ui| {
+                    ui.menu_button("Indent \u{25be}", |ui| {
+                        for inches in INDENTS_IN {
+                            if ui.button(format!("{inches} in")).clicked() {
+                                *action = Some(Action::FormatText(indent_spec(inches)));
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("Left indent of the whole text");
+                });
+            }
+            "p:lineSp" => {
+                ui.add_enabled_ui(enabled, |ui| {
+                    ui.menu_button("Line spacing \u{25be}", |ui| {
+                        for multiple in LINE_SPACINGS {
+                            if ui.button(format!("{multiple}")).clicked() {
+                                *action = Some(Action::FormatText(line_spacing_spec(multiple)));
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("Line spacing of the whole text, in lines");
+                });
             }
             "p:fontFamily" => {
                 let (name, replaced) = self.selected_font().unwrap_or_default();
@@ -3110,6 +3374,32 @@ impl LayoutCraftApp {
         }
     }
 
+    /// `all_struck` of the selection, remembered until the page is rebuilt or the selection changes (it reads the file's XML).
+    fn selection_struck(&mut self) -> bool {
+        let ids = self.all_selected();
+        let key = ids.join("\n");
+        match &self.struck_cache {
+            Some((known, struck)) if *known == key => *struck,
+            _ => {
+                let struck = all_struck(&self.engine, self.page_index, &ids);
+                self.struck_cache = Some((key, struck));
+                struck
+            }
+        }
+    }
+
+    /// Format the whole text of every selected shape (one undo step).
+    fn format_selected_text(&mut self, ctx: &egui::Context, spec: &serde_json::Value) {
+        let ids = self.all_selected();
+        let Some(primary) = self.selected.clone() else {
+            self.status = "Select a shape first.".to_string();
+            return;
+        };
+        let page = self.page_index;
+        let result = format_whole_text(&mut self.engine, page, &ids, spec).map(|_| ());
+        self.finish_edit(ctx, result, "Formatted text", Some(primary));
+    }
+
     /// Apply an `Engine::edit` op 10 style JSON to every selected shape (one undo step).
     fn style_selected(&mut self, ctx: &egui::Context, json: &str) {
         let ids = self.all_selected();
@@ -3139,6 +3429,8 @@ impl LayoutCraftApp {
             N::RotateQuarter => Action::Arrange(ArrangeCmd::RotateQuarter),
             N::RotateLeft => Action::Arrange(ArrangeCmd::RotateLeft),
             N::Flip(vertical) => Action::Arrange(ArrangeCmd::Flip(vertical)),
+            N::SameSize(width, height) => Action::Arrange(ArrangeCmd::SameSize(width, height)),
+            N::ShapeOp(op) => Action::Arrange(ArrangeCmd::Shapes(op)),
             N::Align(mode) => Action::Arrange(ArrangeCmd::Align(mode)),
             N::Distribute(vertical) => Action::Arrange(ArrangeCmd::Distribute(vertical)),
             N::PageAdd => Action::PageAdd,
@@ -3385,6 +3677,8 @@ impl LayoutCraftApp {
         let list = ids.join("\n");
         let page = self.page_index;
         let need = |count: usize| ids.len() >= count;
+        // the shapes a shape operation made: all of them stay selected
+        let mut pieces: Vec<String> = Vec::new();
         let (verb, result): (&str, Result<Option<String>, String>) = match command {
             ArrangeCmd::Group if !need(2) => ("Group", Err("select two or more shapes (shift-click)".to_string())),
             ArrangeCmd::Group => ("Grouped", self.engine.group_op(page, 0, &list).map(Some)),
@@ -3398,6 +3692,15 @@ impl LayoutCraftApp {
             ArrangeCmd::RotateQuarter => ("Rotated right", self.engine.edit(page, 11, &list, -std::f64::consts::FRAC_PI_2, 0.0, 0.0, 0.0, 0).map(|_| None)),
             ArrangeCmd::RotateLeft => ("Rotated left", self.engine.edit(page, 11, &list, std::f64::consts::FRAC_PI_2, 0.0, 0.0, 0.0, 0).map(|_| None)),
             ArrangeCmd::Flip(vertical) => ("Flipped", self.engine.edit(page, 12, &list, 0.0, 0.0, 0.0, 0.0, vertical as i32).map(|_| None)),
+            ArrangeCmd::SameSize(width, height) => ("Resized", self.make_same_size(&ids, width, height).map(|_| None)),
+            ArrangeCmd::Shapes(op) if !need(shape_op_info(op).1) => (shape_op_info(op).0, Err("select two or more shapes (shift-click)".to_string())),
+            ArrangeCmd::Shapes(op) => (
+                shape_op_info(op).0,
+                self.engine.group_op(page, op, &list).map(|made| {
+                    pieces = serde_json::from_str(&made).unwrap_or_default();
+                    pieces.first().cloned()
+                }),
+            ),
         };
         match result {
             Ok(new_primary) => {
@@ -3405,9 +3708,27 @@ impl LayoutCraftApp {
                     self.extra_selected.clear();
                 }
                 self.finish_edit(ctx, Ok(()), verb, new_primary.or(Some(primary)));
+                if pieces.len() > 1 {
+                    self.extra_selected = pieces.split_off(1);
+                }
             }
             Err(error) => self.status = format!("{verb} failed: {error}"),
         }
+    }
+
+    /// Resize the selection to the first shape's width and / or height, about each centre, as one undo step.
+    fn make_same_size(&mut self, ids: &[String], width: bool, height: bool) -> Result<(), String> {
+        let page = self.page_index;
+        let frames = self.engine.group_info_json(page)?;
+        let plan = same_size_plan(&frames, ids, |id| self.is_connector(id), width, height)?;
+        let depth = self.engine.undo_depth();
+        let result = plan.iter().try_for_each(|(id, w, h)| self.engine.edit(page, 3, id, *w, *h, 0.5, 0.5, 0));
+        self.engine.collapse_history(depth);
+        // all or nothing: a failure part way takes the earlier resizes back
+        if result.is_err() && self.engine.undo_depth() > depth {
+            let _ = self.engine.undo();
+        }
+        result
     }
 
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
@@ -5037,6 +5358,7 @@ impl eframe::App for LayoutCraftApp {
                 }
             }
             Some(Action::StyleSelected(ref json)) => self.style_selected(&ctx, json),
+            Some(Action::FormatText(ref spec)) => self.format_selected_text(&ctx, spec),
             Some(Action::Paste) => self.paste_clipboard(&ctx),
             Some(Action::Duplicate) => {
                 self.copy_selected();
@@ -5086,6 +5408,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Format the whole text of the selected shapes: `cells` and / or `para` of `Engine::edit` op 13.
+    FormatText(serde_json::Value),
     Load,
     OpenDialog,
     Reload,

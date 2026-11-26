@@ -115,8 +115,8 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 32 present, 18 partial,
-75 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 36 present, 20 partial,
+69 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
 ### 3.1 File / Backstage
@@ -154,10 +154,10 @@ these are row counts, not a count of every Visio button.
 | Font: family | S1 (Font group named) | p:fontFamily | missing | present | Engine op 13 formats a text range | P1 |
 | Font: size and Increase/Decrease size (Ctrl+Shift+> and <) | S1 | p:fontSize | missing | present | | P1 |
 | Font: Bold / Italic / Underline | S1 | p:bold | missing | present | Desktop has no text format keys | P1 |
-| Font: strikethrough, caps, sub/superscript, font colour | S1 for caps and sub/superscript; others unverified | p:strike | missing | partial | | P2 |
-| Paragraph: align left / centre / right / justify | S1 | p:alignL | missing | present | | P1 |
+| Font: strikethrough, caps, sub/superscript, font colour | S1 for caps and sub/superscript; others unverified | p:strike | partial | partial | Desktop: strikethrough of the whole text | P2 |
+| Paragraph: align left / centre / right / justify | S1 | p:alignL | present | present | Desktop: the whole text of the selected shapes | P1 |
 | Paragraph: vertical align top / middle / bottom | S1 | p:alignL (menu) | missing | partial | | P2 |
-| Paragraph: indent, line spacing | unverified | p:indLeft, p:lineSp | missing | present | | P3 |
+| Paragraph: indent, line spacing | unverified | p:indLeft, p:lineSp | present | present | Desktop: fixed choices of left indent and line spacing, whole text | P3 |
 | Tools: Pointer Tool (Ctrl+1) | S5, S1 | - (default tool) | partial | partial | No button, Esc returns to select | P1 |
 | Tools: Text (Ctrl+2) | S9, S1 | insertTextBox | present | present | | P1 |
 | Tools: Text Block (Ctrl+Shift+4) | S5, S1 | - | missing | missing | Moves the text block inside a shape | P2 |
@@ -180,10 +180,10 @@ these are row counts, not a count of every Visio button.
 | Arrange: Bring to Front / Send to Back | S1 | zFront zBack | present | present | | P0 |
 | Arrange: Bring Forward / Send Backward | unverified | zFwd zBwd | present | present | | P1 |
 | Arrange: Group / Ungroup | S1 | grp ungrp | present | present | Grouped shapes are read-only for edits on desktop ("Grouped: read-only in this slice") | P0 |
-| Arrange: same width / height / size | unverified | sameW sameH sameWH | missing | present | | P2 |
+| Arrange: same width / height / size | unverified | sameW sameH sameWH | present | present | To the first shape selected; connectors and group members are left out | P2 |
 | Arrange: reverse connector ends | unverified | reverseEnds | missing | present | | P2 |
 | Arrange: lock | unverified | lockShape | missing | present | | P2 |
-| Arrange: shape operations (Union, Combine, Fragment, Intersect, Subtract, Join, Trim) | S18 for Trim (Developer tab, Shape Design, Operations); the others unverified | opUnion opCombine opFragment opIntersect opSubtract opJoin opTrim | missing | present | Visio puts them on Developer (S18); LayoutCraft shows them in Home > Arrange. Engine: `shape_operation`; follow Visio's place | P1 |
+| Arrange: shape operations (Union, Combine, Fragment, Intersect, Subtract, Join, Trim) | S18 for Trim (Developer tab, Shape Design, Operations); the others unverified | opUnion opCombine opFragment opIntersect opSubtract opJoin opTrim | present | present | Visio puts them on Developer (S18); LayoutCraft shows them in Home > Arrange. Engine: `shape_operation`; follow Visio's place | P1 |
 | Editing: Select (Area Select, Lasso Select, Select All, Select by Type) | S19 | - | partial | partial | Rectangle drag and Ctrl+A exist; lasso and by-type missing | P1 |
 | Editing: Layers > Assign to Layer, Layer Properties | S22 | layersBtn | partial | present | Desktop in inspector only | P2 |
 | Editing: Change Shape | unverified | changeShapeBtn | partial | present | Desktop: stencil context menu "Replace the selected shape" | P2 |
@@ -288,7 +288,7 @@ these are row counts, not a count of every Visio button.
 | Shape Design: Geometry (Freeform, Arc, Pencil) | S14 | drawTools | missing | present | | P3 |
 | Shape Design: Shape Name | S14 | - | missing | missing | | P3 |
 | Shape Design: Behavior, Protection | S14 | - | missing | missing | | P3 |
-| Shape Design: Operations (Trim and the other operations) | S18 | opUnion ... opTrim | missing | present | | P2 |
+| Shape Design: Operations (Trim and the other operations) | S18 | opUnion ... opTrim | partial | present | Desktop has them in Home > Arrange; there is no Developer tab | P2 |
 | Stencil: new stencil | S14 | - | missing | missing | Needs stencil writer | P3 |
 | Show/Hide: Document Stencil, Drawing Explorer, Master Explorer | S14 | - | missing | missing | | P3 |
 | Code & Controls: Macros, Visual Basic | S14 | - | missing | missing | Not planned | P3 |
