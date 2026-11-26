@@ -2716,6 +2716,39 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_view_tab_goes_to_size_and_position() {
+        let (mut driver, ids) = Driver::new();
+        let choose = |driver: &mut Driver| {
+            let tab = *driver.texts("View").first().expect("the View tab");
+            driver.click(tab.center(), Modifiers::NONE);
+            driver.frames(2);
+            let top = driver.app.last_viewport.top();
+            let in_ribbon = |driver: &Driver| driver.texts("Size and Position").into_iter().find(|text| text.center().y < top);
+            // in a narrow window the command may be inside the drop-down of its group
+            if in_ribbon(driver).is_none() {
+                let group = *driver.texts("Show \u{25be}").first().expect("the Show group");
+                driver.click(group.center(), Modifiers::NONE);
+                driver.frames(2);
+            }
+            let command = driver.texts("Size and Position").into_iter().min_by(|a, b| a.left().total_cmp(&b.left())).expect("the command");
+            driver.click(command.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        // nothing selected: said, and no field is waiting to take the keyboard later
+        choose(&mut driver);
+        assert!(driver.app.status.contains("Select a shape") && driver.app.size_pos.focus.is_none(), "{}", driver.app.status);
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        choose(&mut driver);
+        let before = driver.at(&ids[0]);
+        driver.key(Key::A, CTRL);
+        driver.write("4");
+        driver.key(Key::Enter, Modifiers::NONE);
+        let after = driver.at(&ids[0]);
+        assert!((after.0 - before.0).abs() > 1.0 && (after.1 - before.1).abs() < 0.01, "the X field took the typing: {before:?} {after:?} {}", driver.app.status);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -5884,6 +5917,7 @@ impl LayoutCraftApp {
             N::Layers => Action::Layers,
             N::CopyPicture => Action::CopyPicture,
             N::ShapeFormulas => Action::ShapeFormulas,
+            N::SizePosition => Action::SizePosition,
             N::FullScreen => Action::FullScreen,
             N::ShapeData => Action::ShapeData,
             N::Find => Action::Find,
@@ -8894,6 +8928,12 @@ impl eframe::App for LayoutCraftApp {
                 }
             }
             Some(Action::ShapeFormulas) => self.sheet_pane = if self.sheet_pane.is_some() { None } else { Some(SheetPane::default()) },
+            // the fields are those the inspector drew for the selection; without them there is nothing to go to
+            Some(Action::SizePosition) => match (&self.selected, &self.size_pos.fields) {
+                (Some(_), Some(Ok(_))) => self.size_pos.focus = Some(0),
+                (Some(_), Some(Err(reason))) => self.status = reason.to_string(),
+                _ => self.status = "Select a shape to see its size and position.".to_string(),
+            },
             Some(Action::DeleteGuide) => self.delete_selected_guide(&ctx),
             Some(Action::SizeField(ref id, field, value, per_inch)) => self.set_size_field(&ctx, id, field, value, per_inch),
             Some(Action::FullScreen) => self.toggle_full_screen(&ctx),
@@ -9009,6 +9049,8 @@ enum Action {
     OpenRecent(std::path::PathBuf),
     /// Show or hide the Shape Formulas window.
     ShapeFormulas,
+    /// Give the keyboard to the first Size and Position field of the inspector.
+    SizePosition,
     /// Reverse the ends of the selected connectors.
     ReverseEnds,
     /// Move the page at the first position to the second.
