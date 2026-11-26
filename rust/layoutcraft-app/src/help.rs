@@ -20,7 +20,7 @@ pub const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+X / Ctrl+C / Ctrl+V", "Cut / copy / paste"),
             ("Ctrl+D", "Duplicate"),
             ("Delete or Backspace", "Delete the selection"),
-            ("F2 or Ctrl+E", "Edit the text of the selected shape"),
+            ("F2 or Ctrl+E", "Edit the text of the selected shape"), ("Type", "Add to the text of the one selected shape"),
             ("Ctrl+S", "Save a copy"), ("Ctrl+B / Ctrl+I / Ctrl+U", "Bold / italic / underline"), ("Ctrl+Shift+> / Ctrl+Shift+<", "Larger / smaller font"), ("Ctrl+Shift+L / C / R / J", "Align text left / centre / right / justify"),
         ],
     ),
@@ -40,8 +40,8 @@ pub const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+G or Ctrl+Shift+G", "Group"),
             ("Ctrl+Shift+U", "Ungroup"),
             ("Ctrl+Shift+F / Ctrl+Shift+B", "Bring to front / send to back"),
-            ("Ctrl+L / Ctrl+R, or [ / ]", "Turn left / right"),
-            ("Ctrl+H / Ctrl+J, or H / V", "Flip horizontally / vertically"),
+            ("Ctrl+L / Ctrl+R", "Turn left / right"),
+            ("Ctrl+H / Ctrl+J", "Flip horizontally / vertically"),
         ],
     ),
     (
@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn the_table_lists_every_shortcut_the_app_handles() {
         let keys: Vec<&str> = SHORTCUTS.iter().flat_map(|(_, rows)| rows.iter().map(|(keys, _)| *keys)).collect();
-        for handled in ["Ctrl+Z", "Ctrl+Y or Ctrl+Shift+Z", "Ctrl+X / Ctrl+C / Ctrl+V", "Ctrl+D", "Delete or Backspace", "F2 or Ctrl+E", "Ctrl+S", "Ctrl+Shift+U", "Ctrl+L / Ctrl+R, or [ / ]", "Ctrl+1", "Ctrl+Shift+W"] {
+        for handled in ["Ctrl+Z", "Ctrl+Y or Ctrl+Shift+Z", "Ctrl+X / Ctrl+C / Ctrl+V", "Ctrl+D", "Delete or Backspace", "F2 or Ctrl+E", "Ctrl+S", "Ctrl+Shift+U", "Ctrl+L / Ctrl+R", "Ctrl+1", "Ctrl+Shift+W"] {
             assert!(keys.contains(&handled), "{handled} is listed");
         }
     }

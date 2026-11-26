@@ -304,8 +304,8 @@ mod nudge_tests {
 }
 
 /// The keys of the arrange commands. The first key listed for a command is the one Visio documents (`docs/43-ui-parity.md` 4.1);
-/// `[`, `]`, `H` and `V` are the earlier LayoutCraft keys, kept as aliases (4.2). egui ignores an extra Shift when it matches a
-/// shortcut, so a Shift binding comes before a plain one on the same key.
+/// egui ignores an extra Shift when it matches a shortcut, so a Shift binding comes before a plain one on the same key.
+/// Plain letters are not shortcuts: typing them on a selected shape edits its text.
 const ARRANGE_KEYS: &[(egui::Modifiers, egui::Key, ArrangeCmd)] = &[
     (CTRL_SHIFT, egui::Key::U, ArrangeCmd::Ungroup),
     (egui::Modifiers::CTRL, egui::Key::G, ArrangeCmd::Group),
@@ -315,10 +315,6 @@ const ARRANGE_KEYS: &[(egui::Modifiers, egui::Key, ArrangeCmd)] = &[
     (egui::Modifiers::CTRL, egui::Key::R, ArrangeCmd::RotateQuarter),
     (egui::Modifiers::CTRL, egui::Key::H, ArrangeCmd::Flip(false)),
     (egui::Modifiers::CTRL, egui::Key::J, ArrangeCmd::Flip(true)),
-    (egui::Modifiers::NONE, egui::Key::OpenBracket, ArrangeCmd::RotateLeft),
-    (egui::Modifiers::NONE, egui::Key::CloseBracket, ArrangeCmd::RotateQuarter),
-    (egui::Modifiers::NONE, egui::Key::H, ArrangeCmd::Flip(false)),
-    (egui::Modifiers::NONE, egui::Key::V, ArrangeCmd::Flip(true)),
 ];
 
 const CTRL_SHIFT: egui::Modifiers = egui::Modifiers { alt: false, ctrl: true, shift: true, mac_cmd: false, command: false };
@@ -351,15 +347,13 @@ mod arrange_key_tests {
     }
 
     #[test]
-    fn turn_and_flip_take_the_ctrl_keys_and_the_old_aliases() {
-        for (key, alias, command) in [
-            (Key::L, Key::OpenBracket, ArrangeCmd::RotateLeft),
-            (Key::R, Key::CloseBracket, ArrangeCmd::RotateQuarter),
-            (Key::H, Key::H, ArrangeCmd::Flip(false)),
-            (Key::J, Key::V, ArrangeCmd::Flip(true)),
-        ] {
+    fn turn_and_flip_take_the_ctrl_keys_only() {
+        for (key, command) in [(Key::L, ArrangeCmd::RotateLeft), (Key::R, ArrangeCmd::RotateQuarter), (Key::H, ArrangeCmd::Flip(false)), (Key::J, ArrangeCmd::Flip(true))] {
             assert!(press(key, true, false) == Some(command));
-            assert!(press(alias, false, false) == Some(command));
+        }
+        // the letters and brackets alone are typing, not commands
+        for key in [Key::H, Key::V, Key::OpenBracket, Key::CloseBracket] {
+            assert!(press(key, false, false).is_none());
         }
         // Ctrl+V is paste, never a flip
         assert!(press(Key::V, true, false).is_none());
@@ -2381,6 +2375,32 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn typing_on_a_selected_shape_edits_its_text() {
+        let (mut driver, ids) = Driver::new();
+        let first = driver.middle_of(&ids[0]);
+        driver.click(first, Modifiers::NONE);
+        driver.write("h");
+        assert!(driver.app.text_editor.is_some(), "{}", driver.app.status);
+        driver.write("ij");
+        // the typing carries on where it started, after the text that was there
+        assert_eq!(driver.app.text_editor.as_ref().map(|editor| editor.text.clone()), Some("labelhij".to_string()));
+        driver.key(Key::Enter, CTRL);
+        assert!(driver.app.doc_shape(&ids[0]).is_some_and(|shape| shape.label == "labelhij"), "{}", driver.app.status);
+    }
+
+    #[test]
+    fn typing_without_a_shape_or_with_two_does_nothing() {
+        let (mut driver, ids) = Driver::new();
+        let canvas = driver.app.last_viewport;
+        driver.click(pos2(canvas.left() + 30.0, canvas.top() + 30.0), Modifiers::NONE);
+        driver.write("x");
+        assert!(driver.app.text_editor.is_none());
+        driver.key(Key::A, CTRL);
+        driver.write("x");
+        assert!(driver.app.text_editor.is_none() && ids.iter().all(|id| driver.app.doc_shape(id).is_some_and(|shape| shape.label == "label")));
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -2392,6 +2412,13 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert!(driver.app.text_editor.is_none());
         assert_eq!(driver.app.selected, Some(ids[0].clone()), "the shape stays selected");
     }
+}
+
+/// The characters typed in a frame that start a text edit: what the keyboard sent, if it is more than blank space (the
+/// space bar moves the view).
+fn typed_text(events: &[egui::Event]) -> Option<String> {
+    let typed: String = events.iter().filter_map(|event| if let egui::Event::Text(text) = event { Some(text.as_str()) } else { None }).collect();
+    (!typed.trim().is_empty()).then_some(typed)
 }
 
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
@@ -6910,6 +6937,15 @@ impl eframe::App for LayoutCraftApp {
                 action = Some(Action::ZoomIn);
             } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Minus)) {
                 action = Some(Action::ZoomOut);
+            }
+            // typing on one selected shape of the canvas opens its text editor, with what was typed added to the text
+            if self.canvas_keys && !self.focus_at_frame_start && self.text_editor.is_none() && self.extra_selected.is_empty() && self.selected.is_some() && self.tool == Tool::Select {
+                if let Some(typed) = ctx.input(|input| typed_text(&input.events)) {
+                    self.open_text_editor();
+                    if let Some(editor) = self.text_editor.as_mut() {
+                        editor.text.push_str(&typed);
+                    }
+                }
             }
             match ctx.input_mut(consume_view_key) {
                 Some(ViewKey::Tool(tool)) => self.tool = tool,
