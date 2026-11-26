@@ -1880,6 +1880,29 @@ mod stencil_accordion_tests {
     }
 }
 
+/// A move held to one axis (Shift): the axis the pointer has gone further along (`raw`) keeps its snapped distance and
+/// snap line, the other axis does not move.
+fn axis_locked(raw: egui::Vec2, snapped: egui::Vec2, lines: (Option<f32>, Option<f32>)) -> (egui::Vec2, (Option<f32>, Option<f32>)) {
+    if raw.x.abs() >= raw.y.abs() {
+        (egui::vec2(snapped.x, 0.0), (lines.0, None))
+    } else {
+        (egui::vec2(0.0, snapped.y), (None, lines.1))
+    }
+}
+
+#[cfg(test)]
+mod axis_lock_tests {
+    use super::axis_locked;
+    use eframe::egui::vec2;
+
+    #[test]
+    fn the_longer_direction_wins_and_only_its_snap_line_stays() {
+        // mostly sideways: no vertical movement, even when snapping would have pulled it
+        assert_eq!(axis_locked(vec2(-40.0, 9.0), vec2(-38.0, 12.0), (Some(1.0), Some(2.0))), (vec2(-38.0, 0.0), (Some(1.0), None)));
+        assert_eq!(axis_locked(vec2(5.0, 30.0), vec2(8.0, 32.0), (Some(1.0), Some(2.0))), (vec2(0.0, 32.0), (None, Some(2.0))));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -3816,7 +3839,12 @@ impl LayoutCraftApp {
                 start_rect
             }
             DragMode::Move => {
-                let (delta, found) = self.snapped_move(drag.start_rect, pointer - drag.start_pointer);
+                let raw = pointer - drag.start_pointer;
+                let (mut delta, mut found) = self.snapped_move(drag.start_rect, raw);
+                // Shift held during the drag keeps the move straight
+                if self.shift_down {
+                    (delta, found) = axis_locked(raw, delta, found);
+                }
                 guides = found;
                 egui::Rect::from_min_size(drag.start_rect.min + delta, drag.start_rect.size())
             }

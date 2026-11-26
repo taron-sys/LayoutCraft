@@ -28,7 +28,7 @@ pub const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         "Shapes",
         &[
             ("Click, Shift+click", "Select, add to or remove from the selection"),
-            ("Drag a shape", "Move it"),
+            ("Drag a shape", "Move it"), ("Shift while dragging", "Move straight, across or up and down"),
             ("Drag a corner handle", "Resize it"),
             ("Ctrl+A", "Select all"), ("Tab / Shift+Tab", "Next / previous shape (a shape selected on the page)"),
             ("Arrow keys, with Shift", "Move the selection a small or a large step"),
