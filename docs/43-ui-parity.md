@@ -91,14 +91,14 @@ nice to have. Effort is an estimate in hours.
 | Shapes window | Stencils stacked, one open at a time, title bars; More Shapes menu; Search at the top; minimise to a thin column; any stencil can be opened in any diagram (S2). Quick Shapes area at the top of each stencil plus a generated Quick Shapes stencil (S3). | Desktop left panel: heading, "Open stencil", "Basic shapes", search box, collapsible stencil headers with 70 x 84 px thumbnails; click-then-click or drag onto page; context menu Place / Replace; remembers opened stencils. Browser: `web/shell.js` palette with favourites. | Accordion behaviour (one open), More Shapes category menu, minimise-to-column, Quick Shapes area and stencil, drag shape out of the Quick area to edit it, Shapes window dock/float. | P0 | 16-28 |
 | Drawing canvas | Page with horizontal and vertical rulers (S26), optional grid (S21) fixed or variable, guides dragged from rulers (S26 snippet), page breaks (unverified), workspace beyond the page. | Desktop: page raster with grid lines (`show_grid`), snapping to grid / shapes / guides read from the page; rulers (no drawing scale), guides dragged from them. Browser: rulers, guides (`shell.js` ruler guides), grid, page breaks. | Drawing scale on the desktop rulers; keyboard creation and moving of guides; page-break view. | P0 | 12-20 |
 | Page tabs | Tabs at the lower edge of the drawing: Page-1 and background pages such as VBackground-1 (S5); right-click a page tab for page properties (S1 snippet context, S27). | Browser: `#pageBar` with context menu (`contextmenu.js`). Desktop: a tab strip under the drawing with a right-click menu, drag to reorder and an add button; page buttons also in the status bar. | Background pages in the desktop strip; page properties from the menu; keyboard reordering other than the ribbon commands. | P0 | 8-14 |
-| Status bar | Left: items that act as shortcuts, e.g. clicking the width item opens Size & Position (S4); right: zoom controls, Full Screen, window switching (S4); zoom slider and Fit Page to Window at the lower right, and a button to open Pan & Zoom (S11). Page number and language: unverified. | Desktop bottom panel: previous / next page, "page n / m", status message, zoom slider, "zoom nn%", Fit button, "modified". Browser: `#statusbar`. | Shape-geometry items (width, height, angle) that open Size & Position; full screen and pan buttons; language item unverified. | P0 | 8-12 |
+| Status bar | Left: items that act as shortcuts, e.g. clicking the width item opens Size & Position (S4); right: zoom controls, Full Screen, window switching (S4); zoom slider and Fit Page to Window at the lower right, and a button to open Pan & Zoom (S11). Page number and language: unverified. | Desktop bottom panel: previous / next page, "page n / m", status message, zoom slider, "zoom nn%", Fit button, "modified", and the selected shape's width, height and angle (a click goes to Size and Position). Browser: `#statusbar`. | Full screen and pan buttons; language item unverified. | P0 | 8-12 |
 | Zoom and pan | Zoom slider, Fit Page to Window, Pan & Zoom button (S11); Ctrl+wheel zooms, plain wheel scrolls, Ctrl+Shift magnifier (click zoom in, right-click out, drag a rectangle) (S11). | Desktop: Ctrl+wheel zooms at the pointer, the wheel scrolls (Shift: sideways), middle button / Space / Pan tool move; Ctrl+= / Ctrl+-; zoom slider and menu. Browser: wheel option (`wheelZoom`), Pan & Zoom pane. | Magnifier gesture, Pan & Zoom pane, a wheel-zooms option. | P1 | 8-14 |
 | Task pane: Size & Position | View > Show > Task Panes > Size & Position: Width, Height, X, Y (pin position), Pin Pos, Angle; units typed in text; formulas (S12). | Desktop inspector: editable pin X and Y, width, height and angle (shapes of the page, not locked), in the page unit (in or mm). Browser: `paneSizePos`. | Choice of the reference point; typed units; formulas (P3); a dockable window. | P0 | 8-14 |
 | Task pane: Shape Data | Data entered per shape and shown in a window (View > Task Panes, Data > Show/Hide; S5). | Browser: Data panel (`dataBtn`). Desktop: a window for one selected shape (values, add, remove). | Type, prompt, hidden and order editing; several shapes at once; docking. | P1 | 10-16 |
 | Task pane: Pan & Zoom | Thumbnail of the page with a blue frame; drag the frame to pan, resize to zoom, has a slider (S11). | Browser `panePanZoom` (frame drag, wheel). Desktop none. | Port to desktop. | P2 | 6-10 |
 | Task pane: Layers | Layer Properties dialog with Visible, Print, Active, Lock, Snap, Glue, Color columns; Assign to Layer (S22). | Desktop inspector: per layer Visible / Prints / Locked checkboxes, shape-on-layer checkbox, add and delete layer. Browser: layers panel. | Active, Snap, Glue, Color columns; Assign to Layer command in the Editing group. | P2 | 8-12 |
 | Task pane: Format Shape | Opened from the right-click menu or F3; tabs Fill & Line and Effects (Shadow, Reflection, Glow, 3-D Rotation) (S9, S1). | Desktop inspector "Style": fill, line colour, weight, pattern. Browser: Home > Shape Styles drop-down (fill, line, shadow). | Docked pane with tabs; text options; F3. | P1 | 14-22 |
-| Task pane: ShapeSheet | Developer > Shape Design > Show ShapeSheet for a shape, page or document (S14). | Browser `paneSheet` (read-only table from `shape_sheet_json`). Desktop none. | See naming: we call it a formula table; read-only first. | P3 | 10-16 |
+| Task pane: ShapeSheet | Developer > Shape Design > Show ShapeSheet for a shape, page or document (S14). | Browser `paneSheet` (read-only table from `shape_sheet_json`). Desktop: a read-only Shape Formulas window for one shape. | See naming: we call it a formula table; read-only first. | P3 | 10-16 |
 | Task pane behaviour | Panes can float or dock and be resized, opened from View > Show > Task Panes (S12, S16); F6 moves between panes (S1). | Desktop: two fixed side panels, resizable; no float; F6 not bound. Browser: F6 cycles regions (`keyboard.js`). | Dock / float; F6 on desktop. | P2 | 10-16 |
 | Context (right-click) menus | Shape menu has special commands for the shape; Format Shape from it (S5, S9). Page-tab menu exists (S1, S27). Canvas menu: unverified. | Desktop: shape menu (Cut, Copy, Paste, Duplicate, Delete, Group, Ungroup, order, rotate, flip, Edit text) and empty-page menu (Paste, Page setup, Fit, snap toggles). Browser: `contextmenu.js`. | Format Shape, Data, Container submenu; page-tab menu on desktop; Shift+F10 key (S1). | P1 | 6-10 |
 | Mini toolbars | AutoConnect mini toolbar of up to four Quick Shapes over the arrow (S3, S5, S6). Selection mini toolbar for text: unverified. | Browser: AutoConnect-style arrows (`autoConnectToggle`). Desktop none. | Connect arrows and their picker on desktop. | P0 | 12-20 |
@@ -115,8 +115,8 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 46 present, 20 partial,
-59 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 46 present, 21 partial,
+58 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
 ### 3.1 File / Backstage
@@ -267,7 +267,7 @@ these are row counts, not a count of every Visio button.
 | Show: Grid | S21 | showGrid | present | present | Ruler & Grid dialog (fixed / variable spacing, origin) missing | P0 |
 | Show: Guides | S26 snippet | showGuides | present | present | Desktop: drag from a ruler, move, drop on a ruler or press Delete; mouse only for creating and moving; no turned guides | P0 |
 | Show: Page Breaks | unverified | showBreaks | missing | present | | P2 |
-| Show: Task Panes menu | S12, S11 | paneShapes paneSizePos paneSheet panePanZoom | partial | present | Desktop: Shapes pane only from the ribbon | P0 |
+| Show: Task Panes menu | S12, S11 | paneShapes paneSizePos paneSheet panePanZoom | partial | present | Desktop: Shapes pane and Shape Formulas from the ribbon | P0 |
 | Zoom: Zoom (dialog) | S11 | zl | partial | present | Desktop: a menu of fixed levels, fit and page width; no typed value | P1 |
 | Zoom: Fit Page to Window (Ctrl+Shift+W) | S11, S1 | fit | present | present | | P0 |
 | Zoom: 100%, Page Width | unverified | zoom100 zoomWidth | present | present | | P2 |
@@ -284,7 +284,7 @@ these are row counts, not a count of every Visio button.
 
 | Visio command | Src | LC id | Desktop | Browser | Notes | Prio |
 |---|---|---|---|---|---|---|
-| Shape Design: Show ShapeSheet (shape, page, document) | S14 | paneSheet | missing | partial | Browser read-only; sits in View, not Developer | P2 |
+| Shape Design: Show ShapeSheet (shape, page, document) | S14 | paneSheet | partial | partial | Read only, shapes only; sits in View, not Developer | P2 |
 | Shape Design: Geometry (Freeform, Arc, Pencil) | S14 | drawTools | missing | present | | P3 |
 | Shape Design: Shape Name | S14 | - | missing | missing | | P3 |
 | Shape Design: Behavior, Protection | S14 | - | missing | missing | | P3 |
@@ -378,15 +378,15 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Help pane | F1 | none (Ctrl+F1 collapses the ribbon, the same as Office) | same | none |
 | Key tips | Alt, then letters (Alt+H is Home) | none on desktop | Alt shows tips | none (desktop) |
 | Open context menu from keyboard | Shift+F10 | none | none | none |
-| Bold / italic / underline | Ctrl+B / I / U | none on desktop | Ctrl+B / I / U | none (desktop) |
-| Text alignment | Ctrl+Shift+L / C / R / J (web table uses S for centre) | none | none | none |
+| Bold / italic / underline | Ctrl+B / I / U | Ctrl+B / I / U (selected shapes) | Ctrl+B / I / U | same on desktop |
+| Text alignment | Ctrl+Shift+L / C / R / J (web table uses S for centre) | Ctrl+Shift+L / C / R / J | none | same on desktop |
 | Edit text stop | Esc | Esc | Esc / Ctrl+Enter | same |
 | Delete | Delete | Delete or Backspace | same | same |
 | Save | Ctrl+S (assumed standard, not in S1) | Ctrl+S (saves a copy) | Ctrl+S | partial |
 | Find | Ctrl+F (web `findBtn`) | Ctrl+F | Ctrl+F | same on desktop |
 | Hyperlink | Ctrl+K (unverified in S1) | Ctrl+K | Ctrl+K | same on desktop |
 
-Count of the 41 rows above: same 20, diff 2, partial 2, none 17. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 22, diff 2, partial 2, none 15. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 

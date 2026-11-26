@@ -1176,6 +1176,8 @@ struct SizePos {
     fields: Option<Result<([String; 5], [String; 5]), &'static str>>,
     unit: &'static str,
     per_inch: f64,
+    /// The field to give the keyboard focus on the next frame.
+    focus: Option<usize>,
 }
 
 #[cfg(test)]
@@ -1666,6 +1668,171 @@ mod shape_tab_tests {
         assert_eq!((step(Some("a"), false), step(Some("c"), false)), ("b".to_string(), "a".to_string()));
         assert_eq!((step(Some("a"), true), step(Some("gone"), false), step(None, true)), ("c".to_string(), "a".to_string(), "c".to_string()));
         assert_eq!(next_in_cycle(&[], None, false), None);
+    }
+}
+
+/// What a key that works on the selection asks for.
+#[derive(Clone, Copy, PartialEq)]
+enum EditKey {
+    Arrange(ArrangeCmd),
+    /// Text alignment: the `HorzAlign` cell value.
+    Align(&'static str),
+    /// Switch bold, italic or underline (the `Engine::edit` op 10 name).
+    Style(&'static str),
+}
+
+/// Text alignment keys. They are taken before the arrange keys: egui ignores an extra Shift when it matches a shortcut, so
+/// Ctrl+J (flip) would otherwise swallow Ctrl+Shift+J.
+const ALIGN_KEYS: [(egui::Key, &str); 4] = [(egui::Key::L, "0"), (egui::Key::C, "1"), (egui::Key::R, "2"), (egui::Key::J, "3")];
+/// Text style keys. They are taken after the arrange keys, which own Ctrl+Shift+B and Ctrl+Shift+U.
+const STYLE_KEYS: [(egui::Key, &str); 3] = [(egui::Key::B, "bold"), (egui::Key::I, "italic"), (egui::Key::U, "underline")];
+
+/// Takes the first selection shortcut pressed in this frame out of the input.
+fn consume_edit_key(input: &mut egui::InputState) -> Option<EditKey> {
+    if let Some((_, cell)) = ALIGN_KEYS.iter().find(|(key, _)| input.consume_key(CTRL_SHIFT, *key)) {
+        return Some(EditKey::Align(cell));
+    }
+    if let Some(command) = consume_arrange_key(input) {
+        return Some(EditKey::Arrange(command));
+    }
+    STYLE_KEYS.iter().find(|(key, _)| input.consume_key(egui::Modifiers::CTRL, *key)).map(|(_, name)| EditKey::Style(name))
+}
+
+#[cfg(test)]
+mod edit_key_tests {
+    use super::{consume_edit_key, ArrangeCmd, EditKey};
+    use eframe::egui::{self, Key, Modifiers};
+
+    fn press(key: Key, shift: bool) -> Option<EditKey> {
+        let modifiers = Modifiers { alt: false, ctrl: true, shift, mac_cmd: false, command: true };
+        let mut input = egui::InputState::default();
+        input.events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+        consume_edit_key(&mut input)
+    }
+
+    #[test]
+    fn keys_that_differ_only_by_shift_do_not_swallow_each_other() {
+        for (key, plain, shifted) in [
+            (Key::J, EditKey::Arrange(ArrangeCmd::Flip(true)), EditKey::Align("3")),
+            (Key::L, EditKey::Arrange(ArrangeCmd::RotateLeft), EditKey::Align("0")),
+            (Key::R, EditKey::Arrange(ArrangeCmd::RotateQuarter), EditKey::Align("2")),
+            (Key::B, EditKey::Style("bold"), EditKey::Arrange(ArrangeCmd::Order(3))),
+            (Key::U, EditKey::Style("underline"), EditKey::Arrange(ArrangeCmd::Ungroup)),
+        ] {
+            assert!(press(key, false) == Some(plain));
+            assert!(press(key, true) == Some(shifted));
+        }
+        assert!(press(Key::C, true) == Some(EditKey::Align("1")));
+        assert!(press(Key::I, false) == Some(EditKey::Style("italic")));
+    }
+}
+
+/// The status bar's geometry text of the selected shape, from the Size and Position fields: only when they were read for
+/// that shape on that page and it can be edited.
+fn status_geometry(size_pos: &SizePos, page: usize, selected: Option<&str>) -> Option<String> {
+    let (read_page, shape) = size_pos.key.as_ref()?;
+    if *read_page != page || Some(shape.as_str()) != selected {
+        return None;
+    }
+    let (_, read) = size_pos.fields.as_ref()?.as_ref().ok()?;
+    let unit = size_pos.unit;
+    Some(format!("Width {} {unit}  Height {} {unit}  Angle {} deg", read[2], read[3], read[4]))
+}
+
+#[cfg(test)]
+mod status_geometry_tests {
+    use super::{status_geometry, SizePos};
+
+    #[test]
+    fn only_the_selected_editable_shape_is_described() {
+        let texts = ["1", "2", "3.5", "4.5", "90"].map(str::to_string);
+        let mut size_pos = SizePos { key: Some((0, "7".to_string())), fields: Some(Ok((texts.clone(), texts))), unit: "mm", per_inch: 25.4, focus: None };
+        let text = status_geometry(&size_pos, 0, Some("7")).unwrap();
+        assert!(text.contains("3.5 mm") && text.contains("4.5 mm") && text.contains("90 deg"));
+        // another shape, another page, nothing selected, or fields about to be read again: nothing stale is shown
+        assert!(status_geometry(&size_pos, 0, Some("8")).is_none() && status_geometry(&size_pos, 1, Some("7")).is_none() && status_geometry(&size_pos, 0, None).is_none());
+        size_pos.fields = Some(Err("The shape is locked."));
+        assert!(status_geometry(&size_pos, 0, Some("7")).is_none());
+        size_pos.key = None;
+        assert!(status_geometry(&size_pos, 0, Some("7")).is_none());
+    }
+}
+
+/// One part of the Shape Formulas table: its title and rows of (cell, value, formula).
+#[derive(Debug, Clone, PartialEq)]
+struct SheetGroup {
+    title: String,
+    rows: Vec<(String, String, String)>,
+}
+
+/// `Engine::shape_sheet_json` as the table shows it: the shape's own cells first, then every section; a section the
+/// shape takes from its master says so. A value carries its unit.
+fn sheet_groups(json: &str) -> Vec<SheetGroup> {
+    let sheet: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+    let row = |prefix: &str, cell: &serde_json::Value| {
+        let text = |key: &str| cell[key].as_str().unwrap_or("").to_string();
+        let (value, unit) = (text("value"), text("unit"));
+        let value = if unit.is_empty() { value } else { format!("{value} {unit}") };
+        (format!("{prefix}{}", text("name")), value, text("formula"))
+    };
+    let list = |value: &serde_json::Value| value.as_array().cloned().unwrap_or_default();
+    let mut groups = Vec::new();
+    let cells = list(&sheet["cells"]);
+    if !cells.is_empty() {
+        groups.push(SheetGroup { title: "Shape".to_string(), rows: cells.iter().map(|cell| row("", cell)).collect() });
+    }
+    for section in list(&sheet["sections"]) {
+        let mut title = section["name"].as_str().unwrap_or("Section").to_string();
+        if let Some(index) = section["index"].as_u64() {
+            title.push_str(&format!(" {index}"));
+        }
+        if section["fromMaster"].as_bool() == Some(true) {
+            title.push_str(" (from the master)");
+        }
+        let mut rows: Vec<_> = list(&section["cells"]).iter().map(|cell| row("", cell)).collect();
+        for entry in list(&section["rows"]) {
+            let name = entry["name"].as_str().map(str::to_string).or_else(|| entry["index"].as_u64().map(|index| index.to_string())).unwrap_or_default();
+            let kind = entry["type"].as_str().map(|kind| format!(" {kind}")).unwrap_or_default();
+            rows.extend(list(&entry["cells"]).iter().map(|cell| row(&format!("{name}{kind} / "), cell)));
+        }
+        groups.push(SheetGroup { title, rows });
+    }
+    groups
+}
+
+/// The Shape Formulas window (read only) and what it last read.
+#[derive(Default)]
+struct SheetPane {
+    /// (page, shape, undo depth) the groups were read at.
+    key: Option<(usize, String, usize)>,
+    groups: Vec<SheetGroup>,
+}
+
+#[cfg(test)]
+mod sheet_tests {
+    use super::sheet_groups;
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn a_drawn_shape_lists_its_size_cells_and_sections() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let id = engine.draw(0, 0, 1.0, 1.0, 3.0, 2.0).unwrap();
+        let groups = sheet_groups(&engine.shape_sheet_json(0, &id).unwrap());
+        let width = groups[0].rows.iter().find(|row| row.0 == "Width").expect("the width cell");
+        assert!(width.1.starts_with('2'), "{width:?}");
+        // the outline of a drawn rectangle is a section with rows
+        assert!(groups.iter().skip(1).any(|group| group.title.starts_with("Geometry") && !group.rows.is_empty()), "{groups:?}");
+    }
+
+    #[test]
+    fn units_and_inherited_sections_are_said() {
+        let json = r#"{"cells":[{"name":"Angle","value":"1.5","unit":"RAD","formula":null}],"sections":[{"name":"User","index":null,"fromMaster":true,"cells":[],"rows":[{"name":"A","index":0,"type":null,"cells":[{"name":"Value","value":"3","formula":"1+2"}]}]}]}"#;
+        let groups = sheet_groups(json);
+        assert_eq!(groups[0].rows[0], ("Angle".to_string(), "1.5 RAD".to_string(), String::new()));
+        assert!(groups[1].title.contains("from the master"));
+        assert_eq!(groups[1].rows[0], ("A / Value".to_string(), "3".to_string(), "1+2".to_string()));
+        assert!(sheet_groups("nonsense").is_empty());
     }
 }
 
@@ -2406,6 +2573,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Shape Formulas window, while it is open.
+    sheet_pane: Option<SheetPane>,
     /// The last press was on the canvas (or all shapes were selected by key); a Tab to apply to the shapes.
     canvas_keys: bool,
     tab_cycle: Option<bool>,
@@ -2551,6 +2720,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            sheet_pane: None,
             canvas_keys: false,
             tab_cycle: None,
             show_guides: true,
@@ -2731,6 +2901,9 @@ impl LayoutCraftApp {
         let _timer = Timer::new("build_page (whole)", 0.0);
         self.sites_cache.clear();
         self.struck_cache = None;
+        if let Some(pane) = self.sheet_pane.as_mut() {
+            pane.key = None;
+        }
         self.guides = self.engine.guides_json(self.page_index).map(|json| guide_lines(&json)).unwrap_or_default();
         self.selected_guide = None;
         self.guide_drag = None;
@@ -4692,6 +4865,7 @@ impl LayoutCraftApp {
             N::HelpShortcuts => Action::HelpShortcuts,
             N::Hyperlink => Action::Hyperlink,
             N::Layers => Action::Layers,
+            N::ShapeFormulas => Action::ShapeFormulas,
             N::FullScreen => Action::FullScreen,
             N::ShapeData => Action::ShapeData,
             N::Find => Action::Find,
@@ -5527,6 +5701,11 @@ impl LayoutCraftApp {
                     for (field, name) in SIZE_FIELDS.iter().enumerate() {
                         let label = ui.label(*name);
                         let edit = ui.add(egui::TextEdit::singleline(&mut texts[field]).desired_width(80.0)).labelled_by(label.id);
+                        if self.size_pos.focus == Some(field) {
+                            edit.request_focus();
+                            edit.scroll_to_me(None);
+                            self.size_pos.focus = None;
+                        }
                         ui.label(if field == 4 { "deg" } else { unit });
                         ui.end_row();
                         match field_left(ui, &edit) {
@@ -5760,6 +5939,55 @@ impl LayoutCraftApp {
         }
     }
 
+    /// The Shape Formulas window: the cells of the one selected shape with their values and formulas. Read only.
+    fn draw_sheet_pane(&mut self, ctx: &egui::Context) {
+        let Some(mut pane) = self.sheet_pane.take() else {
+            return;
+        };
+        let page = self.page_index;
+        let selection = self.all_selected();
+        let key = match &selection[..] {
+            [one] => Some((page, one.clone(), self.engine.undo_depth())),
+            _ => None,
+        };
+        if pane.key != key {
+            pane.groups = key.as_ref().and_then(|(page, shape, _)| self.engine.shape_sheet_json(*page, shape).ok()).map(|json| sheet_groups(&json)).unwrap_or_default();
+            pane.key = key;
+        }
+        let mut open = true;
+        egui::Window::new("Shape Formulas").open(&mut open).collapsible(true).default_width(460.0).show(ctx, |ui| {
+            let Some((_, shape, _)) = &pane.key else {
+                ui.label("Select one shape to see its formulas.");
+                return;
+            };
+            ui.label(format!("Shape {shape} (read only)"));
+            if pane.groups.is_empty() {
+                ui.label("The cells of this shape cannot be read.");
+            }
+            egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                for (at, group) in pane.groups.iter().enumerate() {
+                    egui::CollapsingHeader::new(&group.title).id_salt(("sheet", at)).default_open(at == 0).show(ui, |ui| {
+                        egui::Grid::new(("sheet-grid", at)).num_columns(3).striped(true).show(ui, |ui| {
+                            for heading in ["Cell", "Value", "Formula"] {
+                                ui.strong(heading);
+                            }
+                            ui.end_row();
+                            for (cell, value, formula) in &group.rows {
+                                ui.label(cell);
+                                ui.label(value);
+                                ui.label(formula);
+                                ui.end_row();
+                            }
+                        });
+                    });
+                }
+            });
+        });
+        if open {
+            self.sheet_pane = Some(pane);
+        }
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -5975,9 +6203,22 @@ impl eframe::App for LayoutCraftApp {
             {
                 action = Some(Action::DeleteGuide);
             }
-            // arrange commands (ARRANGE_KEYS), then select all, zoom, F2 and the arrow nudge
-            if let Some(command) = ctx.input_mut(consume_arrange_key) {
-                action = Some(Action::Arrange(command));
+            // text and arrange keys (`consume_edit_key`), then select all, zoom, F2 and the arrow nudge
+            if let Some(command) = ctx.input_mut(consume_edit_key) {
+                action = Some(match command {
+                    EditKey::Arrange(command) => Action::Arrange(command),
+                    EditKey::Align(cell) => Action::FormatText(serde_json::json!({ "para": { "HorzAlign": cell } })),
+                    EditKey::Style(name) => {
+                        // switched off only when the first selected shape has it
+                        let shape = self.selected.as_deref().and_then(|id| self.doc_shape(id));
+                        let on = shape.is_some_and(|shape| match name {
+                            "bold" => shape.bold == Some(true),
+                            "italic" => shape.italic == Some(true),
+                            _ => shape.underline == Some(true),
+                        });
+                        Action::StyleSelected(serde_json::json!({ name: !on }).to_string())
+                    }
+                });
             } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::A)) {
                 self.select_all();
             } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Equals) || input.consume_key(egui::Modifiers::CTRL, egui::Key::Plus)) {
@@ -6051,6 +6292,13 @@ impl eframe::App for LayoutCraftApp {
                 ui.label(format!("page {} / {}", if pages == 0 { 0 } else { self.page_index + 1 }, pages));
                 if ui.add_enabled(self.page_index + 1 < pages, egui::Button::new(">")).on_hover_text("Next page").clicked() {
                     action = Some(Action::Page(self.page_index + 1));
+                }
+                // the selected shape's size; a click goes to the fields of the inspector
+                if let Some(geometry) = status_geometry(&self.size_pos, self.page_index, self.selected.as_deref()).filter(|_| !self.full_screen) {
+                    ui.separator();
+                    if ui.button(geometry).on_hover_text("Edit in Size and Position").clicked() {
+                        self.size_pos.focus = Some(2);
+                    }
                 }
                 ui.separator();
                 ui.label(&self.status);
@@ -7265,6 +7513,7 @@ impl eframe::App for LayoutCraftApp {
         }
         self.draw_find(&ctx);
         self.draw_links(&ctx);
+        self.draw_sheet_pane(&ctx);
         self.draw_data_pane(&ctx);
         if self.help_shortcuts_open {
             let mut open = true;
@@ -7404,6 +7653,7 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
             Some(Action::Hyperlink) => self.open_links(),
             Some(Action::Layers) => self.layers_open = !self.layers_open,
+            Some(Action::ShapeFormulas) => self.sheet_pane = if self.sheet_pane.is_some() { None } else { Some(SheetPane::default()) },
             Some(Action::DeleteGuide) => self.delete_selected_guide(&ctx),
             Some(Action::SizeField(ref id, field, value, per_inch)) => self.set_size_field(&ctx, id, field, value, per_inch),
             Some(Action::FullScreen) => self.toggle_full_screen(&ctx),
@@ -7512,6 +7762,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Show or hide the Shape Formulas window.
+    ShapeFormulas,
     /// Reverse the ends of the selected connectors.
     ReverseEnds,
     /// Move the page at the first position to the second.
