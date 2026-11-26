@@ -158,7 +158,7 @@ these are row counts, not a count of every Visio button.
 | Paragraph: align left / centre / right / justify | S1 | p:alignL | present | present | Desktop: the whole text of the selected shapes | P1 |
 | Paragraph: vertical align top / middle / bottom | S1 | p:alignL (menu) | missing | partial | | P2 |
 | Paragraph: indent, line spacing | unverified | p:indLeft, p:lineSp | present | present | Desktop: fixed choices of left indent and line spacing, whole text | P3 |
-| Tools: Pointer Tool (Ctrl+1) | S5, S1 | - (default tool) | partial | partial | No button, Esc returns to select | P1 |
+| Tools: Pointer Tool (Ctrl+1) | S5, S1 | - (default tool) | present | partial | Desktop: the Select button in Home > Tools, and Ctrl+1 | P1 |
 | Tools: Text (Ctrl+2) | S9, S1 | insertTextBox | present | present | | P1 |
 | Tools: Text Block (Ctrl+Shift+4) | S5, S1 | - | missing | missing | Moves the text block inside a shape | P2 |
 | Tools: Connector (Ctrl+3) | S6, S1 | connectTool | present | present | Drag shape to shape; glue to connection point or whole shape | P0 |
@@ -168,8 +168,8 @@ these are row counts, not a count of every Visio button.
 | Tools: Pan (hand) | none in S11 | handTool | present | present | LayoutCraft addition; Visio's pan is wheel, Ctrl+Shift drag, Pan & Zoom (S11) | P3 |
 | Tools: Edit points / Fit curve | unverified | editPointsBtn, fitCurveBtn | missing | present | | P2 |
 | Shape Styles: quick style gallery | S9 | p:fillColor (menu) | missing | partial | | P1 |
-| Shape Styles: Fill (colour, no fill, more colours) | S9 | p:fillColor | partial | present | Desktop inspector "Style" panel | P0 |
-| Shape Styles: Line (colour, weight, dashes, arrows) | S9 | p:lineColor | partial | present | Arrowheads missing on desktop | P0 |
+| Shape Styles: Fill (colour, no fill, more colours) | S9 | p:fillColor | partial | present | Desktop: swatches and none on the ribbon, and the inspector's Style panel; no chooser for further colours on the ribbon | P0 |
+| Shape Styles: Line (colour, weight, dashes, arrows) | S9 | p:lineColor | present | present | Desktop: colour swatches and the Line ends menu (arrowheads and sizes) on the ribbon; weight and dash pattern in the inspector | P0 |
 | Shape Styles: Effects (shadow, reflection, glow, soft edges, bevel, 3-D rotation) | S9 | p:shadow | partial | partial | Shadow only (on / off) | P2 |
 | Arrange: Align Left / Center / Right / Top / Middle / Bottom | S13 | arrL arrCx arrRt arrT arrM arrB | present | present | Aligns to the first selected; Visio aligns to the primary shape (S13) | P0 |
 | Arrange: Auto Align | S13 | - | missing | missing | Straightens connector lines | P3 |
@@ -181,7 +181,7 @@ these are row counts, not a count of every Visio button.
 | Arrange: Bring Forward / Send Backward | unverified | zFwd zBwd | present | present | | P1 |
 | Arrange: Group / Ungroup | S1 | grp ungrp | present | present | Grouped shapes are read-only for edits on desktop ("Grouped: read-only in this slice") | P0 |
 | Arrange: same width / height / size | unverified | sameW sameH sameWH | present | present | To the first shape selected; connectors and group members are left out | P2 |
-| Arrange: reverse connector ends | unverified | reverseEnds | missing | present | | P2 |
+| Arrange: reverse connector ends | unverified | reverseEnds | present | present | | P2 |
 | Arrange: lock | unverified | lockShape | missing | present | | P2 |
 | Arrange: shape operations (Union, Combine, Fragment, Intersect, Subtract, Join, Trim) | S18 for Trim (Developer tab, Shape Design, Operations); the others unverified | opUnion opCombine opFragment opIntersect opSubtract opJoin opTrim | present | present | Visio puts them on Developer (S18); LayoutCraft shows them in Home > Arrange. Engine: `shape_operation`; follow Visio's place | P1 |
 | Editing: Select (Area Select, Lasso Select, Select All, Select by Type) | S19 | - | partial | partial | Rectangle drag and Ctrl+A exist; lasso and by-type missing | P1 |

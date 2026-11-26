@@ -2885,6 +2885,40 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_home_tab_picks_the_pointer_reverses_a_connector_and_sets_its_arrowhead() {
+        let (mut driver, ids) = Driver::new();
+        let connector = driver.app.engine.add_connector(0, &ids[0], None, &ids[1], None).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        // click a command of the ribbon by what it says, opening the drop-downs on the way
+        let choose = |driver: &mut Driver, path: &[&str]| {
+            for label in path {
+                let top = driver.app.last_viewport.top();
+                let found = driver.texts(label).into_iter().filter(|text| text.left() >= 0.0).min_by(|a, b| a.top().total_cmp(&b.top()));
+                let at = found.unwrap_or_else(|| panic!("nothing says {label:?} (canvas from {top})"));
+                driver.click(at.center(), Modifiers::NONE);
+                driver.frames(3);
+            }
+        };
+        driver.app.tool = super::Tool::Draw(0);
+        driver.frames(2);
+        choose(&mut driver, &["Select"]);
+        assert!(driver.app.tool == super::Tool::Select);
+
+        driver.app.selected = Some(connector.clone());
+        driver.frames(3);
+        let ends = driver.app.connector_end_points(&connector).expect("the connector is drawn");
+        choose(&mut driver, &["Rotate \u{25be}", "Reverse Ends"]);
+        let turned = driver.app.connector_end_points(&connector).expect("still drawn");
+        assert!(turned.0.distance(ends.1) < 1.0 && turned.1.distance(ends.0) < 1.0, "{ends:?} {turned:?} {}", driver.app.status);
+
+        let arrow = |driver: &Driver| serde_json::from_str::<serde_json::Value>(&driver.app.engine.style_info_json(0, &connector).unwrap()).unwrap()["endArrow"].as_f64();
+        assert_ne!(arrow(&driver), Some(14.0));
+        choose(&mut driver, &["Styles \u{25be}", "Line ends \u{25be}", "End arrowhead", "Hollow triangle"]);
+        assert_eq!(arrow(&driver), Some(14.0), "{}", driver.app.status);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
