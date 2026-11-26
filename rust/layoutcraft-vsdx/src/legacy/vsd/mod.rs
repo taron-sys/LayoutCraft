@@ -7,6 +7,7 @@
 //! ("chunks"), or one blob (a name, a font, the colour table, a picture). Everything is read defensively: a damaged or hostile file
 //! gives an error or loses the damaged part, and never panics or loops.
 mod build;
+mod glue;
 mod records;
 
 use super::cfb;
@@ -237,7 +238,7 @@ pub(super) fn read(bytes: &[u8]) -> Result<Drawing> {
     }
     // Always true of this format, as far as it is read here.
     builder.drawing.note("formulas are not read: shapes keep their saved form, resizing scales them plainly, and behaviour that formulas gave them is gone");
-    builder.drawing.note("connectors are drawn where they were saved but are no longer glued to shapes");
+    builder.drawing.note("connectors are glued only where the connector itself stores the link: a link that comes from its master is not restored");
     Ok(builder.finish())
 }
 

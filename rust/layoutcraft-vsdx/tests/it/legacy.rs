@@ -119,6 +119,29 @@ fn compound(mut stream: Vec<u8>) -> Vec<u8> {
 
 /// A drawing with one master (a closed outline of three rows) and one page whose shape keeps two of those rows and has a text.
 fn binary(version: u8) -> Vec<u8> {
+    binary_with(version, &[])
+}
+
+/// A formula block: length, type 2, cell number, tokens.
+fn formula(cell: u8, tokens: &[u8]) -> Vec<u8> {
+    [&(tokens.len() as u32 + 6).to_le_bytes()[..], &[2, cell], tokens].concat()
+}
+
+/// A second shape, 1-D, whose begin is glued to the first connection point of shape 1 and whose end walks around shape 1.
+fn glued_line() -> Vec<u8> {
+    let reference = |column: u8| [&[0x70][..], &1u32.to_le_bytes(), &0u32.to_le_bytes(), &[7, column, 0]].concat();
+    let point = [reference(0), reference(1), vec![0x80, 0x0b, 0, 0, 0x40, 0x7a, 0x33, 0, 0, 0x40, 0xfe]].concat();
+    let walking = [0x75, 0x67, 0, 0, 0x60, 0x75, 0x66, 0, 0, 0x60, 0x75, 0x65, 0, 0, 0x60, 0x7a, 0x70, 0, 0, 0x40, 0xfe];
+    let mut ends = cells(&[1.0, 1.0, 3.0, 2.0]);
+    for (cell, tokens) in [(0, &point[..]), (1, &point[..]), (2, &walking[..]), (3, &walking[..])] {
+        ends.extend(formula(cell, tokens));
+    }
+    let trigger = [&[0x74, 0x4e, 0, 0, 0x60][..], &1u32.to_le_bytes(), &[0x7a, 0x73, 0, 0, 0x40, 0xfe]].concat();
+    [shape(2, None, None), record(0x9d, 3, &ends, 0), record(0xa4, 4, &formula(12, &trigger), 0)].concat()
+}
+
+/// [`binary`] with more records at the end of its page.
+fn binary_with(version: u8, more: &[u8]) -> Vec<u8> {
     let mut document = Document { bytes: vec![0; 0x40] };
     document.bytes[..20].copy_from_slice(b"Visio (TM) Drawing\r\n");
     document.bytes[0x1a] = version;
@@ -130,7 +153,7 @@ fn binary(version: u8) -> Vec<u8> {
     let mut sheet = record(0x46, 0, &[0xff; 54], 0);
     sheet.extend(record(0x92, 0, &cells(&[8.5, 11.0, 0.125, -0.125, 1.0, 1.0]), 4));
     let text: Vec<u8> = [0u8; 8].into_iter().chain("Hello\0".encode_utf16().flat_map(u16::to_le_bytes)).collect();
-    let page = [sheet, shape(1, Some(0), Some(5)), geometry(&[(0.0, 0.0), (2.0, 1.0)]), record(0x0e, 3, &text, 0)].concat();
+    let page = [sheet, shape(1, Some(0), Some(5)), geometry(&[(0.0, 0.0), (2.0, 1.0)]), record(0x0e, 3, &text, 0), more.to_vec()].concat();
     let page = document.stream(0x15, 0xd0, &page, true);
     let pages = document.list(0x27, &[page]);
     let trailer = document.list(0x14, &[stencils, pages]);
@@ -172,6 +195,24 @@ fn a_binary_drawing_becomes_a_package_with_its_page_shape_and_text() {
     // The shape has two of the master section's three rows: the third must not be inherited.
     let page_xml = package.text("visio/pages/page1.xml").unwrap();
     assert!(page_xml.contains("IX='3' Del='1'"), "{page_xml}");
+}
+
+#[test]
+fn stored_connector_glue_becomes_connections_and_formulas() {
+    for version in [6, 11] {
+        // a version 6 record without a list has no trailer, like the version 11 records built here
+        let (package, _) = converted(&binary_with(version, &glued_line()));
+        let page = package.text("visio/pages/page1.xml").unwrap();
+        for expected in [
+            "FromSheet='2' FromCell='BeginX' ToSheet='1' ToCell='Connections.X1'",
+            "FromSheet='2' FromCell='EndX' ToSheet='1' ToCell='PinX'",
+            "PAR(PNT(Sheet.1!Connections.X1,Sheet.1!Connections.Y1))",
+            "_WALKGLUE(EndTrigger,BegTrigger,WalkPreference)",
+            "_XFTRIGGER(Sheet.1!EventXFMod)",
+        ] {
+            assert!(page.contains(expected), "version {version}: no {expected} in {page}");
+        }
+    }
 }
 
 #[test]
@@ -217,7 +258,7 @@ fn other_files_are_not_taken_for_old_drawings() {
 
 #[test]
 fn damaged_old_drawings_never_panic() {
-    let seeds = [("binary", binary(11)), ("xml", XML.as_bytes().to_vec())];
+    let seeds = [("binary", binary_with(11, &glued_line())), ("xml", XML.as_bytes().to_vec())];
     let mut rng = Rng::new(seed() ^ 0x1e6);
     let mut sweep = Sweep::new("legacy");
     for n in 0..1500 * scale() {
