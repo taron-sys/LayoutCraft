@@ -1,0 +1,289 @@
+//! Lines and arrows between shapes: the arrows around a shape under the pointer that add a connection, connectors with loose ends,
+//! the line end (arrowhead) menu and reversing a connector's ends. The rules are the engine's; this file asks and draws.
+use super::{Action, DragMode, DragState, LayoutCraftApp, Tool, MIN_SHAPE_PX};
+use eframe::egui;
+use layoutcraft_engine::{Direction, EndTarget};
+use layoutcraft_render::SceneItem;
+
+/// The line end styles offered, with the numbers the file stores (`BeginArrow` / `EndArrow`), as the browser shell lists them.
+const LINE_ENDS: [(u32, &str); 9] = [
+    (0, "None"),
+    (1, "Open V"),
+    (4, "Filled triangle"),
+    (10, "Filled circle"),
+    (11, "Filled square"),
+    (14, "Hollow triangle"),
+    (20, "Hollow circle"),
+    (22, "Hollow diamond"),
+    (27, "Crow's foot"),
+];
+const LINE_END_SIZES: [&str; 7] = ["Very small", "Small", "Medium", "Large", "Extra large", "Jumbo", "Colossal"];
+
+/// How far outside a shape's edge its connect arrows sit (screen px).
+const ARROW_GAP: f32 = 16.0;
+/// The top arrow of the selected shape sits above its rotate handle.
+const ARROW_GAP_OVER_ROTATE: f32 = 46.0;
+/// The radius within which a connect arrow is hit, and half its drawn length.
+const ARROW_HIT: f32 = 10.0;
+const ARROW_SIZE: f32 = 6.0;
+const DIRECTIONS: [Direction; 4] = [Direction::Right, Direction::Left, Direction::Up, Direction::Down];
+
+/// The line ends of the selected line as last read: (page, shape, undo depth) and the values.
+pub(super) type LineEndsRead = ((usize, String, usize), serde_json::Value);
+
+/// The unit step of `direction` on screen (y down).
+fn screen_step(direction: Direction) -> egui::Vec2 {
+    let (x, y) = direction.step();
+    egui::vec2(x as f32, -y as f32)
+}
+
+/// Where the connect arrows of a shape shown at `rect` sit; `over_rotate` moves the top one clear of the rotate handle.
+fn arrow_places(rect: egui::Rect, over_rotate: bool) -> [(Direction, egui::Pos2); 4] {
+    DIRECTIONS.map(|direction| {
+        let step = screen_step(direction);
+        let half = egui::vec2(rect.width() / 2.0, rect.height() / 2.0);
+        let gap = if over_rotate && direction == Direction::Up { ARROW_GAP_OVER_ROTATE } else { ARROW_GAP };
+        (direction, rect.center() + egui::vec2(step.x * (half.x + gap), step.y * (half.y + gap)))
+    })
+}
+
+/// The area in which the pointer keeps a shape's arrows shown: the shape and the room its arrows take.
+fn arrow_area(rect: egui::Rect, over_rotate: bool) -> egui::Rect {
+    arrow_places(rect, over_rotate).iter().fold(rect, |area, (_, at)| area.union(egui::Rect::from_center_size(*at, egui::Vec2::splat(2.0 * ARROW_HIT))))
+}
+
+fn direction_words(direction: Direction) -> &'static str {
+    match direction {
+        Direction::Right => "to the right",
+        Direction::Left => "to the left",
+        Direction::Up => "above",
+        Direction::Down => "below",
+    }
+}
+
+impl LayoutCraftApp {
+    /// A connector drag (connector tool or a connect arrow) from shape `from` (empty: from the empty page) at `start` was released at
+    /// `end` (scene px). Each end is glued to the shape under it, else left loose there. One undo step.
+    pub(super) fn commit_connector(&mut self, ctx: &egui::Context, from: &str, start: egui::Pos2, end: egui::Pos2) {
+        let from_site = self.connect_from_site.take();
+        let to = self.pick_shape_near(end);
+        if !from.is_empty() && to.as_deref() == Some(from) {
+            self.status = "Release on a different shape, or on the empty page.".to_string();
+            return;
+        }
+        if (from.is_empty() || to.is_none()) && (end - start).length() < MIN_SHAPE_PX {
+            self.status = "Drag a longer line.".to_string();
+            return;
+        }
+        let page_height = self.page_height_in;
+        let loose = |point: egui::Pos2| EndTarget::Free(f64::from(point.x) / super::DPI, page_height - f64::from(point.y) / super::DPI);
+        let begin = if from.is_empty() { loose(start) } else { EndTarget::Glue(from.to_string(), from_site) };
+        let finish = match &to {
+            Some(shape) => EndTarget::Glue(shape.clone(), self.nearest_site(shape, end).1),
+            None => loose(self.snapped_point(end)),
+        };
+        let words = |shape: Option<&str>| shape.map_or("the page".to_string(), |id| format!("shape {id}"));
+        let done = format!("Drew a connector from {} to {}", words((!from.is_empty()).then_some(from)), words(to.as_deref()));
+        match self.engine.add_connector_between(self.page_index, &begin, &finish) {
+            Ok(id) => {
+                self.tool = Tool::Select;
+                self.finish_edit(ctx, Ok(()), &done, Some(id));
+            }
+            Err(error) => self.status = format!("Could not connect: {error}"),
+        }
+    }
+
+    /// Whether shape `id` gets connect arrows: a shape of the page itself (no connector, no member of a group).
+    fn takes_connect_arrows(&self, id: &str) -> bool {
+        self.doc_shape(id).is_some_and(|shape| shape.group.is_none()) && self.scene_shape(id).is_some()
+    }
+
+    fn connect_arrows_allowed(&self) -> bool {
+        self.connect_arrows && self.tool == Tool::Select && !self.change_shape && !self.space_down && self.drag.is_none()
+    }
+
+    /// The shape's rectangle on screen and whether its rotate handle is shown above it.
+    fn arrow_frame(&self, id: &str, image_rect: egui::Rect) -> Option<(egui::Rect, bool)> {
+        let rect = self.scene_rect_to_screen(Self::selection_scene_rect(self.scene_shape(id)?), image_rect);
+        Some((rect, self.selected.as_deref() == Some(id)))
+    }
+
+    /// The connect arrow under the screen point `pointer`, of the shape whose arrows are shown.
+    pub(super) fn connect_arrow_at(&self, pointer: egui::Pos2, image_rect: egui::Rect) -> Option<(String, Direction)> {
+        if !self.connect_arrows_allowed() {
+            return None;
+        }
+        let id = self.arrow_shape.as_ref()?;
+        let (rect, over_rotate) = self.arrow_frame(id, image_rect)?;
+        arrow_places(rect, over_rotate).into_iter().find(|(_, at)| at.distance(pointer) <= ARROW_HIT).map(|(direction, _)| (id.clone(), direction))
+    }
+
+    /// A press on a connect arrow starts a connector from that side of its shape. `false`: no arrow there.
+    pub(super) fn press_connect_arrow(&mut self, pointer: egui::Pos2, image_rect: egui::Rect) -> bool {
+        let Some((id, direction)) = self.connect_arrow_at(pointer, image_rect) else { return false };
+        let Some(rect) = self.scene_shape(&id).map(Self::selection_scene_rect) else { return false };
+        // the connection point on that side when there is one near its middle, else the whole shape
+        let step = screen_step(direction);
+        let middle = rect.center() + egui::vec2(step.x * rect.width() / 2.0, step.y * rect.height() / 2.0);
+        let reach = rect.width().max(rect.height()) * 0.15;
+        let site = self.sites_of(&id).into_iter().filter(|(_, at)| at.distance(middle) <= reach).min_by(|a, b| a.1.distance(middle).total_cmp(&b.1.distance(middle)));
+        self.connect_from_site = site.map(|(n, _)| n);
+        let at = site.map_or(middle, |(_, at)| at);
+        let start = egui::Rect::from_min_size(at, egui::Vec2::ZERO);
+        self.drag = Some(DragState { visio_id: id, mode: DragMode::Connect, start_pointer: at, end_pointer: at, start_rect: start });
+        self.preview = Some(start);
+        self.status = "Release on a shape to connect to it, or on the empty page to leave the end loose.".to_string();
+        true
+    }
+
+    /// A click on a connect arrow: the shape picked in the Shapes panel (else a copy of this one) is placed on that side and
+    /// connected. `false`: no arrow there.
+    pub(super) fn click_connect_arrow(&mut self, ctx: &egui::Context, pointer: egui::Pos2, image_rect: egui::Rect) -> bool {
+        let Some((id, direction)) = self.connect_arrow_at(pointer, image_rect) else { return false };
+        let picked = self.armed_master.take();
+        let pick = picked.as_ref().map(|(stencil, master, _)| (*stencil, master.as_str()));
+        match self.engine.connect_new_neighbour(self.page_index, &id, direction, pick) {
+            Ok(made) => {
+                self.arrow_shape = None;
+                self.finish_edit(ctx, Ok(()), &format!("Placed a shape {} and connected it", direction_words(direction)), Some(made));
+            }
+            Err(error) => self.status = format!("Could not add a connected shape: {error}"),
+        }
+        true
+    }
+
+    /// Follow the pointer and draw the connect arrows of the shape under it.
+    pub(super) fn show_connect_arrows(&mut self, response: &egui::Response, painter: &egui::Painter, image_rect: egui::Rect) {
+        if !self.connect_arrows_allowed() {
+            self.arrow_shape = None;
+            return;
+        }
+        let Some(pointer) = response.hover_pos() else {
+            self.arrow_shape = None;
+            return;
+        };
+        // an arrow of the shown shape keeps it, even where it lies over a neighbour
+        if self.connect_arrow_at(pointer, image_rect).is_none() {
+            let under = self.pick_shape(self.screen_to_scene(pointer, image_rect)).filter(|id| self.takes_connect_arrows(id));
+            self.arrow_shape = under.or_else(|| {
+                let id = self.arrow_shape.take()?;
+                let (rect, over_rotate) = self.arrow_frame(&id, image_rect)?;
+                (self.takes_connect_arrows(&id) && arrow_area(rect, over_rotate).contains(pointer)).then_some(id)
+            });
+        }
+        let Some((rect, over_rotate)) = self.arrow_shape.as_ref().and_then(|id| self.arrow_frame(id, image_rect)) else { return };
+        for (direction, at) in arrow_places(rect, over_rotate) {
+            // under the pointer an arrow grows as well as changing colour
+            let hot = at.distance(pointer) <= ARROW_HIT;
+            let size = if hot { ARROW_SIZE * 1.5 } else { ARROW_SIZE };
+            let step = screen_step(direction);
+            let side = egui::vec2(-step.y, step.x);
+            let points = vec![at + step * size, at - step * size + side * size, at - step * size - side * size];
+            let colour = if hot { egui::Color32::from_rgb(200, 80, 0) } else { egui::Color32::from_rgb(0, 100, 190) };
+            painter.add(egui::Shape::convex_polygon(points, colour, egui::Stroke::new(1.5, egui::Color32::WHITE)));
+            if hot {
+                response.ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+                let what = if self.armed_master.is_some() { "place the picked shape" } else { "copy this shape" };
+                response.clone().on_hover_text_at_pointer(format!("Click to {what} {} and connect them; drag to connect to a shape or to the page", direction_words(direction)));
+            }
+        }
+    }
+
+    /// The selected shapes that are connectors.
+    pub(super) fn selected_connectors(&self) -> Vec<String> {
+        let routes = self.connector_routes();
+        self.all_selected().into_iter().filter(|id| routes.iter().any(|(other, _)| other == id)).collect()
+    }
+
+    /// Reverse the ends of every selected connector, as one undo step.
+    pub(super) fn reverse_selected_ends(&mut self, ctx: &egui::Context) {
+        let connectors = self.selected_connectors();
+        if connectors.is_empty() {
+            self.status = "Select a connector first.".to_string();
+            return;
+        }
+        let depth = self.engine.undo_depth();
+        let result = connectors.iter().try_for_each(|id| self.engine.reverse_ends(self.page_index, id));
+        if self.engine.undo_depth() > depth {
+            self.engine.collapse_history(depth);
+        }
+        let primary = self.selected.clone();
+        self.finish_edit(ctx, result, "Reversed the ends", primary);
+    }
+
+    /// Whether a canvas item can carry line ends: anything selected that is on the page.
+    pub(super) fn can_set_line_ends(&self) -> bool {
+        self.texture.is_some() && (!self.selected_connectors().is_empty() || self.scene.as_ref().is_some_and(|scene| {
+            scene.items.iter().any(|item| matches!(item, SceneItem::Shape(shape) if shape.visio_id.is_some() && shape.visio_id == self.selected))
+        }))
+    }
+
+    /// The "Line ends" menu: arrowheads and their sizes for the begin and the end of the selected lines.
+    pub(super) fn line_ends_menu(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
+        let enabled = self.can_set_line_ends();
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.menu_button("Line ends \u{25be}", |ui| {
+                let current = self.current_line_ends();
+                for (title, style_key, size_key) in [("Start", "beginArrow", "beginArrowSize"), ("End", "endArrow", "endArrowSize")] {
+                    ui.menu_button(format!("{title} arrowhead"), |ui| {
+                        for (number, name) in LINE_ENDS {
+                            if ui.radio(current[style_key].as_f64() == Some(f64::from(number)), name).clicked() {
+                                *action = Some(Action::StyleSelected(serde_json::json!({ style_key: number }).to_string()));
+                                ui.close();
+                            }
+                        }
+                    });
+                    ui.menu_button(format!("{title} size"), |ui| {
+                        for (number, name) in LINE_END_SIZES.iter().enumerate() {
+                            if ui.radio(current[size_key].as_f64() == Some(number as f64), *name).clicked() {
+                                *action = Some(Action::StyleSelected(serde_json::json!({ size_key: number }).to_string()));
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+            })
+            .response
+            .on_hover_text("Arrowheads at the start and end of the selected lines");
+        });
+    }
+
+    /// The line end values of the primary selection, read again only after an edit or a selection change.
+    fn current_line_ends(&mut self) -> serde_json::Value {
+        let Some(id) = self.selected.clone() else { return serde_json::Value::Null };
+        let key = (self.page_index, id, self.engine.undo_depth());
+        if let Some((known, value)) = &self.line_ends_read {
+            if *known == key {
+                return value.clone();
+            }
+        }
+        let value: serde_json::Value = self.engine.style_info_json(key.0, &key.1).ok().and_then(|text| serde_json::from_str(&text).ok()).unwrap_or_default();
+        self.line_ends_read = Some((key, value.clone()));
+        value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::egui::{pos2, vec2, Rect};
+
+    /// Every arrow lies outside its shape, on its own side, clear of the resize handles, and inside the area that keeps them shown;
+    /// the top arrow of the selected shape is clear of the rotate handle.
+    #[test]
+    fn connect_arrows_sit_outside_the_shape_and_stay_reachable() {
+        for size in [vec2(8.0, 6.0), vec2(120.0, 60.0)] {
+            let rect = Rect::from_min_size(pos2(200.0, 200.0), size);
+            for over_rotate in [false, true] {
+                for (direction, at) in arrow_places(rect, over_rotate) {
+                    assert!(!rect.expand(ARROW_SIZE).contains(at), "{direction:?}");
+                    assert!((at - rect.center()).dot(screen_step(direction)) > 0.0, "{direction:?}");
+                    assert!(arrow_area(rect, over_rotate).contains(at));
+                }
+            }
+            let rotate_handle = pos2(rect.center().x, rect.top() - super::super::ROTATE_STEM);
+            let top = arrow_places(rect, true).into_iter().find(|(d, _)| *d == Direction::Up).unwrap().1;
+            assert!(top.distance(rotate_handle) > ARROW_HIT + 9.0);
+        }
+    }
+}

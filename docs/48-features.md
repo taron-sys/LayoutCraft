@@ -25,7 +25,10 @@ What LayoutCraft does today. For what is missing or inexact, see [Known gaps](07
 
 - Draw and move shapes, resize, rotate, flip, group/ungroup, change z-order, align and distribute, duplicate,
   cut/copy/paste, undo/redo, snapping to grid, shapes and guides, pan and zoom.
-- Connectors that stay glued to shapes, a connector tool, and text editing on shapes.
+- Connectors that stay glued to shapes, and text editing on shapes. Draw them with the connector tool (Ctrl+3) between
+  shapes or the empty page, or from the arrows shown around the shape under the pointer (View > Add and Connect Arrows):
+  drag an arrow to connect, click it to place a connected shape. Arrowheads are under Home > Shape Styles > Line ends;
+  Reverse Ends is in Home > Arrange.
 - Pages: add, duplicate, rename, delete, reorder; page setup; borders and titles; layers; document properties.
 - A Shapes pane with a built-in "Basic shapes" stencil plus stencils you open.
 - Check Diagram (finds loose connectors, overlaps and similar problems), Compare File, Reports (inventory of shapes and
