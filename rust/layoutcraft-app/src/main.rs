@@ -1176,6 +1176,8 @@ struct SizePos {
     fields: Option<Result<([String; 5], [String; 5]), &'static str>>,
     unit: &'static str,
     per_inch: f64,
+    /// The field to give the keyboard focus on the next frame.
+    focus: Option<usize>,
 }
 
 #[cfg(test)]
@@ -1722,6 +1724,37 @@ mod edit_key_tests {
         }
         assert!(press(Key::C, true) == Some(EditKey::Align("1")));
         assert!(press(Key::I, false) == Some(EditKey::Style("italic")));
+    }
+}
+
+/// The status bar's geometry text of the selected shape, from the Size and Position fields: only when they were read for
+/// that shape on that page and it can be edited.
+fn status_geometry(size_pos: &SizePos, page: usize, selected: Option<&str>) -> Option<String> {
+    let (read_page, shape) = size_pos.key.as_ref()?;
+    if *read_page != page || Some(shape.as_str()) != selected {
+        return None;
+    }
+    let (_, read) = size_pos.fields.as_ref()?.as_ref().ok()?;
+    let unit = size_pos.unit;
+    Some(format!("Width {} {unit}  Height {} {unit}  Angle {} deg", read[2], read[3], read[4]))
+}
+
+#[cfg(test)]
+mod status_geometry_tests {
+    use super::{status_geometry, SizePos};
+
+    #[test]
+    fn only_the_selected_editable_shape_is_described() {
+        let texts = ["1", "2", "3.5", "4.5", "90"].map(str::to_string);
+        let mut size_pos = SizePos { key: Some((0, "7".to_string())), fields: Some(Ok((texts.clone(), texts))), unit: "mm", per_inch: 25.4, focus: None };
+        let text = status_geometry(&size_pos, 0, Some("7")).unwrap();
+        assert!(text.contains("3.5 mm") && text.contains("4.5 mm") && text.contains("90 deg"));
+        // another shape, another page, nothing selected, or fields about to be read again: nothing stale is shown
+        assert!(status_geometry(&size_pos, 0, Some("8")).is_none() && status_geometry(&size_pos, 1, Some("7")).is_none() && status_geometry(&size_pos, 0, None).is_none());
+        size_pos.fields = Some(Err("The shape is locked."));
+        assert!(status_geometry(&size_pos, 0, Some("7")).is_none());
+        size_pos.key = None;
+        assert!(status_geometry(&size_pos, 0, Some("7")).is_none());
     }
 }
 
@@ -5583,6 +5616,11 @@ impl LayoutCraftApp {
                     for (field, name) in SIZE_FIELDS.iter().enumerate() {
                         let label = ui.label(*name);
                         let edit = ui.add(egui::TextEdit::singleline(&mut texts[field]).desired_width(80.0)).labelled_by(label.id);
+                        if self.size_pos.focus == Some(field) {
+                            edit.request_focus();
+                            edit.scroll_to_me(None);
+                            self.size_pos.focus = None;
+                        }
                         ui.label(if field == 4 { "deg" } else { unit });
                         ui.end_row();
                         match field_left(ui, &edit) {
@@ -6120,6 +6158,13 @@ impl eframe::App for LayoutCraftApp {
                 ui.label(format!("page {} / {}", if pages == 0 { 0 } else { self.page_index + 1 }, pages));
                 if ui.add_enabled(self.page_index + 1 < pages, egui::Button::new(">")).on_hover_text("Next page").clicked() {
                     action = Some(Action::Page(self.page_index + 1));
+                }
+                // the selected shape's size; a click goes to the fields of the inspector
+                if let Some(geometry) = status_geometry(&self.size_pos, self.page_index, self.selected.as_deref()).filter(|_| !self.full_screen) {
+                    ui.separator();
+                    if ui.button(geometry).on_hover_text("Edit in Size and Position").clicked() {
+                        self.size_pos.focus = Some(2);
+                    }
                 }
                 ui.separator();
                 ui.label(&self.status);
