@@ -1705,6 +1705,17 @@ enum EditKey {
     Align(&'static str),
     /// Switch bold, italic or underline (the `Engine::edit` op 10 name).
     Style(&'static str),
+    /// Make the font one point larger or smaller.
+    Size(i8),
+}
+
+/// Font size keys: Ctrl+Shift with the `>` / `<` keys, which the toolkit reports as the period and comma keys.
+const SIZE_KEYS: [(egui::Key, i8); 2] = [(egui::Key::Period, 1), (egui::Key::Comma, -1)];
+
+/// The font size in points one step from the model's size in px (96 per inch; 12 pt when the shape states none).
+fn stepped_font_size(px: Option<f64>, delta: f64) -> f64 {
+    let points = px.map_or(12.0, |px| (px * 72.0 / 96.0 * 10.0).round() / 10.0);
+    (points + delta).max(1.0)
 }
 
 /// Text alignment keys. They are taken before the arrange keys: egui ignores an extra Shift when it matches a shortcut, so
@@ -1718,6 +1729,9 @@ fn consume_edit_key(input: &mut egui::InputState) -> Option<EditKey> {
     if let Some((_, cell)) = ALIGN_KEYS.iter().find(|(key, _)| input.consume_key(CTRL_SHIFT, *key)) {
         return Some(EditKey::Align(cell));
     }
+    if let Some((_, delta)) = SIZE_KEYS.iter().find(|(key, _)| input.consume_key(CTRL_SHIFT, *key)) {
+        return Some(EditKey::Size(*delta));
+    }
     if let Some(command) = consume_arrange_key(input) {
         return Some(EditKey::Arrange(command));
     }
@@ -1726,7 +1740,7 @@ fn consume_edit_key(input: &mut egui::InputState) -> Option<EditKey> {
 
 #[cfg(test)]
 mod edit_key_tests {
-    use super::{consume_edit_key, ArrangeCmd, EditKey};
+    use super::{consume_edit_key, stepped_font_size, ArrangeCmd, EditKey};
     use eframe::egui::{self, Key, Modifiers};
 
     fn press(key: Key, shift: bool) -> Option<EditKey> {
@@ -1734,6 +1748,14 @@ mod edit_key_tests {
         let mut input = egui::InputState::default();
         input.events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
         consume_edit_key(&mut input)
+    }
+
+    #[test]
+    fn a_font_size_step_starts_from_the_shapes_size_and_stays_positive() {
+        // 16 px are 12 pt
+        assert!(stepped_font_size(Some(16.0), 1.0) > 12.5 && stepped_font_size(Some(16.0), -1.0) < 11.5);
+        assert_eq!(stepped_font_size(None, 1.0), stepped_font_size(Some(16.0), 1.0));
+        assert!(stepped_font_size(Some(1.0), -1.0) >= 1.0);
     }
 
     #[test]
@@ -1750,6 +1772,8 @@ mod edit_key_tests {
         }
         assert!(press(Key::C, true) == Some(EditKey::Align("1")));
         assert!(press(Key::I, false) == Some(EditKey::Style("italic")));
+        assert!(press(Key::Period, true) == Some(EditKey::Size(1)) && press(Key::Comma, true) == Some(EditKey::Size(-1)));
+        assert!(press(Key::Period, false).is_none());
     }
 }
 
@@ -1945,6 +1969,257 @@ mod full_screen_page_tests {
         // Ctrl+Page Down is the ordinary page key, read elsewhere
         assert_eq!(press(Key::PageDown, Modifiers { ctrl: true, command: true, ..Modifiers::NONE }), None);
         assert_eq!(press(Key::ArrowDown, Modifiers::NONE), None);
+    }
+}
+
+/// How many recently opened drawings are remembered.
+const RECENT_LIMIT: usize = 8;
+
+/// `%APPDATA%\LayoutCraft\recent.txt` (one path per line, newest first), beside the list of opened stencils.
+fn recent_file() -> Option<std::path::PathBuf> {
+    stencil_memory_file().map(|file| file.with_file_name("recent.txt"))
+}
+
+fn read_recent(file: &Path) -> Vec<std::path::PathBuf> {
+    fs::read_to_string(file).unwrap_or_default().lines().filter(|line| !line.trim().is_empty()).take(RECENT_LIMIT).map(std::path::PathBuf::from).collect()
+}
+
+/// Put `opened` at the top of the list kept in `file`, once.
+fn remember_recent(file: &Path, opened: &Path) -> std::io::Result<()> {
+    let mut list = read_recent(file);
+    list.retain(|path| path != opened);
+    list.insert(0, opened.to_path_buf());
+    list.truncate(RECENT_LIMIT);
+    if let Some(folder) = file.parent() {
+        fs::create_dir_all(folder)?;
+    }
+    fs::write(file, list.iter().map(|path| format!("{}\n", path.display())).collect::<String>())
+}
+
+#[cfg(test)]
+mod recent_tests {
+    use super::{read_recent, remember_recent, RECENT_LIMIT};
+    use std::path::PathBuf;
+
+    #[test]
+    fn the_newest_is_first_listed_once_and_the_list_stays_short() {
+        let folder = std::env::temp_dir().join(format!("layoutcraft-recent-{}", std::process::id()));
+        let file = folder.join("recent.txt");
+        assert!(read_recent(&file).is_empty());
+        for number in 0..RECENT_LIMIT + 3 {
+            remember_recent(&file, &PathBuf::from(format!("drawing {number}.vsdx"))).unwrap();
+        }
+        let again = PathBuf::from("drawing 5.vsdx");
+        remember_recent(&file, &again).unwrap();
+        let list = read_recent(&file);
+        assert_eq!(list.len(), RECENT_LIMIT);
+        assert_eq!(list[0], again);
+        assert_eq!(list.iter().filter(|path| **path == again).count(), 1);
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+}
+
+/// A range (low, high) along one axis of the page, inches.
+type Span = (f64, f64);
+
+/// The pull towards equal spacing along one axis: the moved box (`along` that axis, `across` the other one) between its
+/// nearest neighbour on each side, among the `others` (along, across) that it passes beside. Returns the shift that makes
+/// both gaps equal, when it is within `threshold` and the box fits, and the box's centre after the shift.
+fn equal_gap(along: Span, across: Span, others: &[(Span, Span)], threshold: f64) -> Option<(f64, f64)> {
+    let centre = (along.0 + along.1) / 2.0;
+    let beside = || others.iter().filter(|(_, other)| other.0 < across.1 && other.1 > across.0).map(|(span, _)| *span);
+    let before = beside().filter(|span| (span.0 + span.1) / 2.0 < centre).map(|span| span.1).max_by(f64::total_cmp)?;
+    let after = beside().filter(|span| (span.0 + span.1) / 2.0 > centre).map(|span| span.0).min_by(f64::total_cmp)?;
+    let width = along.1 - along.0;
+    if after - before < width {
+        return None;
+    }
+    let middle = (before + after) / 2.0;
+    let shift = middle - centre;
+    (shift.abs() <= threshold).then_some((shift, middle))
+}
+
+#[cfg(test)]
+mod equal_gap_tests {
+    use super::equal_gap;
+
+    #[test]
+    fn a_box_between_two_others_is_pulled_to_equal_gaps() {
+        let others = [((0.0, 1.0), (0.0, 1.0)), ((5.0, 6.0), (0.5, 1.5))];
+        let along = (2.45, 3.45);
+        let (shift, centre) = equal_gap(along, (0.2, 1.2), &others, 0.1).unwrap();
+        let (left, right) = (along.0 + shift - 1.0, 5.0 - (along.1 + shift));
+        assert!((left - right).abs() < 1e-9 && (centre - 3.0).abs() < 1e-9);
+        // out of reach, passing above both, only one neighbour, or no room: no pull
+        assert!(equal_gap((1.2, 2.2), (0.2, 1.2), &others, 0.1).is_none());
+        assert!(equal_gap(along, (7.0, 8.0), &others, 0.1).is_none());
+        assert!(equal_gap(along, (0.2, 1.2), &others[..1], 0.1).is_none());
+        assert!(equal_gap((0.5, 5.6), (0.2, 1.2), &others, 10.0).is_none());
+    }
+}
+
+/// The picture "Copy as Picture" puts on the clipboard: the page drawn at twice its size (less for a very large page).
+fn page_picture(scene: &Scene) -> Result<egui::ColorImage, String> {
+    let (width, height) = scene.raster_size();
+    let scale = LayoutCraftApp::raster_scale_for(width as f64, height as f64, 2.0);
+    let (width, height, rgba) = render_rgba(scene, scale).map_err(|error| error.to_string())?;
+    Ok(egui::ColorImage::from_rgba_unmultiplied([width as usize, height as usize], &rgba))
+}
+
+#[cfg(test)]
+mod page_picture_tests {
+    use super::page_picture;
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn the_picture_is_sharper_than_the_page_and_shows_its_shapes() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        engine.draw(0, 0, 1.0, 1.0, 3.0, 2.0).unwrap();
+        let scene = layoutcraft_render::scene_from_document(engine.document().unwrap(), 0).unwrap();
+        let picture = page_picture(&scene).unwrap();
+        assert!(picture.size[0] > scene.raster_size().0 as usize);
+        assert!(picture.pixels.iter().any(|pixel| *pixel != picture.pixels[0]), "the picture is not one flat colour");
+    }
+}
+
+/// The whole app, driven without a window: real frames, key presses and pointer drags. Nothing here opens or writes the
+/// user's settings (no file is loaded and the stencil panel does not open itself).
+#[cfg(test)]
+mod app_frame_tests {
+    use super::{DataPane, Find, LayoutCraftApp, SheetPane};
+    use eframe::egui::{self, pos2, vec2, Event, Key, Modifiers, PointerButton};
+    use eframe::App as _;
+
+    struct Driver {
+        ctx: egui::Context,
+        app: LayoutCraftApp,
+        frame: eframe::Frame,
+        time: f64,
+        modifiers: Modifiers,
+    }
+
+    impl Driver {
+        /// A new drawing with two rectangles, shown in a 1400 x 900 window.
+        fn new() -> (Self, Vec<String>) {
+            let ctx = egui::Context::default();
+            let mut app = LayoutCraftApp::new(&eframe::CreationContext::_new_kittest(ctx.clone()), None);
+            app.stencil_autoopen_done = true;
+            app.engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+            let ids: Vec<String> = [1.0, 6.0].iter().map(|x| app.engine.draw(0, 0, *x, 3.0, x + 2.0, 5.0).unwrap()).collect();
+            for id in &ids {
+                app.engine.edit(0, 8, &format!("{id}
+label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+            }
+            app.baseline = app.engine.document().cloned();
+            app.build_page(&ctx, true);
+            let mut driver = Driver { ctx, app, frame: eframe::Frame::_new_kittest(), time: 0.0, modifiers: Modifiers::NONE };
+            driver.frames(3);
+            (driver, ids)
+        }
+
+        fn run(&mut self, mut events: Vec<Event>) {
+            self.time += 0.1;
+            events.insert(0, Event::ModifiersChanged(self.modifiers));
+            let mut raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0))),
+                time: Some(self.time),
+                events,
+                ..Default::default()
+            };
+            self.app.raw_input_hook(&self.ctx, &mut raw);
+            let (app, frame) = (&mut self.app, &mut self.frame);
+            let output = self.ctx.run_ui(raw, |ui| app.ui(ui, frame));
+            // nothing paints here: the texture changes of the frame are not applied, so the output must not be dropped
+            std::mem::forget(output);
+        }
+
+        fn frames(&mut self, count: usize) {
+            for _ in 0..count {
+                self.run(Vec::new());
+            }
+        }
+
+        fn key(&mut self, key: Key, modifiers: Modifiers) {
+            self.modifiers = modifiers;
+            self.run(vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }]);
+            self.run(vec![Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers }]);
+            self.modifiers = Modifiers::NONE;
+            self.frames(2);
+        }
+
+        fn drag(&mut self, from: egui::Pos2, to: egui::Pos2) {
+            let button = |at, pressed, modifiers| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers };
+            self.run(vec![Event::PointerMoved(from)]);
+            self.run(vec![button(from, true, self.modifiers)]);
+            for step in 1..=6 {
+                self.run(vec![Event::PointerMoved(from + (to - from) * (step as f32 / 6.0))]);
+            }
+            self.run(vec![button(to, false, self.modifiers)]);
+            self.frames(3);
+        }
+    }
+
+    const CTRL: Modifiers = Modifiers { alt: false, ctrl: true, shift: false, mac_cmd: false, command: true };
+
+    #[test]
+    fn every_window_and_view_draws_with_a_shape_selected() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.app.find = Some(Find { text: "a".to_string(), ..Find::default() });
+        driver.app.data_pane = Some(DataPane::default());
+        driver.app.sheet_pane = Some(SheetPane::default());
+        driver.app.layers_open = true;
+        driver.app.snap_open = true;
+        driver.app.help_shortcuts_open = true;
+        driver.app.open_links();
+        driver.frames(4);
+        assert!(driver.app.link_draft.is_some() && driver.app.sheet_pane.as_ref().is_some_and(|pane| !pane.groups.is_empty()));
+        driver.app.shapes_minimised = true;
+        driver.frames(2);
+        driver.app.full_screen = true;
+        driver.frames(2);
+        // every ribbon tab
+        driver.app.full_screen = false;
+        for tab in 0..driver.app.ribbon.tabs.len() {
+            driver.app.ribbon_tab = tab;
+            driver.frames(2);
+        }
+    }
+
+    #[test]
+    fn keys_reach_the_selection_and_the_view() {
+        let (mut driver, ids) = Driver::new();
+        driver.key(Key::A, CTRL);
+        assert_eq!(driver.app.all_selected().len(), 2);
+        driver.key(Key::B, CTRL);
+        assert!(ids.iter().all(|id| driver.app.doc_shape(id).is_some_and(|shape| shape.bold == Some(true))), "{}", driver.app.status);
+        // Tab steps through the shapes after select all
+        let first = driver.app.selected.clone();
+        driver.key(Key::Tab, Modifiers::NONE);
+        assert!(driver.app.selected.is_some() && driver.app.selected != first && driver.app.all_selected().len() == 1);
+        driver.key(Key::F5, Modifiers::NONE);
+        assert!(driver.app.full_screen);
+        driver.key(Key::Escape, Modifiers::NONE);
+        assert!(!driver.app.full_screen && driver.app.selected.is_some(), "the first Esc only leaves full screen");
+        driver.key(Key::Num3, CTRL);
+        assert!(driver.app.tool == super::Tool::Connector);
+    }
+
+    #[test]
+    fn a_guide_is_dragged_out_of_the_ruler_and_back() {
+        let (mut driver, _) = Driver::new();
+        let canvas = driver.app.last_viewport;
+        assert!(canvas.width() > 100.0, "the canvas was drawn");
+        // from the left ruler to an empty part of the canvas: a vertical guide
+        let ruler = pos2(canvas.left() - 10.0, canvas.top() + 40.0);
+        let inside = pos2(canvas.left() + 40.0, canvas.top() + 40.0);
+        driver.drag(ruler, inside);
+        assert_eq!(driver.app.guides.len(), 1, "{}", driver.app.status);
+        assert!(driver.app.guides[0].1, "vertical");
+        // and back onto the ruler: gone
+        driver.drag(inside, ruler);
+        assert!(driver.app.guides.is_empty(), "{}", driver.app.status);
     }
 }
 
@@ -2961,6 +3236,10 @@ impl LayoutCraftApp {
         self.dirty = is_scene;
         self.pending_open = None;
         self.build_page(ctx, true);
+        // a list that cannot be written only means the drawing is not offered under Recent
+        if let Some(file) = recent_file() {
+            let _ = remember_recent(&file, path);
+        }
         let pages = self
             .engine
             .document
@@ -3520,22 +3799,10 @@ impl LayoutCraftApp {
     /// The positions other shapes and the ruler guides offer to snap to, in page inches: (x values, y values). The shapes being moved are left out.
     fn snap_targets(&self) -> (Vec<f64>, Vec<f64>) {
         let (mut xs, mut ys) = (Vec::new(), Vec::new());
-        let page_h = self.page_height_in;
         if self.snap_shapes {
-            let moving = self.all_selected();
-            if let Some(scene) = self.scene.as_ref() {
-                for item in &scene.items {
-                    let SceneItem::Shape(shape) = item else { continue };
-                    let Some(id) = shape.visio_id.as_deref() else { continue };
-                    if moving.iter().any(|m| m == id) || self.doc_shape(id).is_none_or(|doc| doc.group.is_some()) {
-                        continue;
-                    }
-                    let r = Self::selection_scene_rect(shape);
-                    let (x0, x1) = (f64::from(r.min.x) / DPI, f64::from(r.max.x) / DPI);
-                    let (y1, y0) = (page_h - f64::from(r.min.y) / DPI, page_h - f64::from(r.max.y) / DPI);
-                    xs.extend([x0, (x0 + x1) / 2.0, x1]);
-                    ys.extend([y0, (y0 + y1) / 2.0, y1]);
-                }
+            for ((x0, x1), (y0, y1)) in self.other_boxes() {
+                xs.extend([x0, (x0 + x1) / 2.0, x1]);
+                ys.extend([y0, (y0 + y1) / 2.0, y1]);
             }
         }
         if self.snap_guides {
@@ -3553,6 +3820,30 @@ impl LayoutCraftApp {
         (xs, ys)
     }
 
+    /// The boxes (x span, y span; page inches, y up) of the page's shapes that are not being moved.
+    fn other_boxes(&self) -> Vec<(Span, Span)> {
+        let page_h = self.page_height_in;
+        let moving = self.all_selected();
+        let Some(scene) = self.scene.as_ref() else {
+            return Vec::new();
+        };
+        scene
+            .items
+            .iter()
+            .filter_map(|item| {
+                let SceneItem::Shape(shape) = item else { return None };
+                let id = shape.visio_id.as_deref()?;
+                if moving.iter().any(|m| m == id) || self.doc_shape(id).is_none_or(|doc| doc.group.is_some()) {
+                    return None;
+                }
+                let r = Self::selection_scene_rect(shape);
+                let x = (f64::from(r.min.x) / DPI, f64::from(r.max.x) / DPI);
+                let y = (page_h - f64::from(r.max.y) / DPI, page_h - f64::from(r.min.y) / DPI);
+                Some((x, y))
+            })
+            .collect()
+    }
+
     fn snapping_on(&self) -> bool {
         self.snap_grid || self.snap_shapes || self.snap_guides
     }
@@ -3567,7 +3858,20 @@ impl LayoutCraftApp {
         let box_in = (f64::from(start.min.x) / DPI, page_h - f64::from(start.max.y) / DPI, f64::from(start.max.x) / DPI, page_h - f64::from(start.min.y) / DPI);
         let threshold = 8.0 / (DPI * f64::from(self.view_scale().max(0.01)));
         let grid = if self.snap_grid { self.grid_step } else { 0.0 };
-        let (dx, dy, gx, gy) = snap_move(box_in, f64::from(delta.x) / DPI, -f64::from(delta.y) / DPI, grid, &xs, &ys, threshold);
+        let raw = (f64::from(delta.x) / DPI, -f64::from(delta.y) / DPI);
+        let (mut dx, mut dy, mut gx, mut gy) = snap_move(box_in, raw.0, raw.1, grid, &xs, &ys, threshold);
+        // equal spacing between two neighbours wins over the grid and edges when it is within reach
+        if self.snap_shapes {
+            let others = self.other_boxes();
+            let (x, y) = ((box_in.0 + raw.0, box_in.2 + raw.0), (box_in.1 + raw.1, box_in.3 + raw.1));
+            if let Some((shift, centre)) = equal_gap(x, y, &others, threshold) {
+                (dx, gx) = (raw.0 + shift, Some(centre));
+            }
+            let swapped: Vec<(Span, Span)> = others.iter().map(|(x, y)| (*y, *x)).collect();
+            if let Some((shift, centre)) = equal_gap(y, x, &swapped, threshold) {
+                (dy, gy) = (raw.1 + shift, Some(centre));
+            }
+        }
         (egui::vec2((dx * DPI) as f32, (-dy * DPI) as f32), (gx.map(|x| (x * DPI) as f32), gy.map(|y| ((page_h - y) * DPI) as f32)))
     }
 
@@ -4692,6 +4996,24 @@ impl LayoutCraftApp {
             self.ribbon_palette(ui);
             return;
         }
+        // the recently opened drawings stand beside Open
+        if id == "file" {
+            ui.menu_button("Recent \u{25be}", |ui| {
+                let list = recent_file().map(|file| read_recent(&file)).unwrap_or_default();
+                if list.is_empty() {
+                    ui.label("No drawings opened yet.");
+                }
+                for path in list {
+                    let name = path.file_name().map_or_else(|| path.display().to_string(), |name| name.to_string_lossy().into_owned());
+                    if ui.button(name).on_hover_text(path.display().to_string()).clicked() {
+                        *action = Some(Action::OpenRecent(path));
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Drawings opened lately");
+        }
         if id == "zl" {
             self.ribbon_zoom(ui, action);
             return;
@@ -4880,10 +5202,11 @@ impl LayoutCraftApp {
             }
             "p:fontSize" => {
                 // the model keeps the size in px (96 per inch); the file and the engine speak points
-                let points = primary.as_ref().and_then(|shape| shape.font_size).map(|px| (px * 72.0 / 96.0 * 10.0).round() / 10.0).unwrap_or(12.0);
+                let px = primary.as_ref().and_then(|shape| shape.font_size);
+                let points = px.map_or(12.0, |px| (px * 72.0 / 96.0 * 10.0).round() / 10.0);
                 for (label, delta) in [("A-", -1.0), ("A+", 1.0)] {
                     if ui.add_enabled(enabled, egui::Button::new(label)).on_hover_text(format!("Font size {points} pt")).clicked() {
-                        *action = Some(Action::StyleSelected(serde_json::json!({ "fontPt": (points + delta).max(1.0) }).to_string()));
+                        *action = Some(Action::StyleSelected(serde_json::json!({ "fontPt": stepped_font_size(px, delta) }).to_string()));
                     }
                 }
             }
@@ -4995,6 +5318,7 @@ impl LayoutCraftApp {
             N::HelpShortcuts => Action::HelpShortcuts,
             N::Hyperlink => Action::Hyperlink,
             N::Layers => Action::Layers,
+            N::CopyPicture => Action::CopyPicture,
             N::ShapeFormulas => Action::ShapeFormulas,
             N::FullScreen => Action::FullScreen,
             N::ShapeData => Action::ShapeData,
@@ -5890,7 +6214,7 @@ impl LayoutCraftApp {
         ui.painter().text(area.min + RULER_BANDS / 2.0, egui::Align2::CENTER_CENTER, unit, font.clone(), ink);
         let counts = if metric { "Millimetres" } else { "Inches" };
         let scaled = if unit.ends_with('*') { " on the printed page: the drawing scale is not applied" } else { " from the page's lower left corner" };
-        ui.interact(egui::Rect::from_min_max(area.min, canvas.min), egui::Id::new("ruler-corner"), egui::Sense::hover()).on_hover_text(format!("{counts}{scaled}"));
+        ui.interact(egui::Rect::from_min_max(area.min, canvas.min), egui::Id::unique("ruler-corner"), egui::Sense::hover()).on_hover_text(format!("{counts}{scaled}"));
         let painter = ui.painter_at(top);
         painter.rect_filled(top, 0.0, band);
         for mark in ruler_marks(x_value(top.min.x), x_value(top.max.x), px_per_unit, metric) {
@@ -6150,6 +6474,22 @@ impl LayoutCraftApp {
         self.snap_open = open && !(!ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
     }
 
+    /// Send a picture of the shown page to the system clipboard. The toolkit does not report whether the clipboard took it.
+    fn copy_page_picture(&mut self, ctx: &egui::Context) {
+        let Some(scene) = self.scene.as_ref() else {
+            self.status = "Open a drawing first.".to_string();
+            return;
+        };
+        match page_picture(scene) {
+            Ok(picture) => {
+                let [width, height] = picture.size;
+                ctx.copy_image(picture);
+                self.status = format!("Sent a {width} x {height} picture of the page to the clipboard.");
+            }
+            Err(error) => self.status = format!("Could not draw the picture: {error}"),
+        }
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -6370,6 +6710,10 @@ impl eframe::App for LayoutCraftApp {
             if let Some(command) = ctx.input_mut(consume_edit_key) {
                 action = Some(match command {
                     EditKey::Arrange(command) => Action::Arrange(command),
+                    EditKey::Size(delta) => {
+                        let px = self.selected.as_deref().and_then(|id| self.doc_shape(id)).and_then(|shape| shape.font_size);
+                        Action::StyleSelected(serde_json::json!({ "fontPt": stepped_font_size(px, f64::from(delta)) }).to_string())
+                    }
                     EditKey::Align(cell) => Action::FormatText(serde_json::json!({ "para": { "HorzAlign": cell } })),
                     EditKey::Style(name) => {
                         // switched off only when the first selected shape has it
@@ -6480,6 +6824,10 @@ impl eframe::App for LayoutCraftApp {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.add_enabled(self.texture.is_some(), egui::Button::new("Fit")).on_hover_text("Fit the page to the window (Ctrl+Shift+W)").clicked() {
                         action = Some(Action::Fit);
+                    }
+                    let full_screen = if self.full_screen { "Leave Full Screen" } else { "Full Screen" };
+                    if ui.add_enabled(self.texture.is_some() || self.full_screen, egui::Button::new(full_screen)).on_hover_text("F5").clicked() {
+                        action = Some(Action::FullScreen);
                     }
                     let percent = zoom_percent(self.zoom, self.raster_scale);
                     ui.label(format!("zoom {percent:.0}%"));
@@ -6877,7 +7225,7 @@ impl eframe::App for LayoutCraftApp {
                     let top = egui::Rect::from_min_max(egui::pos2(viewport.min.x, area.min.y), egui::pos2(viewport.max.x, viewport.min.y));
                     let left = egui::Rect::from_min_max(egui::pos2(area.min.x, viewport.min.y), egui::pos2(viewport.min.x, viewport.max.y));
                     for (band, vertical, name) in [(top, false, "ruler-top"), (left, true, "ruler-left")] {
-                        let ruler = ui.interact(band, egui::Id::new(name), egui::Sense::drag()).on_hover_cursor(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
+                        let ruler = ui.interact(band, egui::Id::unique(name), egui::Sense::drag()).on_hover_cursor(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
                         if ruler.drag_started_by(egui::PointerButton::Primary) {
                             self.show_guides = true;
                             self.guide_drag = Some(GuideDrag { id: None, vertical, at: 0.0 });
@@ -7849,6 +8197,16 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
             Some(Action::Hyperlink) => self.open_links(),
             Some(Action::Layers) => self.layers_open = !self.layers_open,
+            Some(Action::CopyPicture) => self.copy_page_picture(&ctx),
+            // as a dropped file: unsaved changes are asked about first
+            Some(Action::OpenRecent(ref path)) => {
+                self.path_input = path.display().to_string();
+                if self.dirty {
+                    self.pending_open = Some(PendingOpen::Load(self.path_input.clone()));
+                } else {
+                    self.load(&ctx, path);
+                }
+            }
             Some(Action::ShapeFormulas) => self.sheet_pane = if self.sheet_pane.is_some() { None } else { Some(SheetPane::default()) },
             Some(Action::DeleteGuide) => self.delete_selected_guide(&ctx),
             Some(Action::SizeField(ref id, field, value, per_inch)) => self.set_size_field(&ctx, id, field, value, per_inch),
@@ -7958,6 +8316,9 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    CopyPicture,
+    /// Open a drawing of the Recent menu.
+    OpenRecent(std::path::PathBuf),
     /// Show or hide the Shape Formulas window.
     ShapeFormulas,
     /// Reverse the ends of the selected connectors.
