@@ -1836,6 +1836,24 @@ mod sheet_tests {
     }
 }
 
+/// A click on the header of stencil `clicked` in the Shapes panel, where only one stencil is open at a time: it opens
+/// (closing the other), or closes when it was the open one.
+fn stencil_clicked(open: Option<usize>, clicked: usize) -> Option<usize> {
+    (open != Some(clicked)).then_some(clicked)
+}
+
+#[cfg(test)]
+mod stencil_accordion_tests {
+    use super::stencil_clicked;
+
+    #[test]
+    fn one_stencil_is_open_at_a_time_and_it_can_be_closed() {
+        assert_eq!(stencil_clicked(None, 2), Some(2));
+        assert_eq!(stencil_clicked(Some(2), 5), Some(5));
+        assert_eq!(stencil_clicked(Some(5), 5), None);
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -2573,6 +2591,10 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Shapes panel is narrowed to a column.
+    shapes_minimised: bool,
+    /// The one stencil of the Shapes panel that is open (its engine slot).
+    open_stencil_shown: Option<usize>,
     /// The Shape Formulas window, while it is open.
     sheet_pane: Option<SheetPane>,
     /// The last press was on the canvas (or all shapes were selected by key); a Tab to apply to the shapes.
@@ -2720,6 +2742,8 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            shapes_minimised: false,
+            open_stencil_shown: None,
             sheet_pane: None,
             canvas_keys: false,
             tab_cycle: None,
@@ -4624,6 +4648,7 @@ impl LayoutCraftApp {
                         self.change_shape = !self.change_shape && self.selected.is_some();
                         if self.change_shape {
                             self.shapes_open = true;
+                            self.shapes_minimised = false;
                             self.armed_master = None;
                             self.status = "Change Shape: click a shape in the Shapes panel (Esc cancels).".to_string();
                         } else if self.selected.is_none() {
@@ -4961,6 +4986,8 @@ impl LayoutCraftApp {
                     .collect()
             });
         self.stencils.push(StencilEntry { index, name: name.to_string(), masters, path: None });
+        // the newest stencil is the open one
+        self.open_stencil_shown = Some(index);
         Ok(())
     }
 
@@ -6497,7 +6524,7 @@ impl eframe::App for LayoutCraftApp {
             self.armed_master = None;
             self.status = "Cancelled placing a shape.".to_string();
         }
-        if self.change_shape && (self.selected.is_none() || !self.shapes_open || ctx.input(|input| input.key_pressed(egui::Key::Escape))) {
+        if self.change_shape && (self.selected.is_none() || !self.shapes_open || self.shapes_minimised || ctx.input(|input| input.key_pressed(egui::Key::Escape))) {
             self.change_shape = false;
             self.status = "Change Shape cancelled.".to_string();
         }
@@ -6508,7 +6535,15 @@ impl eframe::App for LayoutCraftApp {
                 self.restore_stencils();
             }
         }
-        if self.shapes_open && !self.full_screen {
+        // minimised, the panel is a narrow column with the button that brings it back
+        if self.shapes_open && self.shapes_minimised && !self.full_screen {
+            egui::Panel::left("shapes-minimised").resizable(false).default_size(80.0).show(ui, |ui| {
+                if ui.button("Shapes \u{bb}").on_hover_text("Show the Shapes panel").clicked() {
+                    self.shapes_minimised = false;
+                }
+            });
+        }
+        if self.shapes_open && !self.shapes_minimised && !self.full_screen {
             let mut open_stencil = false;
             let mut builtin = false;
             let mut close = None;
@@ -6517,6 +6552,9 @@ impl eframe::App for LayoutCraftApp {
             egui::Panel::left("shapes").default_size(250.0).resizable(true).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading("Shapes");
+                    if ui.small_button("\u{ab} Minimise").on_hover_text("Narrow the Shapes panel to a column").clicked() {
+                        self.shapes_minimised = true;
+                    }
                     if ui.small_button("Open stencil…").clicked() {
                         open_stencil = true;
                     }
@@ -6539,7 +6577,9 @@ impl eframe::App for LayoutCraftApp {
                         if masters.is_empty() && !self.shape_search.trim().is_empty() {
                             continue;
                         }
-                        let header = egui::CollapsingHeader::new(format!("{name} ({})", masters.len())).id_salt(("stencil", index)).default_open(true);
+                        // one stencil is open at a time; a search shows the matches of all of them
+                        let searching = !self.shape_search.trim().is_empty();
+                        let header = egui::CollapsingHeader::new(format!("{name} ({})", masters.len())).id_salt(("stencil", index)).open(Some(searching || self.open_stencil_shown == Some(index)));
                         let shown = header.show(ui, |ui| {
                             ui.horizontal_wrapped(|ui| {
                                 ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
@@ -6589,6 +6629,9 @@ impl eframe::App for LayoutCraftApp {
                                 }
                             });
                         });
+                        if shown.header_response.clicked() {
+                            self.open_stencil_shown = stencil_clicked(self.open_stencil_shown, index);
+                        }
                         shown.header_response.context_menu(|ui| {
                             if ui.button("Close this stencil").clicked() {
                                 close = Some(si);
