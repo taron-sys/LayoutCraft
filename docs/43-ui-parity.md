@@ -187,7 +187,7 @@ these are row counts, not a count of every Visio button.
 | Editing: Select (Area Select, Lasso Select, Select All, Select by Type) | S19 | - | partial | partial | Rectangle drag and Ctrl+A exist; lasso and by-type missing | P1 |
 | Editing: Layers > Assign to Layer, Layer Properties | S22 | layersBtn | partial | present | Desktop in inspector only | P2 |
 | Editing: Change Shape | unverified | changeShapeBtn | partial | present | Desktop: stencil context menu "Replace the selected shape" | P2 |
-| Editing: Find | unverified | findBtn | present | present | Desktop: finds on the current page; no replace | P2 |
+| Editing: Find | unverified | findBtn | present | present | Desktop: finds and replaces on the current page | P2 |
 | Editing: Styles | unverified | stylesBtn | missing | present | | P2 |
 | Duplicate (Ctrl+D is a web shortcut) | S1 | dup | present | present | Not a Visio Home button (unverified) | P1 |
 | Delete | S1 (Delete key) | del | present | present | | P0 |

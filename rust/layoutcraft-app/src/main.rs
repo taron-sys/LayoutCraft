@@ -593,6 +593,7 @@ mod paragraph_tests {
 #[derive(Default)]
 struct Find {
     text: String,
+    replace_with: String,
     match_case: bool,
     /// (page, position in the page's shape list) of the last match shown.
     last: Option<(usize, usize)>,
@@ -635,6 +636,92 @@ mod find_tests {
         assert_eq!(find_match(&texts(), "ROUTER", true, None), (1, Some(3)));
         assert_eq!(find_match(&texts(), "", false, None), (0, None));
         assert_eq!(find_match(&texts(), "firewall", false, None), (0, None));
+    }
+}
+
+/// `text` with every occurrence of `needle` replaced by `with`; `None` when there is none. Without `match_case` two
+/// characters are equal when their lower-case forms are.
+fn replace_matches(text: &str, needle: &str, with: &str, match_case: bool) -> Option<String> {
+    let needle: Vec<char> = needle.chars().collect();
+    if needle.is_empty() {
+        return None;
+    }
+    let same = |a: char, b: char| a == b || (!match_case && a.to_lowercase().eq(b.to_lowercase()));
+    let chars: Vec<char> = text.chars().collect();
+    let (mut out, mut at, mut found) = (String::new(), 0, false);
+    while at < chars.len() {
+        if chars.len() - at >= needle.len() && needle.iter().zip(&chars[at..]).all(|(a, b)| same(*a, *b)) {
+            out.push_str(with);
+            at += needle.len();
+            found = true;
+        } else {
+            out.push(chars[at]);
+            at += 1;
+        }
+    }
+    found.then_some(out)
+}
+
+/// Replace in the texts the shapes show (`Engine::edit` op 8 on each text's owner, once) as one undo step, all or nothing.
+/// Returns the number of texts changed.
+fn replace_in_shapes(engine: &mut Engine, page: usize, ids: &[String], needle: &str, with: &str, match_case: bool) -> Result<usize, String> {
+    let mut jobs: Vec<(String, String)> = Vec::new();
+    for id in ids {
+        let Some(info) = engine.text_info_json(page, id).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()) else {
+            continue;
+        };
+        let (Some(owner), Some(text)) = (info["owner"].as_str(), info["text"].as_str()) else {
+            continue;
+        };
+        if jobs.iter().any(|(known, _)| known == owner) {
+            continue;
+        }
+        if let Some(new) = replace_matches(text, needle, with, match_case) {
+            jobs.push((owner.to_string(), new));
+        }
+    }
+    let depth = engine.undo_depth();
+    let result = jobs.iter().try_for_each(|(owner, text)| engine.edit(page, 8, &format!("{owner}\n{text}"), 0.0, 0.0, 0.0, 0.0, 0));
+    engine.collapse_history(depth);
+    if result.is_err() && engine.undo_depth() > depth {
+        let _ = engine.undo();
+    }
+    result.map(|()| jobs.len())
+}
+
+#[cfg(test)]
+mod replace_tests {
+    use super::{replace_in_shapes, replace_matches};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn every_occurrence_is_replaced_with_or_without_case() {
+        assert_eq!(replace_matches("Port a, PORT b", "port", "Link", false).as_deref(), Some("Link a, Link b"));
+        assert_eq!(replace_matches("Port a, PORT b", "PORT", "Link", true).as_deref(), Some("Port a, Link b"));
+        // the replacement is not searched again
+        assert_eq!(replace_matches("aa", "a", "aa", true).as_deref(), Some("aaaa"));
+        assert_eq!(replace_matches("abc", "x", "y", false), None);
+        assert_eq!(replace_matches("abc", "", "y", false), None);
+    }
+
+    #[test]
+    fn replacing_in_several_shapes_is_one_undo_step() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let ids: Vec<String> = [1.0, 5.0].iter().map(|x| engine.draw(0, 0, *x, 1.0, x + 2.0, 3.0).unwrap()).collect();
+        for id in &ids {
+            engine.edit(0, 8, &format!("{id}\nold name"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+        }
+        let text = |engine: &Engine, id: &str| engine.text_info_json(0, id).unwrap();
+        let depth = engine.undo_depth();
+        assert_eq!(replace_in_shapes(&mut engine, 0, &ids, "old", "new", false), Ok(2));
+        assert!(ids.iter().all(|id| text(&engine, id).contains("new name")));
+        assert_eq!(engine.undo_depth(), depth + 1);
+        let _ = engine.undo();
+        assert!(ids.iter().all(|id| text(&engine, id).contains("old name")));
+        // nothing to replace: no undo step
+        assert_eq!(replace_in_shapes(&mut engine, 0, &ids, "absent", "new", false), Ok(0));
+        assert_eq!(engine.undo_depth(), depth);
     }
 }
 
@@ -3788,19 +3875,10 @@ impl LayoutCraftApp {
         result
     }
 
-    /// Open the Find window (or return the keyboard focus to it).
-    fn open_find(&mut self) {
-        self.find.get_or_insert_with(Find::default).focus = true;
-    }
-
-    /// Select the next shape of the current page whose text contains the Find window's text. Shapes on hidden layers are
-    /// not searched; a match inside a group selects the group.
-    fn find_next(&mut self) {
-        let Some(mut find) = self.find.take() else {
-            return;
-        };
+    /// (shape id, text) of the current page's shapes that are not on a hidden layer, in page order.
+    fn searchable_shapes(&self) -> Vec<(String, String)> {
         let page = self.page_index;
-        let shapes: Vec<(String, String)> = self
+        self
             .engine
             .document
             .as_ref()
@@ -3819,7 +3897,64 @@ impl LayoutCraftApp {
                     })
                     .collect()
             })
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    /// Replace in the last match (when it is on this page) or, with `all`, in every shape of the page; then the Find
+    /// window says how many texts changed. One undo step.
+    fn replace_text(&mut self, ctx: &egui::Context, all: bool) {
+        let Some(find) = self.find.as_ref() else {
+            return;
+        };
+        let (needle, with, match_case) = (find.text.clone(), find.replace_with.clone(), find.match_case);
+        let page = self.page_index;
+        let shapes = self.searchable_shapes();
+        let current = find.last.filter(|(last_page, _)| *last_page == page).and_then(|(_, at)| shapes.get(at));
+        let ids: Vec<String> = if all {
+            shapes.iter().map(|(id, _)| id.clone()).collect()
+        } else {
+            current.map(|(id, _)| id.clone()).into_iter().collect()
+        };
+        let selected = self.selected.clone();
+        match replace_in_shapes(&mut self.engine, page, &ids, &needle, &with, match_case) {
+            Ok(0) => {}
+            Ok(count) => {
+                self.finish_edit(ctx, Ok(()), "Replaced text", selected);
+                if let Some(find) = self.find.as_mut() {
+                    find.status = format!("Replaced in {count} shape(s).");
+                }
+                if all {
+                    return;
+                }
+            }
+            Err(error) => {
+                if let Some(find) = self.find.as_mut() {
+                    find.status = format!("Could not replace: {error}");
+                }
+                return;
+            }
+        }
+        // "Replace" moves on to the next match (and is "find" when nothing is selected yet)
+        if !all {
+            self.find_next();
+        } else if let Some(find) = self.find.as_mut() {
+            find.status = "Nothing to replace on this page.".to_string();
+        }
+    }
+
+    /// Open the Find window (or return the keyboard focus to it).
+    fn open_find(&mut self) {
+        self.find.get_or_insert_with(Find::default).focus = true;
+    }
+
+    /// Select the next shape of the current page whose text contains the Find window's text. Shapes on hidden layers are
+    /// not searched; a match inside a group selects the group.
+    fn find_next(&mut self) {
+        let Some(mut find) = self.find.take() else {
+            return;
+        };
+        let page = self.page_index;
+        let shapes = self.searchable_shapes();
         let texts: Vec<String> = shapes.iter().map(|(_, text)| text.clone()).collect();
         let after = find.last.filter(|(last_page, _)| *last_page == page).map(|(_, at)| at);
         let (count, next) = find_match(&texts, &find.text, find.match_case, after);
@@ -3844,6 +3979,8 @@ impl LayoutCraftApp {
         };
         let mut open = true;
         let mut search = false;
+        // Some(true) = replace all
+        let mut replace: Option<bool> = None;
         egui::Window::new("Find").open(&mut open).collapsible(false).show(ctx, |ui| {
             let label = ui.label("Text to find on this page");
             let edit = ui.text_edit_singleline(&mut find.text).labelled_by(label.id);
@@ -3858,16 +3995,28 @@ impl LayoutCraftApp {
                 search = true;
                 edit.request_focus();
             }
+            let with_label = ui.label("Replace with");
+            ui.text_edit_singleline(&mut find.replace_with).labelled_by(with_label.id);
             if ui.checkbox(&mut find.match_case, "Match case").changed() {
                 find.last = None;
             }
-            if ui.button("Find next").clicked() {
-                search = true;
-            }
+            ui.horizontal(|ui| {
+                if ui.button("Find next").clicked() {
+                    search = true;
+                }
+                if ui.button("Replace").clicked() {
+                    replace = Some(false);
+                }
+                if ui.button("Replace all").clicked() {
+                    replace = Some(true);
+                }
+            });
             ui.label(&find.status);
         });
         if !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.find = None;
+        } else if let Some(all) = replace {
+            self.replace_text(ctx, all);
         } else if search {
             self.find_next();
         }
