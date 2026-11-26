@@ -44,7 +44,15 @@ pub const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+H / Ctrl+J, or H / V", "Flip horizontally / vertically"),
         ],
     ),
-    ("View", &[("Ctrl+Plus / Ctrl+Minus", "Zoom in / out"), ("Mouse wheel", "Zoom"), ("Drag the empty page", "Pan the page")]),
+    (
+        "Tools",
+        &[
+            ("Ctrl+1", "Pointer tool"),
+            ("Ctrl+3", "Connector tool"),
+            ("Ctrl+6 / Ctrl+8 / Ctrl+9", "Draw a line / rectangle / ellipse"),
+        ],
+    ),
+    ("View", &[("Ctrl+Shift+W", "Fit the page to the window"), ("Ctrl+Page Down / Ctrl+Page Up", "Next / previous page"), ("Ctrl+Plus / Ctrl+Minus", "Zoom in / out"), ("Mouse wheel", "Zoom"), ("Drag the empty page", "Pan the page")]),
 ];
 
 #[cfg(test)]
@@ -54,7 +62,7 @@ mod tests {
     #[test]
     fn the_table_lists_every_shortcut_the_app_handles() {
         let keys: Vec<&str> = SHORTCUTS.iter().flat_map(|(_, rows)| rows.iter().map(|(keys, _)| *keys)).collect();
-        for handled in ["Ctrl+Z", "Ctrl+Y or Ctrl+Shift+Z", "Ctrl+X / Ctrl+C / Ctrl+V", "Ctrl+D", "Delete or Backspace", "F2 or Ctrl+E", "Ctrl+S", "Ctrl+Shift+U", "Ctrl+L / Ctrl+R, or [ / ]"] {
+        for handled in ["Ctrl+Z", "Ctrl+Y or Ctrl+Shift+Z", "Ctrl+X / Ctrl+C / Ctrl+V", "Ctrl+D", "Delete or Backspace", "F2 or Ctrl+E", "Ctrl+S", "Ctrl+Shift+U", "Ctrl+L / Ctrl+R, or [ / ]", "Ctrl+1", "Ctrl+Shift+W"] {
             assert!(keys.contains(&handled), "{handled} is listed");
         }
     }

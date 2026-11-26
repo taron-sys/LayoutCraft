@@ -314,6 +314,63 @@ mod arrange_key_tests {
     }
 }
 
+/// What a tool or view shortcut asks for.
+#[derive(Clone, Copy, PartialEq)]
+enum ViewKey {
+    Tool(Tool),
+    FitPage,
+    NextPage,
+    PreviousPage,
+}
+
+/// Tool and view shortcuts for features the app has, with Visio's documented keys (`docs/43-ui-parity.md` 4.1). The draw
+/// numbers are the positions in the ribbon's draw tools: 0 rectangle, 2 ellipse, 6 line.
+const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
+    (egui::Modifiers::CTRL, egui::Key::Num1, ViewKey::Tool(Tool::Select)),
+    (egui::Modifiers::CTRL, egui::Key::Num3, ViewKey::Tool(Tool::Connector)),
+    (egui::Modifiers::CTRL, egui::Key::Num6, ViewKey::Tool(Tool::Draw(6))),
+    (egui::Modifiers::CTRL, egui::Key::Num8, ViewKey::Tool(Tool::Draw(0))),
+    (egui::Modifiers::CTRL, egui::Key::Num9, ViewKey::Tool(Tool::Draw(2))),
+    (CTRL_SHIFT, egui::Key::W, ViewKey::FitPage),
+    (egui::Modifiers::CTRL, egui::Key::PageDown, ViewKey::NextPage),
+    (egui::Modifiers::CTRL, egui::Key::PageUp, ViewKey::PreviousPage),
+];
+
+/// Takes the first tool or view shortcut pressed in this frame out of the input.
+fn consume_view_key(input: &mut egui::InputState) -> Option<ViewKey> {
+    VIEW_KEYS.iter().find(|(modifiers, key, _)| input.consume_key(*modifiers, *key)).map(|(_, _, command)| *command)
+}
+
+#[cfg(test)]
+mod view_key_tests {
+    use super::{consume_view_key, Tool, ViewKey};
+    use eframe::egui::{self, Key, Modifiers};
+
+    fn press(key: Key, ctrl: bool, shift: bool) -> Option<ViewKey> {
+        let modifiers = Modifiers { alt: false, ctrl, shift, mac_cmd: false, command: ctrl };
+        let mut input = egui::InputState::default();
+        input.events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+        consume_view_key(&mut input)
+    }
+
+    #[test]
+    fn ctrl_digits_pick_the_tools() {
+        assert!(press(Key::Num1, true, false) == Some(ViewKey::Tool(Tool::Select)));
+        assert!(press(Key::Num3, true, false) == Some(ViewKey::Tool(Tool::Connector)));
+        assert!(press(Key::Num8, true, false) == Some(ViewKey::Tool(Tool::Draw(0))));
+        // a digit typed without Ctrl is not a tool change
+        assert!(press(Key::Num1, false, false).is_none());
+    }
+
+    #[test]
+    fn fit_and_page_keys() {
+        assert!(press(Key::W, true, true) == Some(ViewKey::FitPage));
+        assert!(press(Key::W, true, false).is_none());
+        assert!(press(Key::PageDown, true, false) == Some(ViewKey::NextPage));
+        assert!(press(Key::PageUp, true, false) == Some(ViewKey::PreviousPage));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -3575,6 +3632,13 @@ impl eframe::App for LayoutCraftApp {
                 action = Some(Action::ZoomIn);
             } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Minus)) {
                 action = Some(Action::ZoomOut);
+            }
+            match ctx.input_mut(consume_view_key) {
+                Some(ViewKey::Tool(tool)) => self.tool = tool,
+                Some(ViewKey::FitPage) => action = Some(Action::Fit),
+                Some(ViewKey::NextPage) => action = Some(Action::Page(self.page_index + 1)),
+                Some(ViewKey::PreviousPage) => action = Some(Action::Page(self.page_index.saturating_sub(1))),
+                None => {}
             }
             if self.selected.is_some() {
                 if ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2)) {
