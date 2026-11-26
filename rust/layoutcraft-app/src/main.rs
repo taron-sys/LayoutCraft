@@ -2749,6 +2749,51 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_connect_arrow_offers_shapes_of_the_open_stencil() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.open_builtin_stencil();
+        driver.app.shapes_open = false;
+        driver.frames(3);
+        let names: Vec<String> = driver.app.stencils[0].masters.iter().map(|master| master.1.clone()).collect();
+        assert!(names.len() > 4, "{names:?}");
+        // the names over the canvas (the ribbon names some of the same shapes)
+        let over_canvas = |driver: &Driver, name: &str| driver.texts(name).into_iter().find(|text| driver.app.last_viewport.contains(text.center()));
+        let shown = |driver: &Driver| names.iter().filter(|name| over_canvas(driver, name).is_some()).count();
+        assert_eq!(shown(&driver), 0);
+        let page = |driver: &Driver| {
+            let page = &driver.app.engine.document().unwrap().pages[0];
+            (page.shapes.len(), page.connectors.len())
+        };
+        let before = page(&driver);
+        // over the shape the arrows appear; over its right arrow, the list
+        let image = driver.app.image_rect(driver.app.last_viewport);
+        let frame = driver.app.scene_rect_to_screen(LayoutCraftApp::selection_scene_rect(driver.app.scene_shape(&ids[0]).unwrap()), image);
+        driver.run(vec![Event::PointerMoved(frame.center())]);
+        driver.frames(2);
+        let arrow = pos2(frame.right() + 16.0, frame.center().y);
+        driver.run(vec![Event::PointerMoved(arrow)]);
+        driver.frames(3);
+        assert_eq!(shown(&driver), 4, "the first four shapes of the stencil");
+        assert!(over_canvas(&driver, &names[4]).is_none());
+        // the pointer can travel to the list, and a click there places that shape and connects it
+        let entry = over_canvas(&driver, &names[1]).expect("the second shape").center();
+        for step in 1..=6 {
+            driver.run(vec![Event::PointerMoved(arrow + (entry - arrow) * (step as f32 / 6.0))]);
+        }
+        driver.frames(2);
+        assert_eq!(shown(&driver), 4, "still there");
+        driver.click(entry, Modifiers::NONE);
+        assert_eq!(page(&driver), (before.0 + 1, before.1 + 1), "{}", driver.app.status);
+        let made = driver.app.selected.clone().expect("the new shape is selected");
+        let size = |id: &str| driver.app.doc_shape(id).map(|shape| (shape.w, shape.h)).unwrap();
+        assert!(made != ids[0] && size(&made) != size(&ids[0]), "the chosen shape, not a copy");
+        // away from the arrows the list goes
+        driver.run(vec![Event::PointerMoved(pos2(frame.center().x, driver.app.last_viewport.bottom() - 5.0))]);
+        driver.frames(3);
+        assert_eq!(shown(&driver), 0);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -3579,6 +3624,8 @@ struct LayoutCraftApp {
     armed_master: Option<(usize, String, String)>,
     /// View > Add and Connect Arrows, the shape whose arrows are shown, and the line ends read for the menu.
     connect_arrows: bool,
+    /// The list of shapes shown beside the connect arrow under the pointer.
+    arrow_picker: Option<connectors::ArrowPicker>,
     arrow_shape: Option<String>,
     line_ends_read: Option<connectors::LineEndsRead>,
     export_open: bool,
@@ -3680,6 +3727,7 @@ impl LayoutCraftApp {
             tab_cycle: None,
             show_guides: true,
             connect_arrows: true,
+            arrow_picker: None,
             arrow_shape: None,
             line_ends_read: None,
             guides: Vec::new(),
