@@ -12,6 +12,7 @@ use layoutcraft_vsdx::{
     patch_page_cells, ShapeCellPatch,
 };
 
+mod appearance;
 mod connectors;
 mod help;
 mod mcpinfo;
@@ -2374,6 +2375,7 @@ struct LayoutCraftApp {
 
 impl LayoutCraftApp {
     fn new(cc: &eframe::CreationContext<'_>, initial: Option<String>) -> Self {
+        appearance::restore(&cc.egui_ctx);
         let (raster_tx, raster_rx) = spawn_raster_thread();
         let (detail_tx, detail_rx) = spawn_raster_thread();
         let mut app = Self {
@@ -4047,18 +4049,20 @@ impl LayoutCraftApp {
 
     /// The icon of the web ribbon (`web/assets/icons`) as an egui texture, drawn once at 36 px in the light text colour.
     fn icon_texture(&mut self, ctx: &egui::Context, name: &str) -> Option<egui::TextureHandle> {
-        if let Some(texture) = self.ribbon_textures.get(name) {
+        let dark = ctx.global_style().visuals.dark_mode;
+        let key = format!("{name} {dark}");
+        if let Some(texture) = self.ribbon_textures.get(&key) {
             return Some(texture.clone());
         }
-        let svg = ribbon::icon_svg(name, "#e6e6e6")?;
+        let svg = ribbon::icon_svg(name, appearance::chrome(dark).icon)?;
         let tree = resvg::usvg::Tree::from_str(&svg, &resvg::usvg::Options::default()).ok()?;
         let size = 36u32;
         let mut pixmap = resvg::tiny_skia::Pixmap::new(size, size)?;
         let scale = size as f32 / tree.size().width().max(1.0);
         resvg::render(&tree, resvg::tiny_skia::Transform::from_scale(scale, scale), &mut pixmap.as_mut());
         let image = egui::ColorImage::from_rgba_premultiplied([size as usize, size as usize], pixmap.data());
-        let texture = ctx.load_texture(format!("ribbon-{name}"), image, egui::TextureOptions::LINEAR);
-        self.ribbon_textures.insert(name.to_string(), texture.clone());
+        let texture = ctx.load_texture(format!("ribbon-{key}"), image, egui::TextureOptions::LINEAR);
+        self.ribbon_textures.insert(key, texture.clone());
         Some(texture)
     }
 
@@ -4163,7 +4167,7 @@ impl LayoutCraftApp {
                                             let behavior = if label == "Font" { egui::PopupCloseBehavior::CloseOnClickOutside } else { egui::PopupCloseBehavior::CloseOnClick };
                                             egui::containers::menu::MenuButton::new({
                                                 let title = egui::RichText::new(format!("{label} \u{25be}"));
-                                                if label == "Font" && self.selected_font().is_some_and(|(_, replaced)| replaced.is_some()) { title.color(egui::Color32::from_rgb(255, 90, 90)) } else { title }
+                                                if label == "Font" && self.selected_font().is_some_and(|(_, replaced)| replaced.is_some()) { title.color(appearance::chrome(ui.visuals().dark_mode).error) } else { title }
                                             }).config(egui::containers::menu::MenuConfig::new().close_behavior(behavior)).ui(ui, |ui| {
                                                 // the popup lists the commands with their names
                                                 let compact = std::mem::replace(&mut self.ribbon_compact, false);
@@ -4256,6 +4260,10 @@ impl LayoutCraftApp {
         }
         if id == "themeGallery" || id == "variantGallery" {
             self.ribbon_themes(ui, id == "variantGallery", action);
+            return;
+        }
+        if id == "paletteSel" {
+            self.ribbon_palette(ui);
             return;
         }
         if id == "zl" {
@@ -4413,7 +4421,7 @@ impl LayoutCraftApp {
                 let label = if name.is_empty() { "Font family".to_string() } else { name.clone() };
                 let mut title = egui::RichText::new(format!("{label} \u{25be}"));
                 if replaced.is_some() {
-                    title = title.color(egui::Color32::from_rgb(255, 90, 90));
+                    title = title.color(appearance::chrome(ui.visuals().dark_mode).error);
                 }
                 let tip = match &replaced {
                     Some(found) => format!("{} is not installed here: {} is drawn instead. The file keeps {}.", found.requested, found.used, found.requested),
@@ -5438,8 +5446,8 @@ impl LayoutCraftApp {
         let x_value = |screen: f32| ((f64::from(screen - image_rect.min.x) / scale + f64::from(origin.x)) / DPI) * per_inch;
         let y_value = |screen: f32| (page_h - (f64::from(screen - image_rect.min.y) / scale + f64::from(origin.y)) / DPI) * per_inch;
         let px_per_unit = DPI * scale / per_inch;
-        let band = egui::Color32::from_rgb(45, 48, 54);
-        let ink = egui::Color32::from_gray(220);
+        let colours = appearance::chrome(ui.visuals().dark_mode);
+        let (band, ink) = (colours.ruler, colours.ruler_ink);
         let font = egui::FontId::proportional(10.0);
         let top = egui::Rect::from_min_max(egui::pos2(canvas.min.x, area.min.y), egui::pos2(canvas.max.x, canvas.min.y));
         let left = egui::Rect::from_min_max(egui::pos2(area.min.x, canvas.min.y), egui::pos2(canvas.min.x, canvas.max.y));
@@ -5863,7 +5871,7 @@ impl eframe::App for LayoutCraftApp {
         if self.pending_open.is_some() {
             egui::Panel::top("pending").show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.colored_label(egui::Color32::from_rgb(255, 196, 0), "Unsaved changes.");
+                    ui.colored_label(appearance::chrome(ui.visuals().dark_mode).warning, "Unsaved changes.");
                     if ui.button("Discard and continue").clicked() {
                         action = Some(Action::ConfirmDiscard);
                     }
@@ -5899,7 +5907,7 @@ impl eframe::App for LayoutCraftApp {
                         }
                     });
                     if self.dirty {
-                        ui.colored_label(egui::Color32::from_rgb(255, 196, 0), "modified");
+                        ui.colored_label(appearance::chrome(ui.visuals().dark_mode).warning, "modified");
                     }
                 });
             });
@@ -5930,7 +5938,7 @@ impl eframe::App for LayoutCraftApp {
                             ));
                         }
                         for found in &self.font_warnings {
-                            ui.colored_label(egui::Color32::from_rgb(255, 90, 90), format!("\u{26a0} Font {} is not installed: drawn with {}", found.requested, found.used))
+                            ui.colored_label(appearance::chrome(ui.visuals().dark_mode).error, format!("\u{26a0} Font {} is not installed: drawn with {}", found.requested, found.used))
                                 .on_hover_text("The file keeps the font it names; only this screen uses the replacement, so text may look and wrap a little differently.");
                         }
                     } else {
@@ -5962,7 +5970,7 @@ impl eframe::App for LayoutCraftApp {
                             ui.add_space(4.0);
                             if shape.group.is_some() {
                                 ui.colored_label(
-                                    egui::Color32::from_rgb(255, 196, 0),
+                                    appearance::chrome(ui.visuals().dark_mode).warning,
                                     "Grouped: read-only in this slice",
                                 );
                             } else if shape.rot.abs() >= 1e-6 {
@@ -6137,10 +6145,10 @@ impl eframe::App for LayoutCraftApp {
                                             ui.painter().image(texture.id(), thumb, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
                                         }
                                         let short: String = if mname.chars().count() > 11 { format!("{}…", mname.chars().take(10).collect::<String>()) } else { mname.clone() };
-                                        ui.painter().text(egui::pos2(rect.center().x, thumb.bottom() + 3.0), egui::Align2::CENTER_TOP, short, egui::FontId::proportional(10.5), egui::Color32::from_gray(200));
+                                        ui.painter().text(egui::pos2(rect.center().x, thumb.bottom() + 3.0), egui::Align2::CENTER_TOP, short, egui::FontId::proportional(10.5), appearance::chrome(ui.visuals().dark_mode).caption);
                                         let armed = self.armed_master.as_ref().is_some_and(|(i, m, _)| *i == index && m == id);
                                         if armed || response.hovered() {
-                                            ui.painter().rect_stroke(thumb.expand(2.0), 4.0, egui::Stroke::new(2.0, if armed { egui::Color32::from_rgb(255, 196, 0) } else { egui::Color32::from_rgb(90, 150, 220) }), egui::StrokeKind::Outside);
+                                            ui.painter().rect_stroke(thumb.expand(2.0), 4.0, egui::Stroke::new(2.0, if armed { appearance::chrome(ui.visuals().dark_mode).warning } else { egui::Color32::from_rgb(60, 125, 200) }), egui::StrokeKind::Outside);
                                         }
                                     }
                                     let response = response.on_hover_text(mname.as_str());
@@ -6221,14 +6229,15 @@ impl eframe::App for LayoutCraftApp {
                 let response = ui.allocate_rect(canvas, egui::Sense::click_and_drag());
                 let viewport = response.rect;
                 let painter = ui.painter_at(viewport);
-                painter.rect_filled(viewport, 0.0, egui::Color32::from_rgb(28, 30, 34));
+                let colours = appearance::chrome(ui.visuals().dark_mode);
+                painter.rect_filled(viewport, 0.0, colours.canvas);
                 let Some(texture_id) = self.texture.as_ref().map(|texture| texture.id()) else {
                     painter.text(
                         viewport.center(),
                         egui::Align2::CENTER_CENTER,
                         "Open a VSDX file to begin.\nYou can also drag and drop one here.",
                         egui::FontId::proportional(18.0),
-                        egui::Color32::from_gray(180),
+                        colours.canvas_text,
                     );
                     return;
                 };
@@ -6396,7 +6405,7 @@ impl eframe::App for LayoutCraftApp {
                 if let Some(label) = &self.pane_drag {
                     if let Some(at) = ctx.pointer_latest_pos() {
                         let ghost = ctx.layer_painter(egui::LayerId::new(egui::Order::Tooltip, egui::Id::new("pane-ghost")));
-                        ghost.text(at + egui::vec2(12.0, 12.0), egui::Align2::LEFT_TOP, format!("+ {label}"), egui::FontId::proportional(13.0), egui::Color32::from_rgb(255, 196, 0));
+                        ghost.text(at + egui::vec2(12.0, 12.0), egui::Align2::LEFT_TOP, format!("+ {label}"), egui::FontId::proportional(13.0), appearance::chrome(ctx.global_style().visuals.dark_mode).warning);
                     }
                 }
                 if let Some((index, master, name, at_screen)) = self.pending_drop.take() {
