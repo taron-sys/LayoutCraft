@@ -1210,6 +1210,37 @@ mod field_left_tests {
     }
 }
 
+/// The zoom and pan that make an image of `size` (at zoom 1) as wide as the view of `available`, its top at the top of
+/// the view when it is taller than the view, else centred. The zoom stays within the app's zoom range.
+fn width_view(size: egui::Vec2, available: egui::Vec2) -> (f32, egui::Vec2) {
+    let zoom = (available.x / size.x * 0.98).clamp(0.05, 8.0);
+    let margin = available.x * 0.01;
+    let down = ((size.y * zoom - available.y) / 2.0 + margin).max(0.0);
+    (zoom, egui::vec2(0.0, down))
+}
+
+#[cfg(test)]
+mod width_view_tests {
+    use super::width_view;
+    use eframe::egui::vec2;
+
+    #[test]
+    fn a_tall_page_fills_the_width_and_shows_its_top() {
+        let (size, view) = (vec2(800.0, 3000.0), vec2(1000.0, 600.0));
+        let (zoom, pan) = width_view(size, view);
+        let width = size.x * zoom;
+        assert!(width <= view.x && width > view.x * 0.9);
+        // top edge of the image relative to the top edge of the view: just inside it
+        let top = view.y / 2.0 + pan.y - size.y * zoom / 2.0;
+        assert!(top >= 0.0 && top < view.y * 0.1);
+    }
+
+    #[test]
+    fn a_wide_page_stays_centred() {
+        assert_eq!(width_view(vec2(1000.0, 200.0), vec2(1000.0, 600.0)).1, vec2(0.0, 0.0));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -1916,6 +1947,8 @@ struct LayoutCraftApp {
     zoom: f32,
     pan: egui::Vec2,
     fit_pending: bool,
+    /// "Page Width" was chosen: apply it when the view size is known.
+    fit_width_pending: bool,
     panning: bool,
     selected: Option<String>,
     tool: Tool,
@@ -2050,6 +2083,7 @@ impl LayoutCraftApp {
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
             fit_pending: true,
+            fit_width_pending: false,
             panning: false,
             selected: None,
             tool: Tool::Select,
@@ -4137,6 +4171,7 @@ impl LayoutCraftApp {
             N::PageDelete => Action::PageDelete,
             N::PageMove(direction) => Action::PageMove(direction),
             N::Fit => Action::Fit,
+            N::FitWidth => Action::FitWidth,
             N::ActualSize => Action::ActualSize,
             N::ZoomIn => Action::ZoomIn,
             N::ZoomOut => Action::ZoomOut,
@@ -5593,6 +5628,11 @@ impl eframe::App for LayoutCraftApp {
                 if self.fit_pending {
                     self.fit_to_view(available);
                 }
+                if self.fit_width_pending && self.texture.is_some() && self.texture_size.x > 0.0 && available.x > 1.0 {
+                    (self.zoom, self.pan) = width_view(self.texture_size, available);
+                    self.fit_pending = false;
+                    self.fit_width_pending = false;
+                }
                 let (viewport, response) =
                     ui.allocate_exact_size(available, egui::Sense::click_and_drag());
                 let painter = ui.painter_at(viewport);
@@ -6639,6 +6679,7 @@ impl eframe::App for LayoutCraftApp {
             }
             Some(Action::Page(page)) => self.go_to_page(&ctx, page),
             Some(Action::Fit) => self.fit_pending = true,
+            Some(Action::FitWidth) => self.fit_width_pending = true,
             Some(Action::ActualSize) => {
                 self.zoom = 1.0;
                 self.pan = egui::Vec2::ZERO;
@@ -6667,6 +6708,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Make the page as wide as the view.
+    FitWidth,
     /// (shape, field, value, page units per inch) of a Size and Position field.
     SizeField(String, usize, f64, f64),
     /// Show or hide the Layers window.

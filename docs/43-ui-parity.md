@@ -115,7 +115,7 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 43 present, 20 partial,
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 44 present, 19 partial,
 62 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
@@ -270,7 +270,7 @@ these are row counts, not a count of every Visio button.
 | Show: Task Panes menu | S12, S11 | paneShapes paneSizePos paneSheet panePanZoom | partial | present | Desktop: Shapes pane only from the ribbon | P0 |
 | Zoom: Zoom (dialog) | S11 | zl | missing | present | | P1 |
 | Zoom: Fit Page to Window (Ctrl+Shift+W) | S11, S1 | fit | present | present | Desktop has no key | P0 |
-| Zoom: 100%, Page Width | unverified | zoom100 zoomWidth | partial | present | Page Width missing on desktop | P2 |
+| Zoom: 100%, Page Width | unverified | zoom100 zoomWidth | present | present | | P2 |
 | Zoom: zoom in / out (Alt+F6, Alt+Shift+F6 desktop; Ctrl+Plus/Minus web) | S1 | zin zout | present | present | LC uses Ctrl+= / Ctrl+- (web style) | P1 |
 | Visual Aids: Snap & Glue (dialog Alt+F9) | S1 | snapGrid snapShapes snapGuides gridStep | partial | present | Desktop has toggles but no dialog or key | P1 |
 | Visual Aids: Dynamic Grid (alignment, spacing, resizing guides; snap strength) | S10 | snapShapes | partial | partial | Desktop snaps to shapes and draws a guide (`snap_guide`); spacing guides and resize guides unverified | P0 |
