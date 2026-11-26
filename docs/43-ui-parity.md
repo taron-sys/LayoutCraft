@@ -330,7 +330,7 @@ Compare File (`compareBtn`: present on both), AI assistant info (`mcpInfo`: pres
 | AutoConnect: pointing at a shape shows four arrows; hovering an arrow shows a mini toolbar of up to four Quick Shapes; click adds and connects; dropping a Shapes-window item on an arrow also works; per-file setting, toggled in View | S3, S6, S7 | Arrows place the picked stencil shape or a copy of the shape and connect; toggled in View | Arrows place the picked stencil shape or a copy of the shape and connect | Port the shape picker at the arrow |
 | Drag from stencil: drag a master onto the page creates an instance; the master stays | S5, S2 | Drag from pane (ghost label), click-then-click placement, Esc cancels | Drag | Done, plus drop on a shape to glue/replace: P3 |
 | Right-click menus | S5, S9 | See section 2 | See section 2 | P1 |
-| Text editing: select a shape and type starts editing; Esc or a click outside ends; F2 toggles text edit and selection; Ctrl+A in text selects all text | S5, S1 | F2 and Ctrl+E start editing; Enter handling in editor; type-to-edit not mapped | F2, type-to-edit unverified | Type-to-edit: P0 |
+| Text editing: select a shape and type starts editing; Esc or a click outside ends; F2 toggles text edit and selection; Ctrl+A in text selects all text | S5, S1 | F2, Ctrl+E or typing on one selected shape open a text window (typed characters are added after the text); Ctrl+Enter applies, Esc closes; F2 does not toggle back | F2, type-to-edit unverified | Type-to-edit: P0 |
 | Text Block tool moves the text block independently | S5 | none | none | P2 |
 | Zoom: Ctrl+wheel; plain wheel scrolls | S11 | Ctrl+wheel zooms, wheel scrolls | wheel scrolls; `wheelZoom` option | Desktop matches |
 | Pan: Pan & Zoom window; scroll; Ctrl+Shift right-drag | S11 | middle button, Space-drag, Pan tool | same plus pane | P2 |
@@ -348,8 +348,8 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Ungroup | Ctrl+Shift+U | Ctrl+Shift+U | Ctrl+Shift+G | same on desktop |
 | Bring to front | Ctrl+Shift+F | Ctrl+Shift+F | Ctrl+Shift+F | same |
 | Send to back | Ctrl+Shift+B | Ctrl+Shift+B | Ctrl+Shift+B | same |
-| Rotate left / right | Ctrl+L / Ctrl+R | Ctrl+L / Ctrl+R (`[` / `]` kept as aliases) | `[` / `]` | same on desktop |
-| Flip horizontal / vertical | Ctrl+H / Ctrl+J | Ctrl+H / Ctrl+J (`H` / `V` kept as aliases) | `H` / `V` | same on desktop |
+| Rotate left / right | Ctrl+L / Ctrl+R | Ctrl+L / Ctrl+R | `[` / `]` | same on desktop |
+| Flip horizontal / vertical | Ctrl+H / Ctrl+J | Ctrl+H / Ctrl+J | `H` / `V` | same on desktop |
 | Align Shapes dialog | F8 | none | none | none |
 | Pointer tool | Ctrl+1 | Ctrl+1 | Esc | same on desktop |
 | Text tool | Ctrl+2 | none | none | none |
@@ -392,7 +392,7 @@ Count of the 41 rows above: same 24, diff 1, partial 3, none 13. This counts tab
 
 Four LayoutCraft keys collide with the Visio meaning of keys the same host may want later: `H` and `V` (plain letters flip a shape;
 Visio uses them for nothing in S1 but uses Ctrl+H and Ctrl+J), `[` and `]` (rotate; Visio uses Ctrl+L and Ctrl+R) and Ctrl+Shift+G (Visio
-groups with it). On the desktop the Visio keys are now the primary bindings and the earlier keys are aliases (Ctrl+Shift+G now groups);
+groups with it). On the desktop the Visio keys are the bindings; the earlier plain keys `H`, `V`, `[` and `]` were removed by the maintainer's decision, so that typing can edit text (Ctrl+Shift+G now groups);
 the browser shell is unchanged. The Visio keys should become the primary bindings and the current ones either removed or kept as secondary
 aliases for one release, announced in the shortcut dialog.
 

@@ -304,8 +304,8 @@ mod nudge_tests {
 }
 
 /// The keys of the arrange commands. The first key listed for a command is the one Visio documents (`docs/43-ui-parity.md` 4.1);
-/// `[`, `]`, `H` and `V` are the earlier LayoutCraft keys, kept as aliases (4.2). egui ignores an extra Shift when it matches a
-/// shortcut, so a Shift binding comes before a plain one on the same key.
+/// egui ignores an extra Shift when it matches a shortcut, so a Shift binding comes before a plain one on the same key.
+/// Plain letters are not shortcuts: typing them on a selected shape edits its text.
 const ARRANGE_KEYS: &[(egui::Modifiers, egui::Key, ArrangeCmd)] = &[
     (CTRL_SHIFT, egui::Key::U, ArrangeCmd::Ungroup),
     (egui::Modifiers::CTRL, egui::Key::G, ArrangeCmd::Group),
@@ -315,10 +315,6 @@ const ARRANGE_KEYS: &[(egui::Modifiers, egui::Key, ArrangeCmd)] = &[
     (egui::Modifiers::CTRL, egui::Key::R, ArrangeCmd::RotateQuarter),
     (egui::Modifiers::CTRL, egui::Key::H, ArrangeCmd::Flip(false)),
     (egui::Modifiers::CTRL, egui::Key::J, ArrangeCmd::Flip(true)),
-    (egui::Modifiers::NONE, egui::Key::OpenBracket, ArrangeCmd::RotateLeft),
-    (egui::Modifiers::NONE, egui::Key::CloseBracket, ArrangeCmd::RotateQuarter),
-    (egui::Modifiers::NONE, egui::Key::H, ArrangeCmd::Flip(false)),
-    (egui::Modifiers::NONE, egui::Key::V, ArrangeCmd::Flip(true)),
 ];
 
 const CTRL_SHIFT: egui::Modifiers = egui::Modifiers { alt: false, ctrl: true, shift: true, mac_cmd: false, command: false };
@@ -351,15 +347,13 @@ mod arrange_key_tests {
     }
 
     #[test]
-    fn turn_and_flip_take_the_ctrl_keys_and_the_old_aliases() {
-        for (key, alias, command) in [
-            (Key::L, Key::OpenBracket, ArrangeCmd::RotateLeft),
-            (Key::R, Key::CloseBracket, ArrangeCmd::RotateQuarter),
-            (Key::H, Key::H, ArrangeCmd::Flip(false)),
-            (Key::J, Key::V, ArrangeCmd::Flip(true)),
-        ] {
+    fn turn_and_flip_take_the_ctrl_keys_only() {
+        for (key, command) in [(Key::L, ArrangeCmd::RotateLeft), (Key::R, ArrangeCmd::RotateQuarter), (Key::H, ArrangeCmd::Flip(false)), (Key::J, ArrangeCmd::Flip(true))] {
             assert!(press(key, true, false) == Some(command));
-            assert!(press(alias, false, false) == Some(command));
+        }
+        // the letters and brackets alone are typing, not commands
+        for key in [Key::H, Key::V, Key::OpenBracket, Key::CloseBracket] {
+            assert!(press(key, false, false).is_none());
         }
         // Ctrl+V is paste, never a flip
         assert!(press(Key::V, true, false).is_none());
@@ -2158,6 +2152,57 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
             self.run(vec![button(to, false, self.modifiers)]);
             self.frames(3);
         }
+
+        /// A press and the start of a drag, then `held` keys going down while it goes on, and the release. (Keys that are
+        /// down before the pointer has moved count for the press: Shift would then add to the selection.)
+        fn drag_holding(&mut self, from: egui::Pos2, to: egui::Pos2, held: Modifiers) {
+            let button = |at, pressed, modifiers| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers };
+            self.run(vec![Event::PointerMoved(from)]);
+            self.run(vec![button(from, true, Modifiers::NONE)]);
+            self.run(vec![Event::PointerMoved(from + (to - from) * (1.0 / 6.0))]);
+            self.modifiers = held;
+            for step in 2..=6 {
+                self.run(vec![Event::PointerMoved(from + (to - from) * (step as f32 / 6.0))]);
+            }
+            self.run(vec![button(to, false, held)]);
+            self.modifiers = Modifiers::NONE;
+            self.frames(3);
+        }
+
+        fn click(&mut self, at: egui::Pos2, modifiers: Modifiers) {
+            self.modifiers = modifiers;
+            let button = |pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers };
+            self.run(vec![Event::PointerMoved(at)]);
+            self.run(vec![button(true)]);
+            self.run(vec![button(false)]);
+            self.modifiers = Modifiers::NONE;
+            // long enough that the next click is not read as a double click
+            self.time += 1.0;
+            self.frames(2);
+        }
+
+        /// Typed characters, as the keyboard sends them to a focused field.
+        fn write(&mut self, typed: &str) {
+            self.run(vec![Event::Text(typed.to_string())]);
+            self.frames(1);
+        }
+
+        fn width_in(&self, id: &str) -> f64 {
+            self.app.doc_shape(id).expect("the shape exists").w / super::DPI
+        }
+
+        /// Where the middle of a shape is on the screen.
+        fn middle_of(&self, id: &str) -> egui::Pos2 {
+            let image = self.app.image_rect(self.app.last_viewport);
+            let shape = self.app.scene_shape(id).expect("the shape is drawn");
+            self.app.scene_to_screen(LayoutCraftApp::shape_scene_rect(shape).center(), image)
+        }
+
+        /// The shape's position in the model (px, y down).
+        fn at(&self, id: &str) -> (f64, f64) {
+            let shape = self.app.doc_shape(id).expect("the shape exists");
+            (shape.x, shape.y)
+        }
     }
 
     const CTRL: Modifiers = Modifiers { alt: false, ctrl: true, shift: false, mac_cmd: false, command: true };
@@ -2221,6 +2266,159 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         driver.drag(inside, ruler);
         assert!(driver.app.guides.is_empty(), "{}", driver.app.status);
     }
+
+    #[test]
+    fn shift_pressed_during_a_drag_keeps_the_move_on_one_axis() {
+        let (mut driver, ids) = Driver::new();
+        // free movement: nothing to snap to may bend the result
+        (driver.app.snap_grid, driver.app.snap_shapes, driver.app.snap_guides) = (false, false, false);
+        let start = driver.at(&ids[0]);
+        let from = driver.middle_of(&ids[0]);
+        driver.drag_holding(from, from + vec2(90.0, 30.0), Modifiers::SHIFT);
+        let straight = driver.at(&ids[0]);
+        assert!(straight.0 > start.0 + 10.0 && (straight.1 - start.1).abs() < 0.01, "{start:?} {straight:?} {}", driver.app.status);
+        let from = driver.middle_of(&ids[0]);
+        driver.drag_holding(from, from + vec2(60.0, 40.0), Modifiers::NONE);
+        let free = driver.at(&ids[0]);
+        assert!(free.0 > straight.0 + 10.0 && free.1 > straight.1 + 10.0, "{straight:?} {free:?}");
+    }
+
+    #[test]
+    fn ctrl_click_adds_a_shape_and_takes_it_out_again() {
+        let (mut driver, ids) = Driver::new();
+        let (first, second) = (driver.middle_of(&ids[0]), driver.middle_of(&ids[1]));
+        driver.click(first, Modifiers::NONE);
+        assert_eq!(driver.app.all_selected(), [ids[0].clone()], "{}", driver.app.status);
+        driver.click(second, CTRL);
+        assert_eq!(driver.app.all_selected().len(), 2);
+        driver.click(second, CTRL);
+        assert_eq!(driver.app.all_selected(), [ids[0].clone()]);
+    }
+
+    #[test]
+    fn a_clicked_guide_is_deleted_by_the_delete_key() {
+        let (mut driver, ids) = Driver::new();
+        let canvas = driver.app.last_viewport;
+        let inside = pos2(canvas.left() + 40.0, canvas.top() + 40.0);
+        driver.drag(pos2(canvas.left() - 10.0, canvas.top() + 40.0), inside);
+        assert_eq!(driver.app.guides.len(), 1);
+        driver.click(inside, Modifiers::NONE);
+        assert!(driver.app.selected_guide.is_some(), "{}", driver.app.status);
+        driver.key(Key::Delete, Modifiers::NONE);
+        assert!(driver.app.guides.is_empty(), "{}", driver.app.status);
+        assert!(ids.iter().all(|id| driver.app.doc_shape(id).is_some()), "no shape went with it");
+    }
+
+    #[test]
+    fn page_keys_turn_pages_in_full_screen() {
+        let (mut driver, _) = Driver::new();
+        driver.app.engine.page_op(1, 0, 0, "").unwrap();
+        let ctx = driver.ctx.clone();
+        driver.app.build_page(&ctx, true);
+        driver.frames(2);
+        driver.key(Key::F5, Modifiers::NONE);
+        driver.key(Key::PageDown, Modifiers::NONE);
+        assert_eq!(driver.app.page_index, 1, "{}", driver.app.status);
+        driver.key(Key::PageUp, Modifiers::NONE);
+        assert_eq!(driver.app.page_index, 0);
+    }
+
+    #[test]
+    fn find_selects_match_after_match_and_escape_closes_it() {
+        let (mut driver, ids) = Driver::new();
+        driver.key(Key::F, CTRL);
+        assert!(driver.app.find.is_some());
+        driver.write("label");
+        driver.key(Key::Enter, Modifiers::NONE);
+        let first = driver.app.selected.clone().unwrap_or_default();
+        driver.key(Key::Enter, Modifiers::NONE);
+        let second = driver.app.selected.clone().unwrap_or_default();
+        assert!(ids.contains(&first) && ids.contains(&second) && first != second, "{first} {second}");
+        driver.key(Key::Escape, Modifiers::NONE);
+        assert!(driver.app.find.is_none());
+        assert_eq!(driver.app.selected, Some(second), "closing the window keeps the shape that was found");
+    }
+
+    #[test]
+    fn a_size_field_applies_on_enter_and_escape_only_leaves_it() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        // what a click on the status bar's size does: the Width field takes the keyboard
+        driver.app.size_pos.focus = Some(2);
+        driver.frames(2);
+        driver.key(Key::A, CTRL);
+        driver.write("3");
+        driver.key(Key::Enter, Modifiers::NONE);
+        assert!((driver.width_in(&ids[0]) - 3.0).abs() < 0.01, "{} {}", driver.width_in(&ids[0]), driver.app.status);
+        driver.app.size_pos.focus = Some(2);
+        driver.frames(2);
+        driver.key(Key::A, CTRL);
+        driver.write("9");
+        driver.key(Key::Escape, Modifiers::NONE);
+        assert!((driver.width_in(&ids[0]) - 3.0).abs() < 0.01, "{}", driver.width_in(&ids[0]));
+        assert_eq!(driver.app.selected, Some(ids[0].clone()), "Esc in a field does not deselect the shape");
+    }
+
+    #[test]
+    fn the_text_editor_takes_typing_at_once_and_ctrl_enter_applies_it() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(2);
+        driver.key(Key::F2, Modifiers::NONE);
+        // no click: the characters go straight into the editor
+        driver.write("typed");
+        assert!(driver.app.text_editor.as_ref().is_some_and(|editor| editor.text.contains("typed")), "{}", driver.app.status);
+        driver.key(Key::Enter, CTRL);
+        assert!(driver.app.text_editor.is_none());
+        assert!(driver.app.doc_shape(&ids[0]).is_some_and(|shape| shape.label.contains("typed")), "{}", driver.app.status);
+    }
+
+    #[test]
+    fn typing_on_a_selected_shape_edits_its_text() {
+        let (mut driver, ids) = Driver::new();
+        let first = driver.middle_of(&ids[0]);
+        driver.click(first, Modifiers::NONE);
+        driver.write("h");
+        assert!(driver.app.text_editor.is_some(), "{}", driver.app.status);
+        driver.write("ij");
+        // the typing carries on where it started, after the text that was there
+        assert_eq!(driver.app.text_editor.as_ref().map(|editor| editor.text.clone()), Some("labelhij".to_string()));
+        driver.key(Key::Enter, CTRL);
+        assert!(driver.app.doc_shape(&ids[0]).is_some_and(|shape| shape.label == "labelhij"), "{}", driver.app.status);
+    }
+
+    #[test]
+    fn typing_without_a_shape_or_with_two_does_nothing() {
+        let (mut driver, ids) = Driver::new();
+        let canvas = driver.app.last_viewport;
+        driver.click(pos2(canvas.left() + 30.0, canvas.top() + 30.0), Modifiers::NONE);
+        driver.write("x");
+        assert!(driver.app.text_editor.is_none());
+        driver.key(Key::A, CTRL);
+        driver.write("x");
+        assert!(driver.app.text_editor.is_none() && ids.iter().all(|id| driver.app.doc_shape(id).is_some_and(|shape| shape.label == "label")));
+    }
+
+    #[test]
+    fn escape_still_closes_the_text_editor() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(2);
+        driver.key(Key::F2, Modifiers::NONE);
+        assert!(driver.app.text_editor.is_some(), "{}", driver.app.status);
+        driver.frames(2);
+        driver.key(Key::Escape, Modifiers::NONE);
+        assert!(driver.app.text_editor.is_none());
+        assert_eq!(driver.app.selected, Some(ids[0].clone()), "the shape stays selected");
+    }
+}
+
+/// The characters typed in a frame that start a text edit: what the keyboard sent, if it is more than blank space (the
+/// space bar moves the view).
+fn typed_text(events: &[egui::Event]) -> Option<String> {
+    let typed: String = events.iter().filter_map(|event| if let egui::Event::Text(text) = event { Some(text.as_str()) } else { None }).collect();
+    (!typed.trim().is_empty()).then_some(typed)
 }
 
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
@@ -2897,6 +3095,8 @@ struct TextEditor {
     font_pt: f64,
     /// bold, italic, underline and size as the shape had them when the editor opened (only changes are written)
     initial: (bool, bool, bool, f64),
+    /// Give the text field the keyboard on the next frame (once, when the editor opens).
+    focus: bool,
 }
 
 struct LayoutCraftApp {
@@ -2960,6 +3160,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// A widget had the keyboard when this frame began.
+    focus_at_frame_start: bool,
     /// The Snap and Attach window is open.
     snap_open: bool,
     /// The Shapes panel is narrowed to a column.
@@ -3115,6 +3317,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            focus_at_frame_start: false,
             snap_open: false,
             shapes_minimised: false,
             open_stencil_shown: None,
@@ -4711,7 +4914,7 @@ impl LayoutCraftApp {
         let (bold, italic, underline) = (shape.bold.unwrap_or(false), shape.italic.unwrap_or(false), shape.underline.unwrap_or(false));
         // the model keeps the size in px (96 per inch); the editor shows points
         let font_pt = (shape.font_size.unwrap_or(12.0 * 96.0 / 72.0) * 72.0 / 96.0 * 10.0).round() / 10.0;
-        self.text_editor = Some(TextEditor { visio_id: id, text, bold, italic, underline, font_pt, initial: (bold, italic, underline, font_pt) });
+        self.text_editor = Some(TextEditor { visio_id: id, text, bold, italic, underline, font_pt, initial: (bold, italic, underline, font_pt), focus: true });
     }
 
     /// Write the text (op 8) and, when given, the character format (op 10 style JSON) as ONE undo step.
@@ -6471,7 +6674,7 @@ impl LayoutCraftApp {
             });
             ui.label(egui::RichText::new("Connectors always attach to the shape or connection point they are dropped on.").small());
         });
-        self.snap_open = open && !(!ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
+        self.snap_open = open && !(!self.focus_at_frame_start && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
     }
 
     /// Send a picture of the shown page to the system clipboard. The toolkit does not report whether the clipboard took it.
@@ -6616,6 +6819,8 @@ impl eframe::App for LayoutCraftApp {
     /// While the canvas has the keyboard and a shape is selected, Tab steps through the shapes instead of through the
     /// buttons; Esc clears the selection and gives Tab back.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // read here, before the toolkit takes the focus away for an Esc: such an Esc is for the field alone
+        self.focus_at_frame_start = ctx.memory(|memory| memory.focused()).is_some();
         if self.canvas_keys && self.selected.is_some() && ctx.memory(|memory| memory.focused()).is_none() {
             self.tab_cycle = take_shape_tab(&mut raw_input.events).or(self.tab_cycle);
         }
@@ -6733,6 +6938,15 @@ impl eframe::App for LayoutCraftApp {
             } else if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Minus)) {
                 action = Some(Action::ZoomOut);
             }
+            // typing on one selected shape of the canvas opens its text editor, with what was typed added to the text
+            if self.canvas_keys && !self.focus_at_frame_start && self.text_editor.is_none() && self.extra_selected.is_empty() && self.selected.is_some() && self.tool == Tool::Select {
+                if let Some(typed) = ctx.input(|input| typed_text(&input.events)) {
+                    self.open_text_editor();
+                    if let Some(editor) = self.text_editor.as_mut() {
+                        editor.text.push_str(&typed);
+                    }
+                }
+            }
             match ctx.input_mut(consume_view_key) {
                 Some(ViewKey::Tool(tool)) => self.tool = tool,
                 Some(ViewKey::FitPage) => action = Some(Action::Fit),
@@ -6769,14 +6983,17 @@ impl eframe::App for LayoutCraftApp {
                     None => {}
                 }
             }
-            if self.full_screen && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            if self.full_screen && !self.focus_at_frame_start && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                 action = Some(Action::FullScreen);
             }
             if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
-                self.selected_guide = None;
-                self.guide_drag = None;
-                self.selected = None;
                 self.text_editor = None;
+                // an Esc that left a text field (or a focused button) does not also drop the selection
+                if !self.focus_at_frame_start {
+                    self.selected_guide = None;
+                    self.guide_drag = None;
+                    self.selected = None;
+                }
             }
         }
 
@@ -7013,7 +7230,7 @@ impl eframe::App for LayoutCraftApp {
                 self.layer_controls(ui, &mut action);
             });
             // Esc closes it, unless a text field has the keyboard (then Esc only leaves the field)
-            self.layers_open = open && !(!ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
+            self.layers_open = open && !(!self.focus_at_frame_start && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
         }
 
         if ctx.input(|input| input.key_pressed(egui::Key::Escape)) && self.armed_master.is_some() {
@@ -7654,11 +7871,14 @@ impl eframe::App for LayoutCraftApp {
                 .collapsible(false)
                 .resizable(true)
                 .show(&ctx, |ui| {
-                    ui.add(
+                    let field = ui.add(
                         egui::TextEdit::multiline(&mut editor.text)
                             .desired_width(360.0)
                             .desired_rows(4),
                     );
+                    if std::mem::take(&mut editor.focus) {
+                        field.request_focus();
+                    }
                     ui.horizontal(|ui| {
                         ui.toggle_value(&mut editor.bold, egui::RichText::new("B").strong());
                         ui.toggle_value(&mut editor.italic, egui::RichText::new("I").italics());
