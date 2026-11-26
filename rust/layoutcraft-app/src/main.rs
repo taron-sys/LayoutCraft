@@ -6023,7 +6023,7 @@ impl LayoutCraftApp {
         ui.painter().text(area.min + RULER_BANDS / 2.0, egui::Align2::CENTER_CENTER, unit, font.clone(), ink);
         let counts = if metric { "Millimetres" } else { "Inches" };
         let scaled = if unit.ends_with('*') { " on the printed page: the drawing scale is not applied" } else { " from the page's lower left corner" };
-        ui.interact(egui::Rect::from_min_max(area.min, canvas.min), egui::Id::new("ruler-corner"), egui::Sense::hover()).on_hover_text(format!("{counts}{scaled}"));
+        ui.interact(egui::Rect::from_min_max(area.min, canvas.min), egui::Id::unique("ruler-corner"), egui::Sense::hover()).on_hover_text(format!("{counts}{scaled}"));
         let painter = ui.painter_at(top);
         painter.rect_filled(top, 0.0, band);
         for mark in ruler_marks(x_value(top.min.x), x_value(top.max.x), px_per_unit, metric) {
@@ -7010,7 +7010,7 @@ impl eframe::App for LayoutCraftApp {
                     let top = egui::Rect::from_min_max(egui::pos2(viewport.min.x, area.min.y), egui::pos2(viewport.max.x, viewport.min.y));
                     let left = egui::Rect::from_min_max(egui::pos2(area.min.x, viewport.min.y), egui::pos2(viewport.min.x, viewport.max.y));
                     for (band, vertical, name) in [(top, false, "ruler-top"), (left, true, "ruler-left")] {
-                        let ruler = ui.interact(band, egui::Id::new(name), egui::Sense::drag()).on_hover_cursor(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
+                        let ruler = ui.interact(band, egui::Id::unique(name), egui::Sense::drag()).on_hover_cursor(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
                         if ruler.drag_started_by(egui::PointerButton::Primary) {
                             self.show_guides = true;
                             self.guide_drag = Some(GuideDrag { id: None, vertical, at: 0.0 });
