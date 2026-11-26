@@ -268,7 +268,7 @@ these are row counts, not a count of every Visio button.
 | Show: Guides | S26 snippet | showGuides | present | present | Desktop: drag from a ruler, move, drop on a ruler or press Delete; mouse only for creating and moving; no turned guides | P0 |
 | Show: Page Breaks | unverified | showBreaks | missing | present | | P2 |
 | Show: Task Panes menu | S12, S11 | paneShapes paneSizePos paneSheet panePanZoom | partial | present | Desktop: Shapes pane and Shape Formulas from the ribbon | P0 |
-| Zoom: Zoom (dialog) | S11 | zl | partial | present | Desktop: a menu of fixed levels, fit and page width; no typed value | P1 |
+| Zoom: Zoom (dialog) | S11 | zl | present | present | Desktop: the Zoom menu (fixed levels, fit, page width) and a Custom zoom window for a typed percentage | P1 |
 | Zoom: Fit Page to Window (Ctrl+Shift+W) | S11, S1 | fit | present | present | | P0 |
 | Zoom: 100%, Page Width | unverified | zoom100 zoomWidth | present | present | | P2 |
 | Zoom: zoom in / out (Alt+F6, Alt+Shift+F6 desktop; Ctrl+Plus/Minus web) | S1 | zin zout | present | present | LC uses Ctrl+= / Ctrl+- (web style) | P1 |
