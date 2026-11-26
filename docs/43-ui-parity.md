@@ -297,7 +297,7 @@ these are row counts, not a count of every Visio button.
 
 | Visio command | Src | LC id | Desktop | Browser | Notes | Prio |
 |---|---|---|---|---|---|---|
-| Help pane (F1) | S1 | helpShortcuts | partial | partial | Ctrl+F1 is collapse in LC, F1 not bound; shortcut listing is a dialog | P1 |
+| Help pane (F1) | S1 | helpShortcuts | partial | partial | Ctrl+F1 is collapse in LC; desktop F1 opens the shortcut list (no help pane) | P1 |
 | About | unverified | helpAbout | present | present | | P2 |
 | Tell me / search box for commands | S27 (a search bar is new in 2024) | - | missing | missing | Command search | P2 |
 
@@ -364,7 +364,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Snap & Glue dialog | Alt+F9 | Alt+F9 (no glue settings) | none | same on desktop |
 | Full-screen view / exit | F5 / Esc | F5 / Esc | no key | same on desktop |
 | Fit page to window | Ctrl+Shift+W | Ctrl+Shift+W | none | same on desktop |
-| Zoom in / out | Alt+F6 / Alt+Shift+F6 (web: Ctrl+Plus / Ctrl+Minus) | Ctrl+= or Ctrl++ / Ctrl+- | same | diff on desktop key set; matches the web variant |
+| Zoom in / out | Alt+F6 / Alt+Shift+F6 (web: Ctrl+Plus / Ctrl+Minus) | Alt+F6 / Alt+Shift+F6, also Ctrl+= or Ctrl++ / Ctrl+- | Ctrl+= or Ctrl++ / Ctrl+- | same on desktop |
 | Cycle focus through shapes | Tab / Shift+Tab | Tab / Shift+Tab with a shape selected | Tab on the stage | same on desktop |
 | Toggle text edit and selection | F2 | F2 (also Ctrl+E) | F2 | same |
 | Nudge | Arrow (to snap position); Shift+Arrow one pixel | Arrow 0.05 in; Shift+Arrow 0.5 in | same | diff |
@@ -375,7 +375,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Next / previous page | Ctrl+Page Down / Ctrl+Page Up | same | none | same on desktop |
 | Switch to next drawing | Ctrl+Tab or Ctrl+F6 | none | none | none |
 | Move to a task pane | F6 | none | F6 cycles regions | none (desktop) |
-| Help pane | F1 | none (Ctrl+F1 collapses the ribbon, the same as Office) | same | none |
+| Help pane | F1 | F1 opens the shortcut list (Ctrl+F1 collapses the ribbon) | none | partial |
 | Key tips | Alt, then letters (Alt+H is Home) | none on desktop | Alt shows tips | none (desktop) |
 | Open context menu from keyboard | Shift+F10 | none | none | none |
 | Bold / italic / underline | Ctrl+B / I / U | Ctrl+B / I / U (selected shapes) | Ctrl+B / I / U | same on desktop |
@@ -386,7 +386,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Find | Ctrl+F (web `findBtn`) | Ctrl+F | Ctrl+F | same on desktop |
 | Hyperlink | Ctrl+K (unverified in S1) | Ctrl+K | Ctrl+K | same on desktop |
 
-Count of the 41 rows above: same 23, diff 2, partial 2, none 14. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 24, diff 1, partial 3, none 13. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 

@@ -377,6 +377,9 @@ enum ViewKey {
     Hyperlink,
     FullScreen,
     SnapDialog,
+    Help,
+    ZoomIn,
+    ZoomOut,
 }
 
 /// Tool and view shortcuts for features the app has, with Visio's documented keys (`docs/43-ui-parity.md` 4.1). The draw
@@ -394,7 +397,14 @@ const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
     (egui::Modifiers::CTRL, egui::Key::K, ViewKey::Hyperlink),
     (egui::Modifiers::NONE, egui::Key::F5, ViewKey::FullScreen),
     (egui::Modifiers::ALT, egui::Key::F9, ViewKey::SnapDialog),
+    // Ctrl+F1 (collapse the ribbon) is taken before these keys are read
+    (egui::Modifiers::NONE, egui::Key::F1, ViewKey::Help),
+    // the Shift binding first: egui ignores an extra Shift
+    (ALT_SHIFT, egui::Key::F6, ViewKey::ZoomOut),
+    (egui::Modifiers::ALT, egui::Key::F6, ViewKey::ZoomIn),
 ];
+
+const ALT_SHIFT: egui::Modifiers = egui::Modifiers { alt: true, ctrl: false, shift: true, mac_cmd: false, command: false };
 
 /// Takes the first tool or view shortcut pressed in this frame out of the input.
 fn consume_view_key(input: &mut egui::InputState) -> Option<ViewKey> {
@@ -437,6 +447,15 @@ mod view_key_tests {
         let mut input = egui::InputState::default();
         input.events.push(egui::Event::Key { key: Key::F9, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::ALT });
         assert!(consume_view_key(&mut input) == Some(ViewKey::SnapDialog));
+        let alt = |key: Key, shift: bool| {
+            let mut input = egui::InputState::default();
+            input.events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers { shift, ..Modifiers::ALT } });
+            consume_view_key(&mut input)
+        };
+        assert!(alt(Key::F6, false) == Some(ViewKey::ZoomIn) && alt(Key::F6, true) == Some(ViewKey::ZoomOut));
+        assert!(press(Key::F6, false, false).is_none());
+        // F1 is help; Ctrl+F1 belongs to the ribbon
+        assert!(press(Key::F1, false, false) == Some(ViewKey::Help) && press(Key::F1, true, false).is_none());
     }
 }
 
@@ -6302,6 +6321,9 @@ impl eframe::App for LayoutCraftApp {
                 Some(ViewKey::Hyperlink) => action = Some(Action::Hyperlink),
                 Some(ViewKey::FullScreen) => action = Some(Action::FullScreen),
                 Some(ViewKey::SnapDialog) => self.snap_open = !self.snap_open,
+                Some(ViewKey::Help) => action = Some(Action::HelpShortcuts),
+                Some(ViewKey::ZoomIn) => action = Some(Action::ZoomIn),
+                Some(ViewKey::ZoomOut) => action = Some(Action::ZoomOut),
                 None => {}
             }
             if self.selected.is_some() {
