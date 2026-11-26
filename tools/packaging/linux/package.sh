@@ -64,7 +64,7 @@ Built on Ubuntu 22.04: it needs glibc 2.35 or newer (Debian 12, Ubuntu 22.04, Fe
 AI assistants (MCP): layoutcraft-mcp is the server an AI client (for example Claude) starts itself; it needs no node and opens no network port.
 Open Help > AI assistant in the app for the configuration (keep layoutcraft-app and layoutcraft-mcp in the same folder).
 
-share/ has the desktop entry, icons and MIME type of .vsdx files for the menu and the file manager. To install them for your user:
+share/ has the desktop entry, icons and MIME types of the drawing files for the menu and the file manager. To install them for your user:
   cp share/applications/layoutcraft.desktop ~/.local/share/applications/   (and edit Exec= to the full path of layoutcraft-app)
   cp -r share/icons/hicolor ~/.local/share/icons/ ; cp share/mime/packages/layoutcraft.xml ~/.local/share/mime/packages/
   update-mime-database ~/.local/share/mime
