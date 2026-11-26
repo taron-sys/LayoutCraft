@@ -1549,6 +1549,62 @@ mod zoom_slider_tests {
     }
 }
 
+/// The view (zoom, pan) after a wheel or pinch over the canvas: a zoom factor (Ctrl+wheel) zooms about the pointer, whose
+/// position is given from the middle of the canvas; otherwise the scroll moves the page.
+fn wheel_view(zoom: f32, pan: egui::Vec2, pointer: egui::Vec2, factor: f32, scroll: egui::Vec2) -> (f32, egui::Vec2) {
+    if (factor - 1.0).abs() > 1e-4 {
+        let under = (pointer - pan) / zoom;
+        let zoom = (zoom * factor).clamp(0.05, 16.0);
+        (zoom, pointer - under * zoom)
+    } else {
+        (zoom, pan + scroll)
+    }
+}
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::wheel_view;
+    use eframe::egui::{self, vec2, Event, Modifiers, MouseWheelSource, MouseWheelUnit, TouchPhase};
+
+    #[test]
+    fn zooming_keeps_the_point_under_the_pointer_and_scrolling_only_moves() {
+        let (zoom, pan, pointer) = (1.0, vec2(20.0, -10.0), vec2(100.0, 50.0));
+        let under = (pointer - pan) / zoom;
+        for factor in [1.5, 0.5, 1000.0] {
+            let (new_zoom, new_pan) = wheel_view(zoom, pan, pointer, factor, vec2(0.0, 40.0));
+            assert!(new_zoom != zoom);
+            assert!(((pointer - new_pan) / new_zoom - under).length() < 0.01);
+        }
+        assert_eq!(wheel_view(zoom, pan, pointer, 1.0, vec2(5.0, 40.0)), (zoom, pan + vec2(5.0, 40.0)));
+    }
+
+    /// What egui reports for one wheel notch: (zoom factor, scroll).
+    fn notch(modifiers: Modifiers) -> (f32, egui::Vec2) {
+        let ctx = egui::Context::default();
+        let event = Event::MouseWheel { unit: MouseWheelUnit::Line, delta: vec2(0.0, 1.0), modifiers, phase: TouchPhase::Move, source: MouseWheelSource::Wheel };
+        let (mut factor, mut scroll) = (1.0, egui::Vec2::ZERO);
+        for events in [Vec::new(), vec![event]] {
+            let output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                (factor, scroll) = ui.input(|input| (input.zoom_delta(), input.smooth_scroll_delta));
+            });
+            // nothing paints here: the texture changes of the frame are not applied, so the output must not be dropped
+            std::mem::forget(output);
+        }
+        (factor, scroll)
+    }
+
+    #[test]
+    fn the_toolkit_gives_ctrl_wheel_as_zoom_and_the_plain_wheel_as_scroll() {
+        let (factor, scroll) = notch(Modifiers::NONE);
+        assert!((factor - 1.0).abs() < 1e-4 && scroll.y > 0.0);
+        let ctrl = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
+        let (factor, scroll) = notch(ctrl);
+        assert!(factor > 1.0 && scroll.y.abs() < 1e-4);
+        let (factor, scroll) = notch(Modifiers { shift: true, ..Modifiers::NONE });
+        assert!((factor - 1.0).abs() < 1e-4 && scroll.x > 0.0 && scroll.y.abs() < 1e-4);
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -6055,7 +6111,7 @@ impl eframe::App for LayoutCraftApp {
                         egui::RichText::new(
                             "Drag a shape to move. Drag a corner handle to resize.\n\
                              Ctrl+Z undo, Ctrl+Shift+Z redo, Ctrl+S save a copy.\n\
-                             Drag empty canvas to pan; wheel zooms.",
+                             Wheel scrolls, Ctrl+wheel zooms; drag empty canvas to pan.",
                         )
                         .small()
                         .weak(),
@@ -6231,15 +6287,11 @@ impl eframe::App for LayoutCraftApp {
                     self.pan += response.drag_delta();
                 }
                 if response.hovered() {
-                    let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-                    if scroll.abs() > 0.01 {
-                        if let Some(pointer) = response.hover_pos() {
-                            let center = viewport.center();
-                            let before = (pointer - center - self.pan) / self.zoom;
-                            let factor = (scroll * 0.0015).exp();
-                            self.zoom = (self.zoom * factor).clamp(0.05, 16.0);
-                            self.pan = pointer - center - before * self.zoom;
-                        }
+                    // Ctrl+wheel (or a pinch) zooms at the pointer; the wheel alone scrolls, sideways with Shift
+                    let (factor, scroll) = ui.input(|input| (input.zoom_delta(), input.smooth_scroll_delta));
+                    if let Some(pointer) = response.hover_pos().filter(|_| (factor - 1.0).abs() > 1e-4 || scroll != egui::Vec2::ZERO) {
+                        (self.zoom, self.pan) = wheel_view(self.zoom, self.pan, pointer - viewport.center(), factor, scroll);
+                        self.fit_pending = false;
                     }
                 }
                 self.last_viewport = viewport;
