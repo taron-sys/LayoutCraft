@@ -52,7 +52,7 @@ pub const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+6 / Ctrl+8 / Ctrl+9", "Draw a line / rectangle / ellipse"),
         ],
     ),
-    ("View", &[("Ctrl+Shift+W", "Fit the page to the window"), ("Ctrl+Page Down / Ctrl+Page Up", "Next / previous page"), ("Ctrl+Plus / Ctrl+Minus", "Zoom in / out"), ("Mouse wheel", "Zoom"), ("Drag the empty page", "Pan the page")]),
+    ("View", &[("Ctrl+F", "Find text on the page"), ("Ctrl+Shift+W", "Fit the page to the window"), ("Ctrl+Page Down / Ctrl+Page Up", "Next / previous page"), ("Ctrl+Plus / Ctrl+Minus", "Zoom in / out"), ("Mouse wheel", "Zoom"), ("Drag the empty page", "Pan the page")]),
 ];
 
 #[cfg(test)]

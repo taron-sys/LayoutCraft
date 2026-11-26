@@ -321,6 +321,7 @@ enum ViewKey {
     FitPage,
     NextPage,
     PreviousPage,
+    Find,
 }
 
 /// Tool and view shortcuts for features the app has, with Visio's documented keys (`docs/43-ui-parity.md` 4.1). The draw
@@ -334,6 +335,7 @@ const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
     (CTRL_SHIFT, egui::Key::W, ViewKey::FitPage),
     (egui::Modifiers::CTRL, egui::Key::PageDown, ViewKey::NextPage),
     (egui::Modifiers::CTRL, egui::Key::PageUp, ViewKey::PreviousPage),
+    (egui::Modifiers::CTRL, egui::Key::F, ViewKey::Find),
 ];
 
 /// Takes the first tool or view shortcut pressed in this frame out of the input.
@@ -368,6 +370,8 @@ mod view_key_tests {
         assert!(press(Key::W, true, false).is_none());
         assert!(press(Key::PageDown, true, false) == Some(ViewKey::NextPage));
         assert!(press(Key::PageUp, true, false) == Some(ViewKey::PreviousPage));
+        // Ctrl+Shift+F is "bring to front" and is taken by the arrange keys first
+        assert!(press(Key::F, true, false) == Some(ViewKey::Find));
     }
 }
 
@@ -582,6 +586,236 @@ mod paragraph_tests {
         // a left indent to the right of the margin, and a relative (negative) spacing wider than single
         assert!(cell("IndLeft") > 0.0);
         assert!(cell("SpLine") < -1.0);
+    }
+}
+
+/// The state of the Find window.
+#[derive(Default)]
+struct Find {
+    text: String,
+    replace_with: String,
+    match_case: bool,
+    /// (page, position in the page's shape list) of the last match shown.
+    last: Option<(usize, usize)>,
+    status: String,
+    /// Put the keyboard focus in the text field on the next frame.
+    focus: bool,
+}
+
+/// Search the texts of a page's shapes (one entry per shape, in page order). Returns how many shapes match and the first
+/// match after position `after`, starting again at the top past the end.
+fn find_match(texts: &[String], needle: &str, match_case: bool, after: Option<usize>) -> (usize, Option<usize>) {
+    if needle.is_empty() {
+        return (0, None);
+    }
+    let fold = |text: &str| if match_case { text.to_string() } else { text.to_lowercase() };
+    let needle = fold(needle);
+    let matches: Vec<usize> = texts.iter().enumerate().filter(|(_, text)| fold(text).contains(&needle)).map(|(at, _)| at).collect();
+    let next = matches.iter().copied().find(|at| after.is_none_or(|last| *at > last)).or_else(|| matches.first().copied());
+    (matches.len(), next)
+}
+
+#[cfg(test)]
+mod find_tests {
+    use super::find_match;
+
+    fn texts() -> Vec<String> {
+        ["Router", "switch", "", "Core ROUTER"].iter().map(|text| text.to_string()).collect()
+    }
+
+    #[test]
+    fn find_next_walks_the_matches_and_starts_again() {
+        let (count, first) = find_match(&texts(), "router", false, None);
+        assert_eq!((count, first), (2, Some(0)));
+        assert_eq!(find_match(&texts(), "router", false, first).1, Some(3));
+        assert_eq!(find_match(&texts(), "router", false, Some(3)).1, Some(0));
+    }
+
+    #[test]
+    fn match_case_and_empty_or_missing_text() {
+        assert_eq!(find_match(&texts(), "ROUTER", true, None), (1, Some(3)));
+        assert_eq!(find_match(&texts(), "", false, None), (0, None));
+        assert_eq!(find_match(&texts(), "firewall", false, None), (0, None));
+    }
+}
+
+/// `text` with every occurrence of `needle` replaced by `with`; `None` when there is none. Without `match_case` two
+/// characters are equal when their lower-case forms are.
+fn replace_matches(text: &str, needle: &str, with: &str, match_case: bool) -> Option<String> {
+    let needle: Vec<char> = needle.chars().collect();
+    if needle.is_empty() {
+        return None;
+    }
+    let same = |a: char, b: char| a == b || (!match_case && a.to_lowercase().eq(b.to_lowercase()));
+    let chars: Vec<char> = text.chars().collect();
+    let (mut out, mut at, mut found) = (String::new(), 0, false);
+    while at < chars.len() {
+        if chars.len() - at >= needle.len() && needle.iter().zip(&chars[at..]).all(|(a, b)| same(*a, *b)) {
+            out.push_str(with);
+            at += needle.len();
+            found = true;
+        } else {
+            out.push(chars[at]);
+            at += 1;
+        }
+    }
+    found.then_some(out)
+}
+
+/// Replace in the texts the shapes show (`Engine::edit` op 8 on each text's owner, once) as one undo step, all or nothing.
+/// Returns the number of texts changed.
+fn replace_in_shapes(engine: &mut Engine, page: usize, ids: &[String], needle: &str, with: &str, match_case: bool) -> Result<usize, String> {
+    let mut jobs: Vec<(String, String)> = Vec::new();
+    for id in ids {
+        let Some(info) = engine.text_info_json(page, id).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()) else {
+            continue;
+        };
+        let (Some(owner), Some(text)) = (info["owner"].as_str(), info["text"].as_str()) else {
+            continue;
+        };
+        if jobs.iter().any(|(known, _)| known == owner) {
+            continue;
+        }
+        if let Some(new) = replace_matches(text, needle, with, match_case) {
+            jobs.push((owner.to_string(), new));
+        }
+    }
+    let depth = engine.undo_depth();
+    let result = jobs.iter().try_for_each(|(owner, text)| engine.edit(page, 8, &format!("{owner}\n{text}"), 0.0, 0.0, 0.0, 0.0, 0));
+    engine.collapse_history(depth);
+    if result.is_err() && engine.undo_depth() > depth {
+        let _ = engine.undo();
+    }
+    result.map(|()| jobs.len())
+}
+
+#[cfg(test)]
+mod replace_tests {
+    use super::{replace_in_shapes, replace_matches};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn every_occurrence_is_replaced_with_or_without_case() {
+        assert_eq!(replace_matches("Port a, PORT b", "port", "Link", false).as_deref(), Some("Link a, Link b"));
+        assert_eq!(replace_matches("Port a, PORT b", "PORT", "Link", true).as_deref(), Some("Port a, Link b"));
+        // the replacement is not searched again
+        assert_eq!(replace_matches("aa", "a", "aa", true).as_deref(), Some("aaaa"));
+        assert_eq!(replace_matches("abc", "x", "y", false), None);
+        assert_eq!(replace_matches("abc", "", "y", false), None);
+    }
+
+    #[test]
+    fn replacing_in_several_shapes_is_one_undo_step() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let ids: Vec<String> = [1.0, 5.0].iter().map(|x| engine.draw(0, 0, *x, 1.0, x + 2.0, 3.0).unwrap()).collect();
+        for id in &ids {
+            engine.edit(0, 8, &format!("{id}\nold name"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+        }
+        let text = |engine: &Engine, id: &str| engine.text_info_json(0, id).unwrap();
+        let depth = engine.undo_depth();
+        assert_eq!(replace_in_shapes(&mut engine, 0, &ids, "old", "new", false), Ok(2));
+        assert!(ids.iter().all(|id| text(&engine, id).contains("new name")));
+        assert_eq!(engine.undo_depth(), depth + 1);
+        let _ = engine.undo();
+        assert!(ids.iter().all(|id| text(&engine, id).contains("old name")));
+        // nothing to replace: no undo step
+        assert_eq!(replace_in_shapes(&mut engine, 0, &ids, "absent", "new", false), Ok(0));
+        assert_eq!(engine.undo_depth(), depth);
+    }
+}
+
+/// The `Engine::edit` op 10 style that switches the shadow on or off.
+fn shadow_style(on: bool) -> String {
+    serde_json::json!({ "shadow": on }).to_string()
+}
+
+#[cfg(test)]
+mod shadow_tests {
+    use super::shadow_style;
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn the_shadow_goes_on_and_off() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let id = engine.draw(0, 0, 1.0, 1.0, 3.0, 3.0).unwrap();
+        let shadowed = |engine: &Engine| {
+            let page = &engine.document().unwrap().pages[0];
+            page.shapes.iter().any(|shape| shape.visio_id.as_deref() == Some(id.as_str()) && shape.shadow.is_some())
+        };
+        assert!(!shadowed(&engine));
+        for on in [true, false] {
+            engine.edit(0, 10, &format!("{id}\n{}", shadow_style(on)), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+            assert_eq!(shadowed(&engine), on);
+        }
+    }
+}
+
+/// The selected shapes "Change Shape" can work on (`web/shell.js` `changeableShapes`): shapes of the page itself that are
+/// editable and not locked, and are not connectors. `frames` is `Engine::group_info_json`.
+fn changeable_shapes(frames: &str, ids: &[String], is_connector: impl Fn(&str) -> bool) -> Vec<String> {
+    let frames: Vec<serde_json::Value> = serde_json::from_str(frames).unwrap_or_default();
+    ids.iter()
+        .filter(|id| !is_connector(id))
+        .filter(|id| {
+            frames.iter().any(|frame| {
+                frame["id"].as_str() == Some(id.as_str()) && frame["parentId"].is_null() && frame["editable"].as_bool() == Some(true) && frame["locked"].as_bool() != Some(true)
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// Replace each shape with an instance of the stencil's master (`Engine::replace_shape`) as one undo step, all or nothing.
+/// Returns the new ids.
+fn change_shapes(engine: &mut Engine, page: usize, ids: &[String], stencil: i32, master: &str) -> Result<Vec<String>, String> {
+    if ids.is_empty() {
+        return Err("select a shape of the page that is not a connector and not locked".to_string());
+    }
+    let depth = engine.undo_depth();
+    let result: Result<Vec<String>, String> = ids.iter().map(|id| engine.replace_shape(page, stencil, &format!("{id}|{master}"))).collect();
+    engine.collapse_history(depth);
+    if result.is_err() && engine.undo_depth() > depth {
+        let _ = engine.undo();
+    }
+    result
+}
+
+#[cfg(test)]
+mod change_shape_tests {
+    use super::{change_shapes, changeable_shapes};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn connectors_members_and_locked_shapes_are_not_changed() {
+        let frames = r#"[
+            {"id":"1","parentId":null,"editable":true,"locked":false},
+            {"id":"2","parentId":null,"editable":true,"locked":true},
+            {"id":"3","parentId":"1","editable":true,"locked":false},
+            {"id":"4","parentId":null,"editable":true,"locked":false}
+        ]"#;
+        let ids: Vec<String> = ["1", "2", "3", "4"].iter().map(|id| id.to_string()).collect();
+        assert_eq!(changeable_shapes(frames, &ids, |id| id == "4"), ["1"]);
+    }
+
+    #[test]
+    fn several_shapes_change_in_one_undo_step() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let ids: Vec<String> = [1.0, 5.0].iter().map(|x| engine.draw(0, 0, *x, 1.0, x + 2.0, 3.0).unwrap()).collect();
+        let stencil: serde_json::Value = serde_json::from_str(&engine.stencil_builtin().unwrap()).unwrap();
+        let index = stencil["index"].as_i64().unwrap() as i32;
+        let master = &stencil["masters"][0]["id"];
+        let master = master.as_str().map_or_else(|| master.to_string(), str::to_string);
+        let depth = engine.undo_depth();
+        let made = change_shapes(&mut engine, 0, &ids, index, &master).unwrap();
+        assert_eq!(made.len(), 2);
+        assert_eq!(engine.undo_depth(), depth + 1);
+        // a shape that does not exist fails the whole change
+        let both = [made[0].clone(), "999".to_string()];
+        assert!(change_shapes(&mut engine, 0, &both, index, &master).is_err());
+        assert_eq!(engine.undo_depth(), depth + 1);
     }
 }
 
@@ -1308,6 +1542,10 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// "Change Shape" is waiting for a click on a shape of the Shapes panel.
+    change_shape: bool,
+    /// The Find window, while it is open.
+    find: Option<Find>,
     /// (selected ids, whether all their text is struck through) for the Strike button.
     struck_cache: Option<(String, bool)>,
     page_setup_open: bool,
@@ -1419,6 +1657,8 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            change_shape: false,
+            find: None,
             struck_cache: None,
             page_setup_open: false,
             check_open: false,
@@ -3193,7 +3433,7 @@ impl LayoutCraftApp {
             }
             return;
         }
-        if matches!(id, "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor") {
+        if matches!(id, "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor" | "p:shadow") {
             self.ribbon_format_controls(ui, id, action);
             return;
         }
@@ -3207,6 +3447,7 @@ impl LayoutCraftApp {
         let label = ribbon::label(id);
         let icon = self.ribbon.icons.get(id).cloned();
         let selected = (native == Some(ribbon::Native::Connector) && self.tool == Tool::Connector) || (native == Some(ribbon::Native::TextBox) && self.tool == Tool::Draw(5)) || (native == Some(ribbon::Native::Hand) && self.tool == Tool::Hand)
+            || (native == Some(ribbon::Native::ChangeShape) && self.change_shape)
             || (native == Some(ribbon::Native::SnapGrid) && self.snap_grid)
             || (native == Some(ribbon::Native::SnapShapes) && self.snap_shapes)
             || (native == Some(ribbon::Native::SnapGuides) && self.snap_guides)
@@ -3231,6 +3472,16 @@ impl LayoutCraftApp {
                     ribbon::Native::Connector => self.tool = if selected { Tool::Select } else { Tool::Connector },
                     ribbon::Native::TextBox => self.tool = if selected { Tool::Select } else { Tool::Draw(5) },
                     ribbon::Native::Hand => self.tool = if selected { Tool::Select } else { Tool::Hand },
+                    ribbon::Native::ChangeShape => {
+                        self.change_shape = !self.change_shape && self.selected.is_some();
+                        if self.change_shape {
+                            self.shapes_open = true;
+                            self.armed_master = None;
+                            self.status = "Change Shape: click a shape in the Shapes panel (Esc cancels).".to_string();
+                        } else if self.selected.is_none() {
+                            self.status = "Select the shape to change first.".to_string();
+                        }
+                    }
                     ribbon::Native::SnapGrid => self.snap_grid = !self.snap_grid,
                     ribbon::Native::SnapShapes => self.snap_shapes = !self.snap_shapes,
                     ribbon::Native::SnapGuides => self.snap_guides = !self.snap_guides,
@@ -3301,6 +3552,12 @@ impl LayoutCraftApp {
                     .response
                     .on_hover_text("Line spacing of the whole text, in lines");
                 });
+            }
+            "p:shadow" => {
+                let on = primary.as_ref().is_some_and(|shape| shape.shadow.is_some());
+                if ui.add_enabled(enabled, egui::Button::new("Shadow").selected(on)).on_hover_text("Shadow of the selected shapes").clicked() {
+                    *action = Some(Action::StyleSelected(shadow_style(!on)));
+                }
             }
             "p:fontFamily" => {
                 let (name, replaced) = self.selected_font().unwrap_or_default();
@@ -3446,6 +3703,7 @@ impl LayoutCraftApp {
             N::OpenFile => Action::OpenDialog,
             N::DocProps => Action::DocProps,
             N::HelpShortcuts => Action::HelpShortcuts,
+            N::Find => Action::Find,
             N::HelpAbout => Action::HelpAbout,
             N::HelpMcp => Action::HelpMcp,
             N::PageSetup => Action::PageSetup,
@@ -3460,6 +3718,8 @@ impl LayoutCraftApp {
             N::TextBox => Action::Fit,
             // the connector tool is a tool, not an action (handled by the caller)
             N::Connector => Action::Fit,
+            // "Change Shape" is a mode, handled where the button is drawn
+            N::ChangeShape => Action::Fit,
             // the Pan tool is a tool too
             N::Hand => Action::Fit,
             // the snap switches and the grid step are state, handled where the button is drawn
@@ -3731,6 +3991,172 @@ impl LayoutCraftApp {
         result
     }
 
+    /// (shape id, text) of the current page's shapes that are not on a hidden layer, in page order.
+    fn searchable_shapes(&self) -> Vec<(String, String)> {
+        let page = self.page_index;
+        self
+            .engine
+            .document
+            .as_ref()
+            .and_then(|document| document.pages.get(page))
+            .map(|page| {
+                page.shapes
+                    .iter()
+                    .filter(|shape| !shape.layer_hidden)
+                    .filter_map(|shape| {
+                        let mut text = shape.label.clone();
+                        for sub in &shape.sub_texts {
+                            text.push('\n');
+                            text.push_str(&sub.text);
+                        }
+                        Some((shape.visio_id.clone()?, text))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Replace in the last match (when it is on this page) or, with `all`, in every shape of the page; then the Find
+    /// window says how many texts changed. One undo step.
+    fn replace_text(&mut self, ctx: &egui::Context, all: bool) {
+        let Some(find) = self.find.as_ref() else {
+            return;
+        };
+        let (needle, with, match_case) = (find.text.clone(), find.replace_with.clone(), find.match_case);
+        let page = self.page_index;
+        let shapes = self.searchable_shapes();
+        let current = find.last.filter(|(last_page, _)| *last_page == page).and_then(|(_, at)| shapes.get(at));
+        let ids: Vec<String> = if all {
+            shapes.iter().map(|(id, _)| id.clone()).collect()
+        } else {
+            current.map(|(id, _)| id.clone()).into_iter().collect()
+        };
+        let selected = self.selected.clone();
+        match replace_in_shapes(&mut self.engine, page, &ids, &needle, &with, match_case) {
+            Ok(0) => {}
+            Ok(count) => {
+                self.finish_edit(ctx, Ok(()), "Replaced text", selected);
+                if let Some(find) = self.find.as_mut() {
+                    find.status = format!("Replaced in {count} shape(s).");
+                }
+                if all {
+                    return;
+                }
+            }
+            Err(error) => {
+                if let Some(find) = self.find.as_mut() {
+                    find.status = format!("Could not replace: {error}");
+                }
+                return;
+            }
+        }
+        // "Replace" moves on to the next match (and is "find" when nothing is selected yet)
+        if !all {
+            self.find_next();
+        } else if let Some(find) = self.find.as_mut() {
+            find.status = "Nothing to replace on this page.".to_string();
+        }
+    }
+
+    /// Open the Find window (or return the keyboard focus to it).
+    fn open_find(&mut self) {
+        self.find.get_or_insert_with(Find::default).focus = true;
+    }
+
+    /// Select the next shape of the current page whose text contains the Find window's text. Shapes on hidden layers are
+    /// not searched; a match inside a group selects the group.
+    fn find_next(&mut self) {
+        let Some(mut find) = self.find.take() else {
+            return;
+        };
+        let page = self.page_index;
+        let shapes = self.searchable_shapes();
+        let texts: Vec<String> = shapes.iter().map(|(_, text)| text.clone()).collect();
+        let after = find.last.filter(|(last_page, _)| *last_page == page).map(|(_, at)| at);
+        let (count, next) = find_match(&texts, &find.text, find.match_case, after);
+        find.status = match (find.text.is_empty(), count) {
+            (true, _) => "Type the text to find.".to_string(),
+            (false, 0) => "Not found on this page.".to_string(),
+            (false, 1) => "1 shape matches.".to_string(),
+            (false, count) => format!("{count} shapes match."),
+        };
+        if let Some(at) = next {
+            find.last = Some((page, at));
+            self.selected = Some(self.group_root(&shapes[at].0));
+            self.extra_selected.clear();
+        }
+        self.find = Some(find);
+    }
+
+    /// The Find window: Enter or "Find next" selects the next match, Esc closes.
+    fn draw_find(&mut self, ctx: &egui::Context) {
+        let Some(find) = self.find.as_mut() else {
+            return;
+        };
+        let mut open = true;
+        let mut search = false;
+        // Some(true) = replace all
+        let mut replace: Option<bool> = None;
+        egui::Window::new("Find").open(&mut open).collapsible(false).show(ctx, |ui| {
+            let label = ui.label("Text to find on this page");
+            let edit = ui.text_edit_singleline(&mut find.text).labelled_by(label.id);
+            if std::mem::take(&mut find.focus) {
+                edit.request_focus();
+            }
+            if edit.changed() {
+                find.last = None;
+                find.status.clear();
+            }
+            if edit.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                search = true;
+                edit.request_focus();
+            }
+            let with_label = ui.label("Replace with");
+            ui.text_edit_singleline(&mut find.replace_with).labelled_by(with_label.id);
+            if ui.checkbox(&mut find.match_case, "Match case").changed() {
+                find.last = None;
+            }
+            ui.horizontal(|ui| {
+                if ui.button("Find next").clicked() {
+                    search = true;
+                }
+                if ui.button("Replace").clicked() {
+                    replace = Some(false);
+                }
+                if ui.button("Replace all").clicked() {
+                    replace = Some(true);
+                }
+            });
+            ui.label(&find.status);
+        });
+        if !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.find = None;
+        } else if let Some(all) = replace {
+            self.replace_text(ctx, all);
+        } else if search {
+            self.find_next();
+        }
+    }
+
+    /// Turn the selected shapes into instances of a stencil master; the new shapes stay selected.
+    fn change_selected_shapes(&mut self, ctx: &egui::Context, stencil: i32, master: &str, name: &str) {
+        let page = self.page_index;
+        let selection = self.all_selected();
+        let result = self.engine.group_info_json(page).and_then(|frames| {
+            let ids = changeable_shapes(&frames, &selection, |id| self.is_connector(id));
+            change_shapes(&mut self.engine, page, &ids, stencil, master)
+        });
+        match result {
+            Ok(mut made) => {
+                let rest = made.split_off(made.len().min(1));
+                let count = rest.len() + made.len();
+                self.finish_edit(ctx, Ok(()), &format!("Changed {count} shape(s) to \"{name}\""), made.pop());
+                self.extra_selected = rest;
+            }
+            Err(error) => self.status = format!("Could not change the shape: {error}"),
+        }
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -3945,6 +4371,7 @@ impl eframe::App for LayoutCraftApp {
                 Some(ViewKey::FitPage) => action = Some(Action::Fit),
                 Some(ViewKey::NextPage) => action = Some(Action::Page(self.page_index + 1)),
                 Some(ViewKey::PreviousPage) => action = Some(Action::Page(self.page_index.saturating_sub(1))),
+                Some(ViewKey::Find) => action = Some(Action::Find),
                 None => {}
             }
             if self.selected.is_some() {
@@ -4217,6 +4644,10 @@ impl eframe::App for LayoutCraftApp {
             self.armed_master = None;
             self.status = "Cancelled placing a shape.".to_string();
         }
+        if self.change_shape && (self.selected.is_none() || !self.shapes_open || ctx.input(|input| input.key_pressed(egui::Key::Escape))) {
+            self.change_shape = false;
+            self.status = "Change Shape cancelled.".to_string();
+        }
         if self.shapes_open && !self.stencil_autoopen_done && self.texture.is_some() {
             self.stencil_autoopen_done = true;
             if self.stencils.is_empty() {
@@ -4241,7 +4672,9 @@ impl eframe::App for LayoutCraftApp {
                     }
                 });
                 ui.add(egui::TextEdit::singleline(&mut self.shape_search).hint_text("Search shapes").desired_width(f32::INFINITY));
-                if let Some((_, _, name)) = &self.armed_master {
+                if self.change_shape {
+                    ui.add(egui::Label::new(egui::RichText::new("Change Shape: click the new shape (Esc cancels).").small()).wrap());
+                } else if let Some((_, _, name)) = &self.armed_master {
                     ui.add(egui::Label::new(egui::RichText::new(format!("Click on the page to place \"{name}\" (Esc cancels).")).small()).wrap());
                 } else if self.stencils.is_empty() {
                     ui.label("No stencil open.");
@@ -4273,7 +4706,9 @@ impl eframe::App for LayoutCraftApp {
                                         }
                                     }
                                     let response = response.on_hover_text(mname.as_str());
-                                    if response.clicked() {
+                                    if response.clicked() && self.change_shape {
+                                        replace = Some((index, id.clone(), mname.clone()));
+                                    } else if response.clicked() {
                                         self.armed_master = Some((index, id.clone(), mname.clone()));
                                         self.status = format!("Click on the page to place \"{mname}\".");
                                     }
@@ -4311,17 +4746,8 @@ impl eframe::App for LayoutCraftApp {
                 });
             });
             if let Some((index, master, name)) = replace {
-                if let Some(shape) = self.selected.clone() {
-                    let page = self.page_index;
-                    let result = self.engine.replace_shape(page, index as i32, &format!("{shape}|{master}"));
-                    match result {
-                        Ok(new_id) => {
-                            self.extra_selected.clear();
-                            self.finish_edit(&ctx, Ok(()), &format!("Changed shape {shape} to \"{name}\""), Some(new_id));
-                        }
-                        Err(error) => self.status = format!("Could not change the shape: {error}"),
-                    }
-                }
+                self.change_shape = false;
+                self.change_selected_shapes(&ctx, index as i32, &master, &name);
             }
             if let Some(si) = close {
                 let index = self.stencils[si].index;
@@ -5179,6 +5605,7 @@ impl eframe::App for LayoutCraftApp {
             }
             self.comments_open = open;
         }
+        self.draw_find(&ctx);
         if self.help_shortcuts_open {
             let mut open = true;
             egui::Window::new("Keyboard shortcuts").open(&mut open).collapsible(false).show(&ctx, |ui| {
@@ -5315,6 +5742,7 @@ impl eframe::App for LayoutCraftApp {
             }
             Some(Action::DocProps) => self.doc_props_open = true,
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
+            Some(Action::Find) => self.open_find(),
             Some(Action::HelpAbout) => self.help_about_open = true,
             Some(Action::HelpMcp) => self.mcp_open = true,
             Some(Action::PageSetup) => {
@@ -5408,6 +5836,7 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    Find,
     /// Format the whole text of the selected shapes: `cells` and / or `para` of `Engine::edit` op 13.
     FormatText(serde_json::Value),
     Load,
