@@ -1306,6 +1306,78 @@ mod ruler_tests {
     }
 }
 
+/// A ruler guide as the canvas uses it: its id, whether it is vertical, and its position (x or y) in page inches.
+type GuideLine = (String, bool, f64);
+
+/// A guide being dragged: an existing one (with its id) or a new one pulled out of a ruler.
+#[derive(Clone, Debug)]
+struct GuideDrag {
+    id: Option<String>,
+    vertical: bool,
+    at: f64,
+}
+
+/// The horizontal and vertical guides of a page (turned guides are not shown), from `Engine::guides_json`.
+fn guide_lines(guides: &str) -> Vec<GuideLine> {
+    let guides: Vec<serde_json::Value> = serde_json::from_str(guides).unwrap_or_default();
+    guides
+        .iter()
+        .filter_map(|guide| {
+            let vertical = guide["vertical"].as_bool()?;
+            let at = guide[if vertical { "x" } else { "y" }].as_f64()?;
+            Some((guide["id"].as_str()?.to_string(), vertical, at))
+        })
+        .collect()
+}
+
+/// The guide nearest to the page point (inches), if one is within `tolerance`.
+fn guide_near(guides: &[GuideLine], x: f64, y: f64, tolerance: f64) -> Option<GuideLine> {
+    let distance = |guide: &GuideLine| (if guide.1 { x } else { y } - guide.2).abs();
+    guides.iter().filter(|guide| distance(guide) <= tolerance).min_by(|a, b| distance(a).total_cmp(&distance(b))).cloned()
+}
+
+/// Release a dragged guide (`Engine::page_op` 16 add, 17 move, 18 delete): on the page it is added or moved, off the page an
+/// existing one is deleted. `None` when there is nothing to do; else the status verb.
+fn drop_guide(engine: &mut Engine, page: usize, drag: &GuideDrag, on_page: bool) -> Option<Result<&'static str, String>> {
+    let (op, text, verb) = match (&drag.id, on_page) {
+        (None, true) => (16, drag.at.to_string(), "Added a guide"),
+        (Some(id), true) => (17, format!("{id}|{}", drag.at), "Moved the guide"),
+        (Some(id), false) => (18, id.clone(), "Deleted the guide"),
+        (None, false) => return None,
+    };
+    Some(engine.page_op(op, page, usize::from(drag.vertical), &text).map(|_| verb))
+}
+
+#[cfg(test)]
+mod guide_tests {
+    use super::{drop_guide, guide_lines, guide_near, GuideDrag};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn a_guide_is_added_moved_and_deleted_by_where_it_is_dropped() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let guides = |engine: &Engine| guide_lines(&engine.guides_json(0).unwrap());
+        let drag = |id: Option<&str>, at: f64| GuideDrag { id: id.map(str::to_string), vertical: true, at };
+        assert!(drop_guide(&mut engine, 0, &drag(None, 2.0), false).is_none());
+        drop_guide(&mut engine, 0, &drag(None, 2.0), true).unwrap().unwrap();
+        let (id, vertical, at) = guides(&engine).remove(0);
+        assert!(vertical && (at - 2.0).abs() < 1e-6);
+        drop_guide(&mut engine, 0, &drag(Some(&id), 3.0), true).unwrap().unwrap();
+        assert!((guides(&engine)[0].2 - 3.0).abs() < 1e-6);
+        drop_guide(&mut engine, 0, &drag(Some(&id), 3.0), false).unwrap().unwrap();
+        assert!(guides(&engine).is_empty());
+    }
+
+    #[test]
+    fn the_nearest_guide_within_reach_is_picked_on_its_own_axis() {
+        let guides = vec![("v".to_string(), true, 2.0), ("h".to_string(), false, 5.0), ("w".to_string(), true, 2.3)];
+        assert_eq!(guide_near(&guides, 2.2, 0.0, 0.25).unwrap().0, "w");
+        assert_eq!(guide_near(&guides, 9.0, 5.1, 0.25).unwrap().0, "h");
+        assert!(guide_near(&guides, 9.0, 0.0, 0.25).is_none());
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -2043,6 +2115,11 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The ruler guides of the page: shown or not, the lines (read when the page is built), the selected and the dragged one.
+    show_guides: bool,
+    guides: Vec<GuideLine>,
+    selected_guide: Option<String>,
+    guide_drag: Option<GuideDrag>,
     /// Rulers beside the canvas, and what they count in (read when the page is built).
     show_rulers: bool,
     ruler_unit: (f64, &'static str),
@@ -2175,6 +2252,10 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            show_guides: true,
+            guides: Vec::new(),
+            selected_guide: None,
+            guide_drag: None,
             show_rulers: true,
             ruler_unit: (1.0, "in"),
             size_pos: SizePos::default(),
@@ -2346,6 +2427,9 @@ impl LayoutCraftApp {
         let _timer = Timer::new("build_page (whole)", 0.0);
         self.sites_cache.clear();
         self.struck_cache = None;
+        self.guides = self.engine.guides_json(self.page_index).map(|json| guide_lines(&json)).unwrap_or_default();
+        self.selected_guide = None;
+        self.guide_drag = None;
         if let Ok(size) = self.engine.page_size_json(self.page_index) {
             self.ruler_unit = ruler_unit(&size);
         }
@@ -4000,7 +4084,8 @@ impl LayoutCraftApp {
             || (native == Some(ribbon::Native::SnapShapes) && self.snap_shapes)
             || (native == Some(ribbon::Native::SnapGuides) && self.snap_guides)
             || (native == Some(ribbon::Native::ShowGrid) && self.show_grid)
-            || (native == Some(ribbon::Native::ShowRulers) && self.show_rulers);
+            || (native == Some(ribbon::Native::ShowRulers) && self.show_rulers)
+            || (native == Some(ribbon::Native::ShowGuides) && self.show_guides);
         let compact = self.ribbon_compact;
         let response = match icon.and_then(|name| self.icon_texture(ctx, &name)) {
             Some(texture) => {
@@ -4036,6 +4121,10 @@ impl LayoutCraftApp {
                     ribbon::Native::SnapGuides => self.snap_guides = !self.snap_guides,
                     ribbon::Native::ShowGrid => self.show_grid = !self.show_grid,
                     ribbon::Native::ShowRulers => self.show_rulers = !self.show_rulers,
+                    ribbon::Native::ShowGuides => {
+                        self.show_guides = !self.show_guides;
+                        self.selected_guide = None;
+                    }
                     other => *action = Some(Self::action_for(other)),
                 }
             }
@@ -4278,7 +4367,7 @@ impl LayoutCraftApp {
             // the Pan tool is a tool too
             N::Hand => Action::Fit,
             // the snap switches and the grid step are state, handled where the button is drawn
-            N::SnapGrid | N::SnapShapes | N::SnapGuides | N::GridStep | N::ShowGrid | N::ShowRulers => Action::Fit,
+            N::SnapGrid | N::SnapShapes | N::SnapGuides | N::GridStep | N::ShowGrid | N::ShowRulers | N::ShowGuides => Action::Fit,
         }
     }
 
@@ -5159,6 +5248,73 @@ impl LayoutCraftApp {
         }
     }
 
+    /// The page point (inches, y up) under a screen point.
+    fn page_point(&self, pointer: egui::Pos2, image_rect: egui::Rect) -> (f64, f64) {
+        let scene = self.screen_to_scene(pointer, image_rect);
+        (f64::from(scene.x) / DPI, self.page_height_in - f64::from(scene.y) / DPI)
+    }
+
+    /// The guide within a few screen px of the pointer, when guides are shown.
+    fn guide_at(&self, pointer: egui::Pos2, image_rect: egui::Rect) -> Option<GuideLine> {
+        if !self.show_guides {
+            return None;
+        }
+        let (x, y) = self.page_point(pointer, image_rect);
+        guide_near(&self.guides, x, y, 4.0 / (DPI * f64::from(self.view_scale())))
+    }
+
+    /// Follow the pointer with the dragged guide (to the grid when snapping to it).
+    fn move_guide_drag(&mut self, pointer: egui::Pos2, image_rect: egui::Rect) {
+        let (x, y) = self.page_point(pointer, image_rect);
+        let (grid, step) = (self.snap_grid, self.grid_step);
+        if let Some(drag) = self.guide_drag.as_mut() {
+            let at = if drag.vertical { x } else { y };
+            drag.at = if grid && step > 0.0 { (at / step).round() * step } else { at };
+        }
+    }
+
+    /// End a guide drag: over the canvas the guide stays there, anywhere else (a ruler) it goes.
+    fn finish_guide_drag(&mut self, ctx: &egui::Context, on_page: bool) {
+        let Some(drag) = self.guide_drag.take() else {
+            return;
+        };
+        let page = self.page_index;
+        if let Some(result) = drop_guide(&mut self.engine, page, &drag, on_page) {
+            self.selected_guide = None;
+            let selected = self.selected.clone();
+            match result {
+                Ok(verb) => self.finish_edit(ctx, Ok(()), verb, selected),
+                Err(error) => self.status = format!("Could not change the guide: {error}"),
+            }
+        }
+    }
+
+    fn delete_selected_guide(&mut self, ctx: &egui::Context) {
+        let Some(id) = self.selected_guide.take() else {
+            return;
+        };
+        if let Some((id, vertical, at)) = self.guides.iter().find(|guide| guide.0 == id).cloned() {
+            self.guide_drag = Some(GuideDrag { id: Some(id), vertical, at });
+            self.finish_guide_drag(ctx, false);
+        }
+    }
+
+    /// The guides as dashed lines across the canvas; the selected one is thicker, the dragged one follows the pointer.
+    fn draw_guides(&self, painter: &egui::Painter, canvas: egui::Rect, image_rect: egui::Rect) {
+        if !self.show_guides {
+            return;
+        }
+        let dragged = self.guide_drag.as_ref();
+        let resting = self.guides.iter().filter(|guide| dragged.and_then(|drag| drag.id.as_ref()) != Some(&guide.0)).map(|guide| (guide.1, guide.2, self.selected_guide.as_ref() == Some(&guide.0)));
+        for (vertical, at, selected) in resting.chain(dragged.map(|drag| (drag.vertical, drag.at, true))) {
+            let scene = egui::pos2((at * DPI) as f32, ((self.page_height_in - at) * DPI) as f32);
+            let screen = self.scene_to_screen(scene, image_rect);
+            let ends = if vertical { [egui::pos2(screen.x, canvas.top()), egui::pos2(screen.x, canvas.bottom())] } else { [egui::pos2(canvas.left(), screen.y), egui::pos2(canvas.right(), screen.y)] };
+            let stroke = egui::Stroke::new(if selected { 2.5 } else { 1.0 }, egui::Color32::from_rgb(20, 110, 220));
+            painter.extend(egui::Shape::dashed_line(&ends, stroke, 7.0, 4.0));
+        }
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -5357,6 +5513,11 @@ impl eframe::App for LayoutCraftApp {
                 })
             {
                 action = Some(Action::DeleteSelected);
+            } else if self.selected.is_none()
+                && self.selected_guide.is_some()
+                && ctx.input(|input| input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace))
+            {
+                action = Some(Action::DeleteGuide);
             }
             // arrange commands (ARRANGE_KEYS), then select all, zoom, F2 and the arrow nudge
             if let Some(command) = ctx.input_mut(consume_arrange_key) {
@@ -5396,6 +5557,8 @@ impl eframe::App for LayoutCraftApp {
                 action = Some(Action::FullScreen);
             }
             if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+                self.selected_guide = None;
+                self.guide_drag = None;
                 self.selected = None;
                 self.text_editor = None;
             }
@@ -5800,7 +5963,25 @@ impl eframe::App for LayoutCraftApp {
                 }
                 if rulers {
                     self.draw_rulers(ui, area, viewport, image_rect);
+                    // a guide pulled out of a ruler: the top one gives a horizontal guide, the left one a vertical guide
+                    let top = egui::Rect::from_min_max(egui::pos2(viewport.min.x, area.min.y), egui::pos2(viewport.max.x, viewport.min.y));
+                    let left = egui::Rect::from_min_max(egui::pos2(area.min.x, viewport.min.y), egui::pos2(viewport.min.x, viewport.max.y));
+                    for (band, vertical, name) in [(top, false, "ruler-top"), (left, true, "ruler-left")] {
+                        let ruler = ui.interact(band, egui::Id::new(name), egui::Sense::drag()).on_hover_cursor(if vertical { egui::CursorIcon::ResizeHorizontal } else { egui::CursorIcon::ResizeVertical });
+                        if ruler.drag_started_by(egui::PointerButton::Primary) {
+                            self.show_guides = true;
+                            self.guide_drag = Some(GuideDrag { id: None, vertical, at: 0.0 });
+                        }
+                        if let Some(pointer) = ruler.interact_pointer_pos().filter(|_| ruler.dragged()) {
+                            self.move_guide_drag(pointer, image_rect);
+                        }
+                        if ruler.drag_stopped() {
+                            let on_page = ctx.pointer_latest_pos().is_some_and(|pointer| viewport.contains(pointer));
+                            self.finish_guide_drag(&ctx, on_page);
+                        }
+                    }
                 }
+                self.draw_guides(&painter, viewport, image_rect);
 
                 if response.drag_started_by(egui::PointerButton::Primary) {
                     self.panning = false;
@@ -5808,11 +5989,24 @@ impl eframe::App for LayoutCraftApp {
                         .input(|input| input.pointer.press_origin())
                         .or_else(|| response.interact_pointer_pos());
                     if let Some(pointer) = press {
-                        self.begin_pointer(pointer, image_rect);
+                        // a guide is taken when no shape, connector or handle of the selection is under the pointer
+                        let scene = self.screen_to_scene(pointer, image_rect);
+                        let free = self.tool == Tool::Select && self.armed_master.is_none() && self.selected.is_none() && self.pick_connector(scene).is_none() && self.pick_shape(scene).is_none();
+                        match self.guide_at(pointer, image_rect).filter(|_| free) {
+                            Some((id, vertical, at)) => {
+                                self.selected_guide = Some(id.clone());
+                                self.guide_drag = Some(GuideDrag { id: Some(id), vertical, at });
+                            }
+                            None => self.begin_pointer(pointer, image_rect),
+                        }
                     }
                 }
                 if response.dragged_by(egui::PointerButton::Primary) {
-                    if self.drag.is_some() {
+                    if self.guide_drag.is_some() {
+                        if let Some(pointer) = response.interact_pointer_pos() {
+                            self.move_guide_drag(pointer, image_rect);
+                        }
+                    } else if self.drag.is_some() {
                         if let Some(pointer) = response.interact_pointer_pos() {
                             self.update_drag(pointer, image_rect);
                         }
@@ -5821,7 +6015,12 @@ impl eframe::App for LayoutCraftApp {
                     }
                 }
                 if response.drag_stopped_by(egui::PointerButton::Primary) {
-                    self.finish_drag(&ctx);
+                    if self.guide_drag.is_some() {
+                        let on_page = ctx.pointer_latest_pos().is_some_and(|pointer| viewport.contains(pointer));
+                        self.finish_guide_drag(&ctx, on_page);
+                    } else {
+                        self.finish_drag(&ctx);
+                    }
                 }
                 // the right-click menus (web/contextmenu.js): a shape or the selection, or the empty page. A right click on a shape that is not
                 // selected selects it first; on empty canvas it clears the selection.
@@ -5943,6 +6142,8 @@ impl eframe::App for LayoutCraftApp {
                         } else {
                             self.selected = None;
                         }
+                        let guide = self.guide_at(pointer, image_rect).filter(|_| self.selected.is_none());
+                        self.selected_guide = guide.map(|guide| guide.0);
                     }
                 }
                 if response.double_clicked() && self.drag.is_none() {
@@ -6729,6 +6930,7 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
             Some(Action::Hyperlink) => self.open_links(),
             Some(Action::Layers) => self.layers_open = !self.layers_open,
+            Some(Action::DeleteGuide) => self.delete_selected_guide(&ctx),
             Some(Action::SizeField(ref id, field, value, per_inch)) => self.set_size_field(&ctx, id, field, value, per_inch),
             Some(Action::FullScreen) => self.toggle_full_screen(&ctx),
             Some(Action::ShapeData) => self.data_pane = if self.data_pane.is_some() { None } else { Some(DataPane::default()) },
@@ -6829,6 +7031,7 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    DeleteGuide,
     /// Make the page as wide as the view.
     FitWidth,
     /// (shape, field, value, page units per inch) of a Size and Position field.
