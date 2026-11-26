@@ -1378,6 +1378,37 @@ mod guide_tests {
     }
 }
 
+/// The zoom levels the Zoom menu offers, percent of actual size.
+const ZOOM_PERCENTS: [u32; 6] = [50, 75, 100, 150, 200, 400];
+
+/// The size the page is shown at, percent of actual size: `zoom` scales the page image, which has `raster_scale` pixels per
+/// scene px (96 per inch).
+fn zoom_percent(zoom: f32, raster_scale: f64) -> f64 {
+    f64::from(zoom) * raster_scale * 100.0
+}
+
+/// The `zoom` that shows the page at `percent` of actual size, within the app's zoom range.
+fn zoom_for_percent(percent: f64, raster_scale: f64) -> f32 {
+    ((percent / 100.0 / raster_scale.max(1e-6)) as f32).clamp(0.05, 16.0)
+}
+
+#[cfg(test)]
+mod zoom_tests {
+    use super::{zoom_for_percent, zoom_percent, ZOOM_PERCENTS};
+
+    #[test]
+    fn a_percentage_means_the_same_size_whatever_the_image_resolution() {
+        for raster_scale in [0.4, 1.0, 2.5] {
+            for percent in ZOOM_PERCENTS {
+                let zoom = zoom_for_percent(f64::from(percent), raster_scale);
+                assert!((zoom_percent(zoom, raster_scale) - f64::from(percent)).abs() < 0.01);
+            }
+        }
+        // a sharper image of the same view is zoomed less
+        assert!(zoom_for_percent(100.0, 2.0) < zoom_for_percent(100.0, 1.0));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -4055,6 +4086,10 @@ impl LayoutCraftApp {
             self.ribbon_themes(ui, id == "variantGallery", action);
             return;
         }
+        if id == "zl" {
+            self.ribbon_zoom(ui, action);
+            return;
+        }
         if id == "designOrientation" || id == "designSize" {
             self.ribbon_page_shape(ui, id, action);
             return;
@@ -5315,6 +5350,30 @@ impl LayoutCraftApp {
         }
     }
 
+    /// The View tab's Zoom menu: the shown percentage; fixed levels, the whole page or its width.
+    fn ribbon_zoom(&self, ui: &mut egui::Ui, action: &mut Option<Action>) {
+        let percent = zoom_percent(self.zoom, self.raster_scale);
+        ui.add_enabled_ui(self.texture.is_some(), |ui| {
+            ui.menu_button(format!("{percent:.0}% \u{25be}"), |ui| {
+                for level in ZOOM_PERCENTS {
+                    if ui.selectable_label((percent - f64::from(level)).abs() < 0.5, format!("{level}%")).clicked() {
+                        *action = Some(Action::ZoomTo(level));
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                for (name, command) in [("Fit page to window", Action::Fit), ("Page width", Action::FitWidth)] {
+                    if ui.button(name).clicked() {
+                        *action = Some(command);
+                        ui.close();
+                    }
+                }
+            })
+            .response
+            .on_hover_text("Zoom");
+        });
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -5599,7 +5658,7 @@ impl eframe::App for LayoutCraftApp {
                 ui.separator();
                 ui.label(&self.status);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("zoom {:.0}%", self.zoom * 100.0));
+                    ui.label(format!("zoom {:.0}%", zoom_percent(self.zoom, self.raster_scale)));
                     if self.dirty {
                         ui.colored_label(egui::Color32::from_rgb(255, 196, 0), "modified");
                     }
@@ -7004,8 +7063,13 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::Fit) => self.fit_pending = true,
             Some(Action::FitWidth) => self.fit_width_pending = true,
             Some(Action::ActualSize) => {
-                self.zoom = 1.0;
+                self.zoom = zoom_for_percent(100.0, self.raster_scale);
                 self.pan = egui::Vec2::ZERO;
+                self.fit_pending = false;
+            }
+            Some(Action::ZoomTo(percent)) => {
+                self.zoom = zoom_for_percent(f64::from(percent), self.raster_scale);
+                self.fit_pending = false;
             }
             Some(Action::Undo) => self.undo(&ctx),
             Some(Action::Redo) => self.redo(&ctx),
@@ -7031,6 +7095,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Show the page at this percentage of actual size.
+    ZoomTo(u32),
     DeleteGuide,
     /// Make the page as wide as the view.
     FitWidth,
