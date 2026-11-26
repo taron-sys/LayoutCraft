@@ -96,6 +96,56 @@ mod resize_tests {
 const DPI: f64 = 96.0;
 const MIN_SHAPE_PX: f32 = 6.0;
 const HANDLE_SIZE: f32 = 9.0;
+/// A shape frame lower than this (scene px) may be a mere line under its picture (1-D masters).
+const HAIRLINE_FRAME: f32 = 12.0;
+
+/// The outline of a hairline-framed group: `own` (the frame and what the shape itself paints) widened to its `members`, when
+/// they make it clearly higher than the frame (the picture of the "Direct QSFP" stencil part is 1.6 times its frame); a real
+/// line (a group of lines) keeps its own outline.
+fn hairline_outline(frame: egui::Rect, own: egui::Rect, members: impl Iterator<Item = egui::Rect>) -> egui::Rect {
+    let all = members.fold(own, |all, member| all.union(member));
+    if all.height() > frame.height() * 1.25 {
+        all
+    } else {
+        own
+    }
+}
+
+#[cfg(test)]
+mod small_shape_tests {
+    use super::{hairline_outline, Handle, LayoutCraftApp};
+    use eframe::egui::{pos2, vec2, Rect};
+
+    /// Stencil parts a few pixels high must stay movable: a press in their middle takes no resize handle, a press on a
+    /// corner still does, and a shape of normal size keeps all its handles.
+    #[test]
+    fn the_middle_of_a_shape_is_never_a_resize_handle() {
+        for size in [vec2(23.0, 8.0), vec2(28.0, 8.0), vec2(57.0, 16.0), vec2(30.0, 30.0), vec2(200.0, 6.0), vec2(6.0, 200.0)] {
+            let rect = Rect::from_min_size(pos2(100.0, 100.0), size);
+            assert_eq!(LayoutCraftApp::handle_at(rect, rect.center()), None, "{size:?}");
+            assert_eq!(LayoutCraftApp::handle_at(rect, rect.center() + size / 5.0), None, "{size:?}");
+            assert!(LayoutCraftApp::handle_at(rect, rect.max + vec2(1.0, 1.0)) == Some(Handle::Se), "{size:?}");
+        }
+        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(120.0, 60.0));
+        for (handle, hit) in LayoutCraftApp::handle_rects(rect) {
+            assert!(LayoutCraftApp::handle_at(rect, hit.center()) == Some(handle));
+        }
+    }
+
+    #[test]
+    fn a_hairline_group_is_outlined_around_its_pictures() {
+        let frame = Rect::from_min_size(pos2(10.0, 20.0), vec2(5.0, 2.0));
+        let picture = Rect::from_min_size(pos2(9.0, 17.0), vec2(8.0, 7.0));
+        let outline = hairline_outline(frame, frame, [picture].into_iter());
+        assert!(outline.contains_rect(picture) && outline.contains_rect(frame));
+        // a picture only somewhat higher than the frame counts too
+        let low = Rect::from_min_size(pos2(10.0, 19.4), vec2(5.0, 3.2));
+        assert!(hairline_outline(frame, frame, [low].into_iter()).contains_rect(low));
+        // members that lie along the line do not widen it
+        let along = Rect::from_min_size(pos2(0.0, 20.0), vec2(40.0, 2.0));
+        assert_eq!(hairline_outline(frame, frame, [along].into_iter()), frame);
+    }
+}
 
 /// Best snap on one axis (the web shell's `snapAxis`): `values` are the moving positions, `targets` the positions to snap to, `grid` the grid step (0 = off),
 /// `threshold` the reach. Returns (the shift to apply, the position snapped to); the smallest shift wins.
@@ -1410,6 +1460,96 @@ mod zoom_tests {
     }
 }
 
+/// The place a page tab dragged from `from` goes to when it is let go at `x`: the tab whose horizontal span holds `x`, or
+/// the first / last place when `x` is left / right of the strip. `None` when nothing would move.
+fn tab_drop(spans: &[(f32, f32)], from: usize, x: f32) -> Option<usize> {
+    let to = if x < spans.first()?.0 {
+        0
+    } else if x > spans.last()?.1 {
+        spans.len() - 1
+    } else {
+        spans.iter().position(|(left, right)| x >= *left && x <= *right)?
+    };
+    (to != from).then_some(to)
+}
+
+#[cfg(test)]
+mod tab_tests {
+    use super::tab_drop;
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn a_dragged_tab_goes_where_it_is_let_go() {
+        let spans = [(0.0, 50.0), (60.0, 110.0), (120.0, 170.0)];
+        assert_eq!(tab_drop(&spans, 0, 130.0), Some(2));
+        assert_eq!(tab_drop(&spans, 2, -20.0), Some(0));
+        assert_eq!(tab_drop(&spans, 0, 500.0), Some(2));
+        // on itself, or in the gap between two tabs: nothing moves
+        assert_eq!(tab_drop(&spans, 1, 80.0), None);
+        assert_eq!(tab_drop(&spans, 0, 55.0), None);
+        assert_eq!(tab_drop(&[], 0, 1.0), None);
+    }
+
+    #[test]
+    fn the_move_reorders_the_pages() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "First").unwrap();
+        engine.page_op(1, 0, 0, "").unwrap();
+        let names = |engine: &Engine| serde_json::from_str::<Vec<String>>(&engine.page_names_json().unwrap()).unwrap();
+        let before = names(&engine);
+        engine.page_op(4, 0, 1, "").unwrap();
+        assert_eq!(names(&engine), [before[1].clone(), before[0].clone()]);
+    }
+}
+
+/// The status bar's zoom slider over `percent` of actual size; the new percentage when the user moves it. A zoom outside
+/// the slider's range (a very small fitted page) is left alone.
+fn zoom_slider(ui: &mut egui::Ui, percent: f64) -> Option<u32> {
+    let mut value = percent;
+    let slider = egui::Slider::new(&mut value, 10.0..=800.0).logarithmic(true).show_value(false).clamping(egui::SliderClamping::Edits);
+    let response = ui.add(slider).on_hover_text("Zoom");
+    (response.changed() && (value - percent).abs() >= 0.5).then(|| value.round() as u32)
+}
+
+#[cfg(test)]
+mod zoom_slider_tests {
+    use super::zoom_slider;
+    use eframe::egui::{self, Event, Key, Modifiers};
+
+    /// One frame with the slider; what it asks for.
+    fn frame(ctx: &egui::Context, percent: f64, events: Vec<Event>) -> Option<u32> {
+        let mut asked = None;
+        let output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+            asked = zoom_slider(ui, percent);
+        });
+        // nothing paints here: the texture changes of the frame are not applied, so the output must not be dropped
+        std::mem::forget(output);
+        asked
+    }
+
+    fn press(key: Key) -> Vec<Event> {
+        vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]
+    }
+
+    #[test]
+    fn showing_the_slider_changes_nothing_also_outside_its_range() {
+        for percent in [3.0, 100.0, 1200.0] {
+            let ctx = egui::Context::default();
+            assert_eq!(frame(&ctx, percent, Vec::new()), None);
+            assert_eq!(frame(&ctx, percent, Vec::new()), None);
+        }
+    }
+
+    #[test]
+    fn tab_reaches_the_slider_and_an_arrow_key_zooms_in() {
+        let ctx = egui::Context::default();
+        frame(&ctx, 100.0, Vec::new());
+        frame(&ctx, 100.0, press(Key::Tab));
+        frame(&ctx, 100.0, Vec::new());
+        assert!(frame(&ctx, 100.0, press(Key::ArrowRight)).is_some_and(|percent| percent > 100));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -1798,7 +1938,7 @@ fn vsdx_name(path: &Path) -> PathBuf {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Handle {
     Nw,
     N,
@@ -2891,7 +3031,7 @@ impl LayoutCraftApp {
     /// masters of the Dell stencils, shows its picture well outside the frame).
     fn selection_scene_rect(shape: &SceneShape) -> egui::Rect {
         let frame = Self::shape_scene_rect(shape);
-        if shape.rot.abs() > 1e-9 || frame.height() >= 12.0 {
+        if shape.rot.abs() > 1e-9 || frame.height() >= HAIRLINE_FRAME {
             return frame; // a turned shape keeps its frame (the outline is turned with it); a normal frame is already what the shape is
         }
         let (x, y, w, h) = layoutcraft_render::shape_painted_bounds(shape);
@@ -2905,6 +3045,39 @@ impl LayoutCraftApp {
             egui::pos2(shape.x as f32, shape.y as f32),
             egui::vec2(shape.w as f32, shape.h as f32),
         )
+    }
+
+    /// `selection_scene_rect` of the shape `id`, and for a group whose frame is a hairline under pictures that are its members (the SFP
+    /// modules of the HPE stencils) what the members cover: the frame alone would put the resize handles across the picture.
+    fn selection_rect(&self, id: &str) -> Option<egui::Rect> {
+        let shape = self.scene_shape(id)?;
+        let own = Self::selection_scene_rect(shape);
+        let frame = Self::shape_scene_rect(shape);
+        if shape.rot.abs() > 1e-6 || frame.height() >= HAIRLINE_FRAME {
+            return Some(own);
+        }
+        let members = self.scene.iter().flat_map(|scene| scene.items.iter()).filter_map(|item| match item {
+            SceneItem::Shape(member) => {
+                let member_id = member.visio_id.as_deref()?;
+                (member_id != id && self.group_root(member_id) == id).then(|| Self::selection_scene_rect(member))
+            }
+            _ => None,
+        });
+        Some(hairline_outline(frame, own, members))
+    }
+
+    /// The resize handle a press at `pointer` takes on a shape shown at `rect`. The middle half of a shape in each direction is
+    /// always left for moving it: on a small shape the handles would otherwise cover (almost) all of it.
+    fn handle_at(rect: egui::Rect, pointer: egui::Pos2) -> Option<Handle> {
+        if !Self::handles_fit(rect) || egui::Rect::from_center_size(rect.center(), rect.size() / 2.0).contains(pointer) {
+            return None;
+        }
+        // where handles overlap on a small shape, the nearest one
+        Self::handle_rects(rect)
+            .into_iter()
+            .filter(|(_, hit)| hit.expand(2.0).contains(pointer))
+            .min_by(|a, b| a.1.center().distance(pointer).total_cmp(&b.1.center().distance(pointer)))
+            .map(|(handle, _)| handle)
     }
 
     /// Whether a selected shape is big enough on screen for its eight resize handles: on a shape smaller than the handles in both directions
@@ -3080,7 +3253,7 @@ impl LayoutCraftApp {
             return None;
         }
         let scene = self.scene_shape(id)?;
-        let rect = self.scene_rect_to_screen(Self::selection_scene_rect(scene), image_rect);
+        let rect = self.scene_rect_to_screen(self.selection_rect(id).unwrap_or_else(|| Self::selection_scene_rect(scene)), image_rect);
         let rot = (match &self.rotating {
             Some(r) if r.id == id => -r.theta,
             _ => shape.rot.to_radians(), // the model keeps the angle in degrees, clockwise on screen
@@ -3186,26 +3359,24 @@ impl LayoutCraftApp {
                 }
             }
             if let Some(shape) = self.doc_shape(&selected_id) {
-                let frame_is_shape = self.scene_shape(&selected_id).is_some_and(|scene| Self::selection_scene_rect(scene) == Self::shape_scene_rect(scene));
+                let frame_is_shape = self.scene_shape(&selected_id).is_some_and(|scene| self.selection_rect(&selected_id) == Some(Self::shape_scene_rect(scene)));
                 if shape.group.is_none() && shape.rot.abs() < 1e-6 && frame_is_shape {
                     let rect = egui::Rect::from_min_size(
                         egui::pos2(shape.x as f32, shape.y as f32),
                         egui::vec2(shape.w as f32, shape.h as f32),
                     );
                     let screen_rect = self.scene_rect_to_screen(rect, image_rect);
-                    for (handle, hit) in Self::handle_rects(screen_rect).into_iter().filter(|_| Self::handles_fit(screen_rect)) {
-                        if hit.expand(2.0).contains(pointer) {
-                            self.drag = Some(DragState {
-                                visio_id: selected_id.clone(),
-                                mode: DragMode::Resize(handle),
-                                start_pointer: scene_pointer,
-                                end_pointer: scene_pointer,
-                                start_rect: rect,
-                            });
-                            self.preview = Some(rect);
-                            self.status = format!("Resizing shape {selected_id}");
-                            return;
-                        }
+                    if let Some(handle) = Self::handle_at(screen_rect, pointer) {
+                        self.drag = Some(DragState {
+                            visio_id: selected_id.clone(),
+                            mode: DragMode::Resize(handle),
+                            start_pointer: scene_pointer,
+                            end_pointer: scene_pointer,
+                            start_rect: rect,
+                        });
+                        self.preview = Some(rect);
+                        self.status = format!("Resizing shape {selected_id}");
+                        return;
                     }
                 }
             }
@@ -3245,7 +3416,7 @@ impl LayoutCraftApp {
                 egui::vec2(shape.w as f32, shape.h as f32),
             );
             // the outline that moves with the pointer is the painted extent (the frame of a 1-D group is a hairline)
-            let rect = self.scene_shape(&id).map_or(frame, Self::selection_scene_rect);
+            let rect = self.selection_rect(&id).unwrap_or(frame);
             self.drag = Some(DragState {
                 visio_id: id.clone(),
                 mode: DragMode::Move,
@@ -3426,7 +3597,11 @@ impl LayoutCraftApp {
             .filter_map(|item| match item {
                 SceneItem::Shape(shape) => {
                     let id = shape.visio_id.clone()?;
-                    self.doc_shape(&id).is_some_and(|doc| doc.group.is_none()).then(|| (id, Self::selection_scene_rect(shape)))
+                    if self.doc_shape(&id).is_none_or(|doc| doc.group.is_some()) {
+                        return None;
+                    }
+                    let rect = self.selection_rect(&id).unwrap_or_else(|| Self::selection_scene_rect(shape));
+                    Some((id, rect))
                 }
                 _ => None,
             })
@@ -3497,7 +3672,7 @@ impl LayoutCraftApp {
             return;
         }
         if !resized {
-            if let Some(old) = self.scene_shape(visio_id).map(Self::selection_scene_rect) {
+            if let Some(old) = self.selection_rect(visio_id) {
                 let (dx, dy) = ((rect.min.x - old.min.x) as f64 / DPI, -((rect.min.y - old.min.y) as f64) / DPI);
                 let page = self.page_index;
                 let edit_timer = Timer::new("  engine.edit (move)", 0.0);
@@ -5380,6 +5555,55 @@ impl LayoutCraftApp {
         });
     }
 
+    /// The page tabs under the drawing: click to show a page, right-click for the page commands, drag to reorder.
+    fn page_tabs(&self, ui: &mut egui::Ui, action: &mut Option<Action>) {
+        let Some(document) = self.engine.document.as_ref() else {
+            return;
+        };
+        let count = document.pages.len();
+        egui::ScrollArea::horizontal().id_salt("page-tabs").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let mut spans = Vec::with_capacity(count);
+                let mut dropped = None;
+                for (at, page) in document.pages.iter().enumerate() {
+                    let tab = ui.add(egui::Button::new(page.name.as_str()).selected(at == self.page_index).sense(egui::Sense::click_and_drag()));
+                    spans.push((tab.rect.left(), tab.rect.right()));
+                    // the menu's commands work on the shown page, so a right click shows the tab's page first
+                    if tab.clicked() || (tab.secondary_clicked() && at != self.page_index) {
+                        *action = Some(Action::Page(at));
+                    }
+                    if tab.drag_stopped_by(egui::PointerButton::Primary) {
+                        dropped = ui.ctx().pointer_latest_pos().map(|pointer| (at, pointer));
+                    }
+                    tab.context_menu(|ui| {
+                        for (name, enabled, command) in [
+                            ("Add a page", true, Action::PageAdd),
+                            ("Duplicate the page", true, Action::PageDuplicate),
+                            ("Rename the page", true, Action::PageRename),
+                            ("Move left", at > 0, Action::PageMove(-1)),
+                            ("Move right", at + 1 < count, Action::PageMove(1)),
+                            ("Delete the page", count > 1, Action::PageDelete),
+                        ] {
+                            if ui.add_enabled(enabled, egui::Button::new(name)).clicked() {
+                                *action = Some(command);
+                                ui.close();
+                            }
+                        }
+                    });
+                }
+                // let go over the strip (not somewhere else in the window)
+                if let Some((from, pointer)) = dropped.filter(|(_, pointer)| ui.max_rect().y_range().contains(pointer.y)) {
+                    if let Some(to) = tab_drop(&spans, from, pointer.x) {
+                        *action = Some(Action::PageReorder(from, to));
+                    }
+                }
+                if ui.button("+").on_hover_text("Add a page").clicked() {
+                    *action = Some(Action::PageAdd);
+                }
+            });
+        });
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -5664,7 +5888,16 @@ impl eframe::App for LayoutCraftApp {
                 ui.separator();
                 ui.label(&self.status);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(format!("zoom {:.0}%", zoom_percent(self.zoom, self.raster_scale)));
+                    if ui.add_enabled(self.texture.is_some(), egui::Button::new("Fit")).on_hover_text("Fit the page to the window (Ctrl+Shift+W)").clicked() {
+                        action = Some(Action::Fit);
+                    }
+                    let percent = zoom_percent(self.zoom, self.raster_scale);
+                    ui.label(format!("zoom {percent:.0}%"));
+                    ui.add_enabled_ui(self.texture.is_some(), |ui| {
+                        if let Some(level) = zoom_slider(ui, percent) {
+                            action = Some(Action::ZoomTo(level));
+                        }
+                    });
                     if self.dirty {
                         ui.colored_label(egui::Color32::from_rgb(255, 196, 0), "modified");
                     }
@@ -5672,6 +5905,12 @@ impl eframe::App for LayoutCraftApp {
             });
             ui.add_space(2.0);
         });
+
+        if !self.full_screen && self.texture.is_some() {
+            egui::Panel::bottom("page-tabs").show(ui, |ui| {
+                self.page_tabs(ui, &mut action);
+            });
+        }
 
         if !self.full_screen {
             egui::Panel::right("inspector")
@@ -6304,10 +6543,10 @@ impl eframe::App for LayoutCraftApp {
                         let doc_shape = self.doc_shape(&selected);
                         // a shape whose frame is a hairline under its picture (1-D masters) cannot be resized by the outline of its picture
                         let resizable = doc_shape.is_some_and(|shape| shape.group.is_none() && shape.rot.abs() < 1e-6)
-                            && Self::selection_scene_rect(shape) == Self::shape_scene_rect(shape);
+                            && self.selection_rect(&selected) == Some(Self::shape_scene_rect(shape));
                         let rect = self
                             .preview
-                            .unwrap_or_else(|| Self::selection_scene_rect(shape));
+                            .unwrap_or_else(|| self.selection_rect(&selected).unwrap_or_else(|| Self::selection_scene_rect(shape)));
                         let screen_rect = self.scene_rect_to_screen(rect, image_rect);
                         let turned = doc_shape.map_or(0.0, |shape| shape.rot.to_radians() as f32);
                         if turned.abs() > 1e-6 {
@@ -6332,12 +6571,8 @@ impl eframe::App for LayoutCraftApp {
                             );
                         }
                         if resizable && Self::handles_fit(screen_rect) {
-                            for (handle, hit) in Self::handle_rects(screen_rect) {
-                                if let Some(pointer) = response.hover_pos() {
-                                    if hit.expand(2.0).contains(pointer) {
-                                        hover_handle = Some(handle);
-                                    }
-                                }
+                            hover_handle = response.hover_pos().and_then(|pointer| Self::handle_at(screen_rect, pointer));
+                            for (_, hit) in Self::handle_rects(screen_rect) {
                                 painter.rect_filled(
                                     hit,
                                     1.0,
@@ -7066,6 +7301,7 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::PageDelete) => self.delete_page(&ctx),
             Some(Action::PageRename) => self.open_page_rename(),
             Some(Action::PageMove(direction)) => self.move_page(&ctx, direction),
+            Some(Action::PageReorder(from, to)) => self.run_page_op(&ctx, 4, from, to, "", "Moved page"),
             Some(Action::Reload) => {
                 if self.dirty {
                     self.pending_open = Some(PendingOpen::Reload);
@@ -7111,6 +7347,8 @@ impl eframe::App for LayoutCraftApp {
 enum Action {
     /// Reverse the ends of the selected connectors.
     ReverseEnds,
+    /// Move the page at the first position to the second.
+    PageReorder(usize, usize),
     /// Show the page at this percentage of actual size.
     ZoomTo(u32),
     DeleteGuide,
