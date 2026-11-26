@@ -115,8 +115,8 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 34 present, 19 partial,
-72 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 35 present, 20 partial,
+70 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
 ### 3.1 File / Backstage
@@ -154,8 +154,8 @@ these are row counts, not a count of every Visio button.
 | Font: family | S1 (Font group named) | p:fontFamily | missing | present | Engine op 13 formats a text range | P1 |
 | Font: size and Increase/Decrease size (Ctrl+Shift+> and <) | S1 | p:fontSize | missing | present | | P1 |
 | Font: Bold / Italic / Underline | S1 | p:bold | missing | present | Desktop has no text format keys | P1 |
-| Font: strikethrough, caps, sub/superscript, font colour | S1 for caps and sub/superscript; others unverified | p:strike | missing | partial | | P2 |
-| Paragraph: align left / centre / right / justify | S1 | p:alignL | missing | present | | P1 |
+| Font: strikethrough, caps, sub/superscript, font colour | S1 for caps and sub/superscript; others unverified | p:strike | partial | partial | Desktop: strikethrough of the whole text | P2 |
+| Paragraph: align left / centre / right / justify | S1 | p:alignL | present | present | Desktop: the whole text of the selected shapes | P1 |
 | Paragraph: vertical align top / middle / bottom | S1 | p:alignL (menu) | missing | partial | | P2 |
 | Paragraph: indent, line spacing | unverified | p:indLeft, p:lineSp | missing | present | | P3 |
 | Tools: Pointer Tool (Ctrl+1) | S5, S1 | - (default tool) | partial | partial | No button, Esc returns to select | P1 |

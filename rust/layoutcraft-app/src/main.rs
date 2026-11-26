@@ -468,6 +468,88 @@ mod shape_op_tests {
     }
 }
 
+/// (owner id, length in characters) of the text each of the shapes shows; shapes without text are left out.
+fn text_targets(engine: &Engine, page: usize, ids: &[String]) -> Vec<(String, usize)> {
+    ids.iter()
+        .filter_map(|id| {
+            let info: serde_json::Value = serde_json::from_str(&engine.text_info_json(page, id).ok()?).ok()?;
+            let length = info["text"].as_str()?.chars().count();
+            let owner = info["owner"].as_str()?.to_string();
+            (length > 0).then_some((owner, length))
+        })
+        .collect()
+}
+
+/// Format the whole text of the shapes (`Engine::edit` op 13 with `spec`, a JSON object of `cells` and / or `para`) as one
+/// undo step, all or nothing. Returns the number of texts changed.
+fn format_whole_text(engine: &mut Engine, page: usize, ids: &[String], spec: &serde_json::Value) -> Result<usize, String> {
+    let targets = text_targets(engine, page, ids);
+    if targets.is_empty() {
+        return Err("the selection has no text".to_string());
+    }
+    let depth = engine.undo_depth();
+    let result = targets.iter().try_for_each(|(owner, length)| {
+        let mut job = spec.clone();
+        job["start"] = serde_json::json!(0);
+        job["end"] = serde_json::json!(length);
+        engine.edit(page, 13, &format!("{owner}\n{job}"), 0.0, 0.0, 0.0, 0.0, 0)
+    });
+    engine.collapse_history(depth);
+    if result.is_err() && engine.undo_depth() > depth {
+        let _ = engine.undo();
+    }
+    result.map(|()| targets.len())
+}
+
+/// Whether the whole text of every one of the shapes that has text is struck through.
+fn all_struck(engine: &Engine, page: usize, ids: &[String]) -> bool {
+    let targets = text_targets(engine, page, ids);
+    !targets.is_empty()
+        && targets.iter().all(|(owner, length)| {
+            engine
+                .text_state_json(page, owner, 0, *length)
+                .ok()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
+                .is_some_and(|state| state["char"]["Strikethru"].as_str() == Some("1"))
+        })
+}
+
+#[cfg(test)]
+mod text_format_tests {
+    use super::{all_struck, format_whole_text};
+    use layoutcraft_engine::Engine;
+
+    fn two_boxes() -> (Engine, Vec<String>) {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let ids: Vec<String> = [1.0, 5.0].iter().map(|x| engine.draw(0, 0, *x, 1.0, x + 2.0, 3.0).unwrap()).collect();
+        (engine, ids)
+    }
+
+    #[test]
+    fn strikethrough_covers_every_text_in_one_undo_step() {
+        let (mut engine, ids) = two_boxes();
+        for id in &ids {
+            engine.edit(0, 8, &format!("{id}\nlabel"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+        }
+        assert!(!all_struck(&engine, 0, &ids));
+        let depth = engine.undo_depth();
+        assert_eq!(format_whole_text(&mut engine, 0, &ids, &serde_json::json!({ "cells": { "Strikethru": "1" } })), Ok(2));
+        assert!(all_struck(&engine, 0, &ids));
+        assert_eq!(engine.undo_depth(), depth + 1);
+        let _ = engine.undo();
+        assert!(!all_struck(&engine, 0, &ids[..1]) && !all_struck(&engine, 0, &ids[1..]));
+    }
+
+    #[test]
+    fn a_selection_without_text_is_reported_and_changes_nothing() {
+        let (mut engine, ids) = two_boxes();
+        let depth = engine.undo_depth();
+        assert!(format_whole_text(&mut engine, 0, &ids, &serde_json::json!({ "para": { "HorzAlign": "2" } })).is_err());
+        assert_eq!(engine.undo_depth(), depth);
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -1191,6 +1273,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// (selected ids, whether all their text is struck through) for the Strike button.
+    struck_cache: Option<(String, bool)>,
     page_setup_open: bool,
     check_open: bool,
     shapes_open: bool,
@@ -1300,6 +1384,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            struck_cache: None,
             page_setup_open: false,
             check_open: false,
             shapes_open: true,
@@ -1456,6 +1541,7 @@ impl LayoutCraftApp {
     fn build_page(&mut self, ctx: &egui::Context, reset_view: bool) {
         let _timer = Timer::new("build_page (whole)", 0.0);
         self.sites_cache.clear();
+        self.struck_cache = None;
         *self.routes_cache.borrow_mut() = None;
         let (Some(package), Some(document)) = (self.engine.package.as_ref(), self.engine.document.as_ref())
         else {
@@ -3072,7 +3158,7 @@ impl LayoutCraftApp {
             }
             return;
         }
-        if matches!(id, "p:bold" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor") {
+        if matches!(id, "p:bold" | "p:strike" | "p:alignL" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor") {
             self.ribbon_format_controls(ui, id, action);
             return;
         }
@@ -3136,6 +3222,20 @@ impl LayoutCraftApp {
                     };
                     if ui.add_enabled(enabled, egui::Button::new(text).selected(on)).on_hover_text(key).clicked() {
                         *action = Some(Action::StyleSelected(serde_json::json!({ key: !on }).to_string()));
+                    }
+                }
+            }
+            "p:strike" => {
+                let on = enabled && self.selection_struck();
+                if ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("Strike").strikethrough()).selected(on)).on_hover_text("Strikethrough of the whole text").clicked() {
+                    *action = Some(Action::FormatText(serde_json::json!({ "cells": { "Strikethru": if on { "0" } else { "1" } } })));
+                }
+            }
+            "p:alignL" => {
+                let current = primary.as_ref().and_then(|shape| shape.align.clone());
+                for (label, model, cell, tip) in [("Left", "left", "0", "Align text left"), ("Centre", "center", "1", "Centre text"), ("Right", "right", "2", "Align text right"), ("Justify", "justify", "3", "Justify text")] {
+                    if ui.add_enabled(enabled, egui::Button::new(label).selected(current.as_deref() == Some(model))).on_hover_text(tip).clicked() {
+                        *action = Some(Action::FormatText(serde_json::json!({ "para": { "HorzAlign": cell } })));
                     }
                 }
             }
@@ -3209,6 +3309,32 @@ impl LayoutCraftApp {
                 });
             }
         }
+    }
+
+    /// `all_struck` of the selection, remembered until the page is rebuilt or the selection changes (it reads the file's XML).
+    fn selection_struck(&mut self) -> bool {
+        let ids = self.all_selected();
+        let key = ids.join("\n");
+        match &self.struck_cache {
+            Some((known, struck)) if *known == key => *struck,
+            _ => {
+                let struck = all_struck(&self.engine, self.page_index, &ids);
+                self.struck_cache = Some((key, struck));
+                struck
+            }
+        }
+    }
+
+    /// Format the whole text of every selected shape (one undo step).
+    fn format_selected_text(&mut self, ctx: &egui::Context, spec: &serde_json::Value) {
+        let ids = self.all_selected();
+        let Some(primary) = self.selected.clone() else {
+            self.status = "Select a shape first.".to_string();
+            return;
+        };
+        let page = self.page_index;
+        let result = format_whole_text(&mut self.engine, page, &ids, spec).map(|_| ());
+        self.finish_edit(ctx, result, "Formatted text", Some(primary));
     }
 
     /// Apply an `Engine::edit` op 10 style JSON to every selected shape (one undo step).
@@ -5169,6 +5295,7 @@ impl eframe::App for LayoutCraftApp {
                 }
             }
             Some(Action::StyleSelected(ref json)) => self.style_selected(&ctx, json),
+            Some(Action::FormatText(ref spec)) => self.format_selected_text(&ctx, spec),
             Some(Action::Paste) => self.paste_clipboard(&ctx),
             Some(Action::Duplicate) => {
                 self.copy_selected();
@@ -5218,6 +5345,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Format the whole text of the selected shapes: `cells` and / or `para` of `Engine::edit` op 13.
+    FormatText(serde_json::Value),
     Load,
     OpenDialog,
     Reload,
