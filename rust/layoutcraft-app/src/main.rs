@@ -376,6 +376,10 @@ enum ViewKey {
     Find,
     Hyperlink,
     FullScreen,
+    SnapDialog,
+    Help,
+    ZoomIn,
+    ZoomOut,
 }
 
 /// Tool and view shortcuts for features the app has, with Visio's documented keys (`docs/43-ui-parity.md` 4.1). The draw
@@ -392,7 +396,15 @@ const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
     (egui::Modifiers::CTRL, egui::Key::F, ViewKey::Find),
     (egui::Modifiers::CTRL, egui::Key::K, ViewKey::Hyperlink),
     (egui::Modifiers::NONE, egui::Key::F5, ViewKey::FullScreen),
+    (egui::Modifiers::ALT, egui::Key::F9, ViewKey::SnapDialog),
+    // Ctrl+F1 (collapse the ribbon) is taken before these keys are read
+    (egui::Modifiers::NONE, egui::Key::F1, ViewKey::Help),
+    // the Shift binding first: egui ignores an extra Shift
+    (ALT_SHIFT, egui::Key::F6, ViewKey::ZoomOut),
+    (egui::Modifiers::ALT, egui::Key::F6, ViewKey::ZoomIn),
 ];
+
+const ALT_SHIFT: egui::Modifiers = egui::Modifiers { alt: true, ctrl: false, shift: true, mac_cmd: false, command: false };
 
 /// Takes the first tool or view shortcut pressed in this frame out of the input.
 fn consume_view_key(input: &mut egui::InputState) -> Option<ViewKey> {
@@ -430,6 +442,20 @@ mod view_key_tests {
         assert!(press(Key::F, true, false) == Some(ViewKey::Find));
         assert!(press(Key::K, true, false) == Some(ViewKey::Hyperlink));
         assert!(press(Key::F5, false, false) == Some(ViewKey::FullScreen));
+        // F9 opens the snap window only with Alt
+        assert!(press(Key::F9, false, false).is_none());
+        let mut input = egui::InputState::default();
+        input.events.push(egui::Event::Key { key: Key::F9, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::ALT });
+        assert!(consume_view_key(&mut input) == Some(ViewKey::SnapDialog));
+        let alt = |key: Key, shift: bool| {
+            let mut input = egui::InputState::default();
+            input.events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers { shift, ..Modifiers::ALT } });
+            consume_view_key(&mut input)
+        };
+        assert!(alt(Key::F6, false) == Some(ViewKey::ZoomIn) && alt(Key::F6, true) == Some(ViewKey::ZoomOut));
+        assert!(press(Key::F6, false, false).is_none());
+        // F1 is help; Ctrl+F1 belongs to the ribbon
+        assert!(press(Key::F1, false, false) == Some(ViewKey::Help) && press(Key::F1, true, false).is_none());
     }
 }
 
@@ -1854,6 +1880,74 @@ mod stencil_accordion_tests {
     }
 }
 
+/// A move held to one axis (Shift): the axis the pointer has gone further along (`raw`) keeps its snapped distance and
+/// snap line, the other axis does not move.
+fn axis_locked(raw: egui::Vec2, snapped: egui::Vec2, lines: (Option<f32>, Option<f32>)) -> (egui::Vec2, (Option<f32>, Option<f32>)) {
+    if raw.x.abs() >= raw.y.abs() {
+        (egui::vec2(snapped.x, 0.0), (lines.0, None))
+    } else {
+        (egui::vec2(0.0, snapped.y), (None, lines.1))
+    }
+}
+
+#[cfg(test)]
+mod axis_lock_tests {
+    use super::axis_locked;
+    use eframe::egui::vec2;
+
+    #[test]
+    fn the_longer_direction_wins_and_only_its_snap_line_stays() {
+        // mostly sideways: no vertical movement, even when snapping would have pulled it
+        assert_eq!(axis_locked(vec2(-40.0, 9.0), vec2(-38.0, 12.0), (Some(1.0), Some(2.0))), (vec2(-38.0, 0.0), (Some(1.0), None)));
+        assert_eq!(axis_locked(vec2(5.0, 30.0), vec2(8.0, 32.0), (Some(1.0), Some(2.0))), (vec2(0.0, 32.0), (None, Some(2.0))));
+    }
+}
+
+/// Whether a click or a band drag with these keys held adds to (or takes out of) the selection: Shift or Ctrl.
+fn adds_to_selection(modifiers: egui::Modifiers) -> bool {
+    modifiers.shift || modifiers.command
+}
+
+#[cfg(test)]
+mod selection_modifier_tests {
+    use super::adds_to_selection;
+    use eframe::egui::Modifiers;
+
+    #[test]
+    fn shift_and_ctrl_add_to_the_selection_and_alt_does_not() {
+        assert!(adds_to_selection(Modifiers::SHIFT) && adds_to_selection(Modifiers { ctrl: true, command: true, ..Modifiers::NONE }));
+        assert!(!adds_to_selection(Modifiers::NONE) && !adds_to_selection(Modifiers::ALT));
+    }
+}
+
+/// In the full-screen view, Page Down and Page Up alone change the page: +1 or -1.
+fn consume_full_screen_page(input: &mut egui::InputState) -> Option<i32> {
+    if input.consume_key(egui::Modifiers::NONE, egui::Key::PageDown) {
+        Some(1)
+    } else {
+        input.consume_key(egui::Modifiers::NONE, egui::Key::PageUp).then_some(-1)
+    }
+}
+
+#[cfg(test)]
+mod full_screen_page_tests {
+    use super::consume_full_screen_page;
+    use eframe::egui::{self, Key, Modifiers};
+
+    #[test]
+    fn page_keys_alone_step_through_the_pages() {
+        let press = |key: Key, modifiers: Modifiers| {
+            let mut input = egui::InputState::default();
+            input.events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
+            consume_full_screen_page(&mut input)
+        };
+        assert_eq!((press(Key::PageDown, Modifiers::NONE), press(Key::PageUp, Modifiers::NONE)), (Some(1), Some(-1)));
+        // Ctrl+Page Down is the ordinary page key, read elsewhere
+        assert_eq!(press(Key::PageDown, Modifiers { ctrl: true, command: true, ..Modifiers::NONE }), None);
+        assert_eq!(press(Key::ArrowDown, Modifiers::NONE), None);
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -2591,6 +2685,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Snap and Attach window is open.
+    snap_open: bool,
     /// The Shapes panel is narrowed to a column.
     shapes_minimised: bool,
     /// The one stencil of the Shapes panel that is open (its engine slot).
@@ -2682,6 +2778,8 @@ struct LayoutCraftApp {
     ribbon_textures: BTreeMap<String, egui::TextureHandle>,
     /// Shift was held at the start of the frame (read once per frame).
     shift_down: bool,
+    /// Shift or Ctrl is held: clicks and bands add to the selection.
+    add_down: bool,
     status: String,
 }
 
@@ -2742,6 +2840,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            snap_open: false,
             shapes_minimised: false,
             open_stencil_shown: None,
             sheet_pane: None,
@@ -2816,6 +2915,7 @@ impl LayoutCraftApp {
             mcp_message: String::new(),
             ribbon_textures: BTreeMap::new(),
             shift_down: false,
+            add_down: false,
             status: "Open a Visio drawing (.vsdx, or the older .vsd and .vdx) or drop one on the window.".to_string(),
         };
         if let Some(path) = initial {
@@ -3588,7 +3688,7 @@ impl LayoutCraftApp {
 
     fn begin_pointer(&mut self, pointer: egui::Pos2, image_rect: egui::Rect) {
         let scene_pointer = self.screen_to_scene(pointer, image_rect);
-        let shift = self.shift_down;
+        let shift = self.add_down;
         if self.tool == Tool::Hand || self.space_down {
             // the Hand tool and Space + drag move the view and touch nothing else
             self.drag = None;
@@ -3787,7 +3887,12 @@ impl LayoutCraftApp {
                 start_rect
             }
             DragMode::Move => {
-                let (delta, found) = self.snapped_move(drag.start_rect, pointer - drag.start_pointer);
+                let raw = pointer - drag.start_pointer;
+                let (mut delta, mut found) = self.snapped_move(drag.start_rect, raw);
+                // Shift held during the drag keeps the move straight
+                if self.shift_down {
+                    (delta, found) = axis_locked(raw, delta, found);
+                }
                 guides = found;
                 egui::Rect::from_min_size(drag.start_rect.min + delta, drag.start_rect.size())
             }
@@ -3930,7 +4035,7 @@ impl LayoutCraftApp {
             .collect();
         let found = enclosed_ids(&candidates, band);
         let mut chosen: Vec<String> = self.all_selected();
-        if !self.shift_down {
+        if !self.add_down {
             chosen.clear();
         }
         for id in found {
@@ -6015,6 +6120,36 @@ impl LayoutCraftApp {
         }
     }
 
+    /// The Snap and Attach window: what dragged shapes snap to, and the grid. Changes apply at once; Esc closes.
+    fn draw_snap_window(&mut self, ctx: &egui::Context) {
+        if !self.snap_open {
+            return;
+        }
+        let mut open = true;
+        egui::Window::new("Snap and Attach").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+            ui.label("Dragged and drawn shapes snap to:");
+            ui.checkbox(&mut self.snap_grid, "The grid");
+            ui.checkbox(&mut self.snap_shapes, "Edges and centres of other shapes");
+            ui.checkbox(&mut self.snap_guides, "Ruler guides");
+            ui.separator();
+            ui.checkbox(&mut self.show_grid, "Show the grid");
+            ui.horizontal(|ui| {
+                let label = ui.label("Grid spacing");
+                egui::ComboBox::from_id_salt("snap-grid-step")
+                    .selected_text(format!("{} in", self.grid_step))
+                    .show_ui(ui, |ui| {
+                        for step in [0.125, 0.25, 0.5, 1.0] {
+                            ui.selectable_value(&mut self.grid_step, step, format!("{step} in"));
+                        }
+                    })
+                    .response
+                    .labelled_by(label.id);
+            });
+            ui.label(egui::RichText::new("Connectors always attach to the shape or connection point they are dropped on.").small());
+        });
+        self.snap_open = open && !(!ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -6152,6 +6287,7 @@ impl eframe::App for LayoutCraftApp {
         self.apply_raster(&ctx);
         self.settle_raster(&ctx);
         self.shift_down = ctx.input(|input| input.modifiers.shift);
+        self.add_down = ctx.input(|input| adds_to_selection(input.modifiers));
         let mut action: Option<Action> = None;
         if let Some(backwards) = self.tab_cycle.take() {
             self.cycle_shape(backwards);
@@ -6261,6 +6397,10 @@ impl eframe::App for LayoutCraftApp {
                 Some(ViewKey::Find) => action = Some(Action::Find),
                 Some(ViewKey::Hyperlink) => action = Some(Action::Hyperlink),
                 Some(ViewKey::FullScreen) => action = Some(Action::FullScreen),
+                Some(ViewKey::SnapDialog) => self.snap_open = !self.snap_open,
+                Some(ViewKey::Help) => action = Some(Action::HelpShortcuts),
+                Some(ViewKey::ZoomIn) => action = Some(Action::ZoomIn),
+                Some(ViewKey::ZoomOut) => action = Some(Action::ZoomOut),
                 None => {}
             }
             if self.selected.is_some() {
@@ -6275,6 +6415,14 @@ impl eframe::App for LayoutCraftApp {
                 });
                 if let Some((dx, dy)) = nudge {
                     self.nudge_selected(&ctx, dx, dy);
+                }
+            }
+            if self.full_screen {
+                match ctx.input_mut(consume_full_screen_page) {
+                    // `go_to_page` keeps the number inside the drawing
+                    Some(1) => action = Some(Action::Page(self.page_index + 1)),
+                    Some(_) => action = Some(Action::Page(self.page_index.saturating_sub(1))),
+                    None => {}
                 }
             }
             if self.full_screen && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
@@ -6848,6 +6996,10 @@ impl eframe::App for LayoutCraftApp {
                         ui.checkbox(&mut self.snap_grid, "Snap to grid");
                         ui.checkbox(&mut self.snap_shapes, "Snap to shapes");
                         ui.checkbox(&mut self.snap_guides, "Snap to guides");
+                        if ui.button("Snap and Attach...").clicked() {
+                            self.snap_open = true;
+                            ui.close();
+                        }
                     }
                 });
                 let mut dropped_now = false;
@@ -6892,7 +7044,7 @@ impl eframe::App for LayoutCraftApp {
                         dropped_now = self.click_connect_arrow(&ctx, pointer, image_rect);
                     }
                 }
-                if response.clicked() && self.drag.is_none() && !self.panning && self.shift_down && !dropped_now {
+                if response.clicked() && self.drag.is_none() && !self.panning && self.add_down && !dropped_now {
                     if let Some(pointer) = response.interact_pointer_pos() {
                         if image_rect.contains(pointer) {
                             let scene_pointer = self.screen_to_scene(pointer, image_rect);
@@ -7556,6 +7708,7 @@ impl eframe::App for LayoutCraftApp {
         }
         self.draw_find(&ctx);
         self.draw_links(&ctx);
+        self.draw_snap_window(&ctx);
         self.draw_sheet_pane(&ctx);
         self.draw_data_pane(&ctx);
         if self.help_shortcuts_open {
