@@ -115,8 +115,8 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 36 present, 20 partial,
-69 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 37 present, 20 partial,
+68 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
 ### 3.1 File / Backstage
@@ -187,7 +187,7 @@ these are row counts, not a count of every Visio button.
 | Editing: Select (Area Select, Lasso Select, Select All, Select by Type) | S19 | - | partial | partial | Rectangle drag and Ctrl+A exist; lasso and by-type missing | P1 |
 | Editing: Layers > Assign to Layer, Layer Properties | S22 | layersBtn | partial | present | Desktop in inspector only | P2 |
 | Editing: Change Shape | unverified | changeShapeBtn | partial | present | Desktop: stencil context menu "Replace the selected shape" | P2 |
-| Editing: Find | unverified | findBtn | missing | present | | P2 |
+| Editing: Find | unverified | findBtn | present | present | Desktop: finds on the current page; no replace | P2 |
 | Editing: Styles | unverified | stylesBtn | missing | present | | P2 |
 | Duplicate (Ctrl+D is a web shortcut) | S1 | dup | present | present | Not a Visio Home button (unverified) | P1 |
 | Delete | S1 (Delete key) | del | present | present | | P0 |
@@ -383,10 +383,10 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Edit text stop | Esc | Esc | Esc / Ctrl+Enter | same |
 | Delete | Delete | Delete or Backspace | same | same |
 | Save | Ctrl+S (assumed standard, not in S1) | Ctrl+S (saves a copy) | Ctrl+S | partial |
-| Find | Ctrl+F (web `findBtn`) | none | Ctrl+F | none (desktop) |
+| Find | Ctrl+F (web `findBtn`) | Ctrl+F | Ctrl+F | same on desktop |
 | Hyperlink | Ctrl+K (unverified in S1) | none | Ctrl+K | none (desktop) |
 
-Count of the 41 rows above: same 16, diff 2, partial 2, none 21. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 17, diff 2, partial 2, none 20. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 

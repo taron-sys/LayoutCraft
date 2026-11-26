@@ -321,6 +321,7 @@ enum ViewKey {
     FitPage,
     NextPage,
     PreviousPage,
+    Find,
 }
 
 /// Tool and view shortcuts for features the app has, with Visio's documented keys (`docs/43-ui-parity.md` 4.1). The draw
@@ -334,6 +335,7 @@ const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
     (CTRL_SHIFT, egui::Key::W, ViewKey::FitPage),
     (egui::Modifiers::CTRL, egui::Key::PageDown, ViewKey::NextPage),
     (egui::Modifiers::CTRL, egui::Key::PageUp, ViewKey::PreviousPage),
+    (egui::Modifiers::CTRL, egui::Key::F, ViewKey::Find),
 ];
 
 /// Takes the first tool or view shortcut pressed in this frame out of the input.
@@ -368,6 +370,8 @@ mod view_key_tests {
         assert!(press(Key::W, true, false).is_none());
         assert!(press(Key::PageDown, true, false) == Some(ViewKey::NextPage));
         assert!(press(Key::PageUp, true, false) == Some(ViewKey::PreviousPage));
+        // Ctrl+Shift+F is "bring to front" and is taken by the arrange keys first
+        assert!(press(Key::F, true, false) == Some(ViewKey::Find));
     }
 }
 
@@ -582,6 +586,55 @@ mod paragraph_tests {
         // a left indent to the right of the margin, and a relative (negative) spacing wider than single
         assert!(cell("IndLeft") > 0.0);
         assert!(cell("SpLine") < -1.0);
+    }
+}
+
+/// The state of the Find window.
+#[derive(Default)]
+struct Find {
+    text: String,
+    match_case: bool,
+    /// (page, position in the page's shape list) of the last match shown.
+    last: Option<(usize, usize)>,
+    status: String,
+    /// Put the keyboard focus in the text field on the next frame.
+    focus: bool,
+}
+
+/// Search the texts of a page's shapes (one entry per shape, in page order). Returns how many shapes match and the first
+/// match after position `after`, starting again at the top past the end.
+fn find_match(texts: &[String], needle: &str, match_case: bool, after: Option<usize>) -> (usize, Option<usize>) {
+    if needle.is_empty() {
+        return (0, None);
+    }
+    let fold = |text: &str| if match_case { text.to_string() } else { text.to_lowercase() };
+    let needle = fold(needle);
+    let matches: Vec<usize> = texts.iter().enumerate().filter(|(_, text)| fold(text).contains(&needle)).map(|(at, _)| at).collect();
+    let next = matches.iter().copied().find(|at| after.is_none_or(|last| *at > last)).or_else(|| matches.first().copied());
+    (matches.len(), next)
+}
+
+#[cfg(test)]
+mod find_tests {
+    use super::find_match;
+
+    fn texts() -> Vec<String> {
+        ["Router", "switch", "", "Core ROUTER"].iter().map(|text| text.to_string()).collect()
+    }
+
+    #[test]
+    fn find_next_walks_the_matches_and_starts_again() {
+        let (count, first) = find_match(&texts(), "router", false, None);
+        assert_eq!((count, first), (2, Some(0)));
+        assert_eq!(find_match(&texts(), "router", false, first).1, Some(3));
+        assert_eq!(find_match(&texts(), "router", false, Some(3)).1, Some(0));
+    }
+
+    #[test]
+    fn match_case_and_empty_or_missing_text() {
+        assert_eq!(find_match(&texts(), "ROUTER", true, None), (1, Some(3)));
+        assert_eq!(find_match(&texts(), "", false, None), (0, None));
+        assert_eq!(find_match(&texts(), "firewall", false, None), (0, None));
     }
 }
 
@@ -1308,6 +1361,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Find window, while it is open.
+    find: Option<Find>,
     /// (selected ids, whether all their text is struck through) for the Strike button.
     struck_cache: Option<(String, bool)>,
     page_setup_open: bool,
@@ -1419,6 +1474,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            find: None,
             struck_cache: None,
             page_setup_open: false,
             check_open: false,
@@ -3446,6 +3502,7 @@ impl LayoutCraftApp {
             N::OpenFile => Action::OpenDialog,
             N::DocProps => Action::DocProps,
             N::HelpShortcuts => Action::HelpShortcuts,
+            N::Find => Action::Find,
             N::HelpAbout => Action::HelpAbout,
             N::HelpMcp => Action::HelpMcp,
             N::PageSetup => Action::PageSetup,
@@ -3731,6 +3788,91 @@ impl LayoutCraftApp {
         result
     }
 
+    /// Open the Find window (or return the keyboard focus to it).
+    fn open_find(&mut self) {
+        self.find.get_or_insert_with(Find::default).focus = true;
+    }
+
+    /// Select the next shape of the current page whose text contains the Find window's text. Shapes on hidden layers are
+    /// not searched; a match inside a group selects the group.
+    fn find_next(&mut self) {
+        let Some(mut find) = self.find.take() else {
+            return;
+        };
+        let page = self.page_index;
+        let shapes: Vec<(String, String)> = self
+            .engine
+            .document
+            .as_ref()
+            .and_then(|document| document.pages.get(page))
+            .map(|page| {
+                page.shapes
+                    .iter()
+                    .filter(|shape| !shape.layer_hidden)
+                    .filter_map(|shape| {
+                        let mut text = shape.label.clone();
+                        for sub in &shape.sub_texts {
+                            text.push('\n');
+                            text.push_str(&sub.text);
+                        }
+                        Some((shape.visio_id.clone()?, text))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let texts: Vec<String> = shapes.iter().map(|(_, text)| text.clone()).collect();
+        let after = find.last.filter(|(last_page, _)| *last_page == page).map(|(_, at)| at);
+        let (count, next) = find_match(&texts, &find.text, find.match_case, after);
+        find.status = match (find.text.is_empty(), count) {
+            (true, _) => "Type the text to find.".to_string(),
+            (false, 0) => "Not found on this page.".to_string(),
+            (false, 1) => "1 shape matches.".to_string(),
+            (false, count) => format!("{count} shapes match."),
+        };
+        if let Some(at) = next {
+            find.last = Some((page, at));
+            self.selected = Some(self.group_root(&shapes[at].0));
+            self.extra_selected.clear();
+        }
+        self.find = Some(find);
+    }
+
+    /// The Find window: Enter or "Find next" selects the next match, Esc closes.
+    fn draw_find(&mut self, ctx: &egui::Context) {
+        let Some(find) = self.find.as_mut() else {
+            return;
+        };
+        let mut open = true;
+        let mut search = false;
+        egui::Window::new("Find").open(&mut open).collapsible(false).show(ctx, |ui| {
+            let label = ui.label("Text to find on this page");
+            let edit = ui.text_edit_singleline(&mut find.text).labelled_by(label.id);
+            if std::mem::take(&mut find.focus) {
+                edit.request_focus();
+            }
+            if edit.changed() {
+                find.last = None;
+                find.status.clear();
+            }
+            if edit.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                search = true;
+                edit.request_focus();
+            }
+            if ui.checkbox(&mut find.match_case, "Match case").changed() {
+                find.last = None;
+            }
+            if ui.button("Find next").clicked() {
+                search = true;
+            }
+            ui.label(&find.status);
+        });
+        if !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.find = None;
+        } else if search {
+            self.find_next();
+        }
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -3945,6 +4087,7 @@ impl eframe::App for LayoutCraftApp {
                 Some(ViewKey::FitPage) => action = Some(Action::Fit),
                 Some(ViewKey::NextPage) => action = Some(Action::Page(self.page_index + 1)),
                 Some(ViewKey::PreviousPage) => action = Some(Action::Page(self.page_index.saturating_sub(1))),
+                Some(ViewKey::Find) => action = Some(Action::Find),
                 None => {}
             }
             if self.selected.is_some() {
@@ -5179,6 +5322,7 @@ impl eframe::App for LayoutCraftApp {
             }
             self.comments_open = open;
         }
+        self.draw_find(&ctx);
         if self.help_shortcuts_open {
             let mut open = true;
             egui::Window::new("Keyboard shortcuts").open(&mut open).collapsible(false).show(&ctx, |ui| {
@@ -5315,6 +5459,7 @@ impl eframe::App for LayoutCraftApp {
             }
             Some(Action::DocProps) => self.doc_props_open = true,
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
+            Some(Action::Find) => self.open_find(),
             Some(Action::HelpAbout) => self.help_about_open = true,
             Some(Action::HelpMcp) => self.mcp_open = true,
             Some(Action::PageSetup) => {
@@ -5408,6 +5553,7 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    Find,
     /// Format the whole text of the selected shapes: `cells` and / or `para` of `Engine::edit` op 13.
     FormatText(serde_json::Value),
     Load,
