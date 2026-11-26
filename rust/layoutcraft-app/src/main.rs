@@ -6685,6 +6685,10 @@ impl eframe::App for LayoutCraftApp {
                     if ui.add_enabled(self.texture.is_some(), egui::Button::new("Fit")).on_hover_text("Fit the page to the window (Ctrl+Shift+W)").clicked() {
                         action = Some(Action::Fit);
                     }
+                    let full_screen = if self.full_screen { "Leave Full Screen" } else { "Full Screen" };
+                    if ui.add_enabled(self.texture.is_some() || self.full_screen, egui::Button::new(full_screen)).on_hover_text("F5").clicked() {
+                        action = Some(Action::FullScreen);
+                    }
                     let percent = zoom_percent(self.zoom, self.raster_scale);
                     ui.label(format!("zoom {percent:.0}%"));
                     ui.add_enabled_ui(self.texture.is_some(), |ui| {
