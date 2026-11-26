@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui;
 use layoutcraft_engine::Engine;
-use layoutcraft_model::{Document, Shape};
+use layoutcraft_model::{DataRow, Document, Shape};
 use layoutcraft_render::{first_font_name, font_substitution, installed_font_families, render_region_rgba, render_rgba, scene_font_substitutions, scene_from_document_with_media, FontSubstitution, Scene, SceneItem, SceneShape};
 use layoutcraft_vsdx::{
     patch_page_cells, ShapeCellPatch,
@@ -973,6 +973,83 @@ mod link_edit_tests {
     }
 }
 
+/// The Shape Data window: a working copy of the selected shape's rows, read again after every edit or selection change.
+#[derive(Default)]
+struct DataPane {
+    /// (page, shape, undo depth) the rows were read at.
+    key: Option<(usize, String, usize)>,
+    rows: Vec<DataRow>,
+    new_label: String,
+}
+
+/// Write one Shape Data row (`Engine::edit` op 17; the row's own name says which). All fields are sent as they are.
+fn write_data_row(engine: &mut Engine, page: usize, shape: &str, row: &DataRow) -> Result<(), String> {
+    let sort_key = row.extra.get("sortKey").and_then(|key| key.as_str()).unwrap_or("");
+    let json = serde_json::json!({
+        "name": row.name, "label": row.label, "value": row.value, "prompt": row.prompt, "format": row.format,
+        "type": row.r#type, "invisible": row.invisible != 0, "sortKey": sort_key,
+    });
+    engine.edit(page, 17, &format!("{shape}\n{json}"), 0.0, 0.0, 0.0, 0.0, 0)
+}
+
+/// A new text row for `label`, with a row name made from it that no other row has (`web/shell.js` `dataAdd`).
+fn new_data_row(label: &str, rows: &[DataRow]) -> Option<DataRow> {
+    let label = label.trim();
+    if label.is_empty() {
+        return None;
+    }
+    let mut base: String = label.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
+    if base.starts_with(|c: char| c.is_ascii_digit()) {
+        base = format!("Row_{base}");
+    }
+    let taken = |name: &str| rows.iter().any(|row| row.name.eq_ignore_ascii_case(name));
+    let mut name = base.clone();
+    let mut number = 2;
+    while taken(&name) {
+        name = format!("{base}_{number}");
+        number += 1;
+    }
+    serde_json::from_value(serde_json::json!({ "name": name, "label": label })).ok()
+}
+
+#[cfg(test)]
+mod data_row_tests {
+    use super::{new_data_row, write_data_row};
+    use layoutcraft_engine::Engine;
+    use layoutcraft_model::DataRow;
+
+    fn rows(engine: &Engine, id: &str) -> Vec<DataRow> {
+        let page = &engine.document().unwrap().pages[0];
+        page.shapes.iter().find(|shape| shape.visio_id.as_deref() == Some(id)).unwrap().data.clone()
+    }
+
+    #[test]
+    fn a_new_row_gets_a_free_name() {
+        let first = new_data_row("Serial no.", &[]).unwrap();
+        assert!(first.name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
+        assert_ne!(new_data_row("Serial no.", std::slice::from_ref(&first)).unwrap().name, first.name);
+        assert!(new_data_row("1st", &[]).unwrap().name.starts_with(|c: char| c.is_ascii_alphabetic()));
+        assert!(new_data_row("  ", &[]).is_none());
+    }
+
+    #[test]
+    fn editing_a_value_keeps_the_row_hidden_and_a_row_can_be_removed() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let id = engine.draw(0, 0, 1.0, 1.0, 3.0, 3.0).unwrap();
+        let mut row = new_data_row("Owner", &[]).unwrap();
+        row.invisible = 1;
+        write_data_row(&mut engine, 0, &id, &row).unwrap();
+        let mut row = rows(&engine, &id).remove(0);
+        row.value = "Network team".to_string();
+        write_data_row(&mut engine, 0, &id, &row).unwrap();
+        let read = rows(&engine, &id);
+        assert_eq!((read.len(), read[0].value.as_str(), read[0].invisible != 0), (1, "Network team", true));
+        engine.edit(0, 18, &format!("{id}\n{}", read[0].name), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+        assert!(rows(&engine, &id).is_empty());
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -1708,6 +1785,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Shape Data window, while it is open.
+    data_pane: Option<DataPane>,
     /// The Hyperlink window, while it is open.
     link_draft: Option<LinkDraft>,
     /// The Themes menus: apply to every page instead of the shown one; and the gallery, until the page is rebuilt.
@@ -1828,6 +1907,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            data_pane: None,
             link_draft: None,
             theme_all_pages: false,
             theme_cache: None,
@@ -3895,6 +3975,7 @@ impl LayoutCraftApp {
             N::DocProps => Action::DocProps,
             N::HelpShortcuts => Action::HelpShortcuts,
             N::Hyperlink => Action::Hyperlink,
+            N::ShapeData => Action::ShapeData,
             N::Find => Action::Find,
             N::HelpAbout => Action::HelpAbout,
             N::HelpMcp => Action::HelpMcp,
@@ -4530,6 +4611,107 @@ impl LayoutCraftApp {
                 draft.error = error;
                 self.link_draft = Some(draft);
             }
+        }
+    }
+
+    /// The Shape Data window follows the selection. A field is written when it is left (or Enter is pressed) with a new
+    /// content; each write is one undo step.
+    fn draw_data_pane(&mut self, ctx: &egui::Context) {
+        let Some(mut pane) = self.data_pane.take() else {
+            return;
+        };
+        let page = self.page_index;
+        let selection = self.all_selected();
+        let shape = match &selection[..] {
+            [one] => Some(one.clone()),
+            _ => None,
+        };
+        let key = shape.as_ref().map(|shape| (page, shape.clone(), self.engine.undo_depth()));
+        if pane.key != key {
+            pane.rows = shape.as_deref().and_then(|id| self.doc_shape(id)).map(|shape| shape.data.clone()).unwrap_or_default();
+            pane.key = key;
+        }
+        let mut open = true;
+        // the row to write, or the name of the row to remove
+        let mut write: Option<DataRow> = None;
+        let mut remove: Option<String> = None;
+        egui::Window::new("Shape Fields").open(&mut open).collapsible(true).default_width(360.0).show(ctx, |ui| {
+            if shape.is_none() {
+                ui.label("Select one shape to see its fields.");
+                return;
+            }
+            if pane.rows.is_empty() {
+                ui.label("This shape has no fields.");
+            }
+            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                egui::Grid::new("shape-data").num_columns(3).show(ui, |ui| {
+                    for row in &mut pane.rows {
+                        let title = if row.label.is_empty() { row.name.clone() } else { row.label.clone() };
+                        let shown = if row.invisible != 0 { format!("{title} (hidden)") } else { title.clone() };
+                        let label = ui.label(shown);
+                        if !row.prompt.is_empty() {
+                            label.clone().on_hover_text(&row.prompt);
+                        }
+                        if row.r#type == 3 {
+                            let mut on = row.value == "1" || row.value.eq_ignore_ascii_case("true");
+                            if ui.checkbox(&mut on, "Yes").labelled_by(label.id).changed() {
+                                row.value = if on { "1" } else { "0" }.to_string();
+                                write = Some(row.clone());
+                            }
+                        } else if row.r#type == 1 || row.r#type == 4 {
+                            let before = row.value.clone();
+                            egui::ComboBox::from_id_salt(("data", &row.name)).selected_text(row.value.clone()).show_ui(ui, |ui| {
+                                for item in row.format.split(';').filter(|item| !item.is_empty()) {
+                                    ui.selectable_value(&mut row.value, item.to_string(), item);
+                                }
+                            })
+                            .response
+                            .labelled_by(label.id);
+                            if row.value != before {
+                                write = Some(row.clone());
+                            }
+                        } else if ui.text_edit_singleline(&mut row.value).labelled_by(label.id).lost_focus() {
+                            write = Some(row.clone());
+                        }
+                        if ui.button("Remove").on_hover_text(format!("Remove the field {title}")).clicked() {
+                            remove = Some(row.name.clone());
+                        }
+                        ui.end_row();
+                    }
+                });
+            });
+            ui.separator();
+            ui.horizontal(|ui| {
+                let label = ui.label("New field");
+                let edit = ui.text_edit_singleline(&mut pane.new_label).labelled_by(label.id);
+                let entered = edit.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                if ui.button("Add").clicked() || entered {
+                    write = new_data_row(&pane.new_label, &pane.rows);
+                    if write.is_some() {
+                        pane.new_label.clear();
+                    }
+                }
+            });
+        });
+        if let Some(shape) = shape {
+            // leaving a field without a change writes nothing
+            let write = write.filter(|row| {
+                let before = self.doc_shape(&shape).and_then(|shape| shape.data.iter().find(|old| old.name == row.name));
+                before.is_none_or(|old| old.value != row.value)
+            });
+            let result = if let Some(name) = remove {
+                Some(self.engine.edit(page, 18, &format!("{shape}\n{name}"), 0.0, 0.0, 0.0, 0.0, 0))
+            } else {
+                write.map(|row| write_data_row(&mut self.engine, page, &shape, &row))
+            };
+            if let Some(result) = result {
+                // read the rows again, also after a refused value
+                pane.key = None;
+                self.finish_edit(ctx, result, "Changed shape fields", Some(shape));
+            }
+        }
+        if open {
+            self.data_pane = Some(pane);
         }
     }
 
@@ -5984,6 +6166,7 @@ impl eframe::App for LayoutCraftApp {
         }
         self.draw_find(&ctx);
         self.draw_links(&ctx);
+        self.draw_data_pane(&ctx);
         if self.help_shortcuts_open {
             let mut open = true;
             egui::Window::new("Keyboard shortcuts").open(&mut open).collapsible(false).show(&ctx, |ui| {
@@ -6121,6 +6304,7 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::DocProps) => self.doc_props_open = true,
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
             Some(Action::Hyperlink) => self.open_links(),
+            Some(Action::ShapeData) => self.data_pane = if self.data_pane.is_some() { None } else { Some(DataPane::default()) },
             Some(Action::Theme(op, ref value)) => self.apply_theme(&ctx, op, value),
             Some(Action::PageShape(w, h)) => self.set_page_shape(&ctx, w, h),
             Some(Action::Find) => self.open_find(),
@@ -6217,6 +6401,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Show or hide the Shape Data window.
+    ShapeData,
     Hyperlink,
     /// `Engine::page_op` `theme_op` with the theme name or variant number.
     Theme(i32, String),

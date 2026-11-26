@@ -94,7 +94,7 @@ nice to have. Effort is an estimate in hours.
 | Status bar | Left: items that act as shortcuts, e.g. clicking the width item opens Size & Position (S4); right: zoom controls, Full Screen, window switching (S4); zoom slider and Fit Page to Window at the lower right, and a button to open Pan & Zoom (S11). Page number and language: unverified. | Desktop bottom panel: previous / next page, "page n / m", status message, "zoom nn%", "modified". Browser: `#statusbar`. | Zoom slider; Fit button; shape-geometry items (width, height, angle) that open Size & Position; language item unverified. | P0 | 8-12 |
 | Zoom and pan | Zoom slider, Fit Page to Window, Pan & Zoom button (S11); Ctrl+wheel zooms, plain wheel scrolls, Ctrl+Shift magnifier (click zoom in, right-click out, drag a rectangle) (S11). | Desktop: wheel zooms at the pointer (`exp(scroll*0.0015)`), middle button / Space / Pan tool move; Ctrl+= / Ctrl+-. Browser: wheel option (`wheelZoom`), Pan & Zoom pane. | Desktop: plain wheel should scroll, Ctrl+wheel zoom (Visio default; the wheel-zooms option is under Advanced options, S11). Zoom slider, magnifier gesture, Pan & Zoom pane. | P1 | 8-14 |
 | Task pane: Size & Position | View > Show > Task Panes > Size & Position: Width, Height, X, Y (pin position), Pin Pos, Angle; units typed in text; formulas (S12). | Desktop inspector prints a read-only "Box" and "Position" line. Browser: `paneSizePos`. | Editable fields on desktop; pin position; units and formulas (formulas: P3). | P0 | 8-14 |
-| Task pane: Shape Data | Data entered per shape and shown in a window (View > Task Panes, Data > Show/Hide; S5). | Browser: Data panel (`dataBtn`). Desktop: none (inspector lists hyperlinks only). | Shape Data window on desktop (engine ops 17/18 write rows, `shape_sheet_json` reads). | P1 | 10-16 |
+| Task pane: Shape Data | Data entered per shape and shown in a window (View > Task Panes, Data > Show/Hide; S5). | Browser: Data panel (`dataBtn`). Desktop: a window for one selected shape (values, add, remove). | Type, prompt, hidden and order editing; several shapes at once; docking. | P1 | 10-16 |
 | Task pane: Pan & Zoom | Thumbnail of the page with a blue frame; drag the frame to pan, resize to zoom, has a slider (S11). | Browser `panePanZoom` (frame drag, wheel). Desktop none. | Port to desktop. | P2 | 6-10 |
 | Task pane: Layers | Layer Properties dialog with Visible, Print, Active, Lock, Snap, Glue, Color columns; Assign to Layer (S22). | Desktop inspector: per layer Visible / Prints / Locked checkboxes, shape-on-layer checkbox, add and delete layer. Browser: layers panel. | Active, Snap, Glue, Color columns; Assign to Layer command in the Editing group. | P2 | 8-12 |
 | Task pane: Format Shape | Opened from the right-click menu or F3; tabs Fill & Line and Effects (Shadow, Reflection, Glow, 3-D Rotation) (S9, S1). | Desktop inspector "Style": fill, line colour, weight, pattern. Browser: Home > Shape Styles drop-down (fill, line, shadow). | Docked pane with tabs; text options; F3. | P1 | 14-22 |
@@ -115,8 +115,8 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 42 present, 19 partial,
-64 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 42 present, 20 partial,
+63 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
 ### 3.1 File / Backstage
@@ -231,7 +231,7 @@ these are row counts, not a count of every Visio button.
 
 | Visio command | Src | LC id | Desktop | Browser | Notes | Prio |
 |---|---|---|---|---|---|---|
-| Show/Hide: Shape Data window | S5 | dataBtn | missing | present | | P1 |
+| Show/Hide: Shape Data window | S5 | dataBtn | partial | present | Desktop: window for one shape: values, add a text field, remove; no type, prompt, hidden or order editing | P1 |
 | External Data: Link Data to Shapes | S24 | - | missing | missing | Needs an import path | P3 |
 | Refresh All / AutoLink | S24 | - | missing | missing | | P3 |
 | Display Data: Data Graphics | S4, S5 | - | missing | missing | | P3 |
