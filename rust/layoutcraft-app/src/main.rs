@@ -1995,6 +1995,45 @@ mod recent_tests {
     }
 }
 
+/// A range (low, high) along one axis of the page, inches.
+type Span = (f64, f64);
+
+/// The pull towards equal spacing along one axis: the moved box (`along` that axis, `across` the other one) between its
+/// nearest neighbour on each side, among the `others` (along, across) that it passes beside. Returns the shift that makes
+/// both gaps equal, when it is within `threshold` and the box fits, and the box's centre after the shift.
+fn equal_gap(along: Span, across: Span, others: &[(Span, Span)], threshold: f64) -> Option<(f64, f64)> {
+    let centre = (along.0 + along.1) / 2.0;
+    let beside = || others.iter().filter(|(_, other)| other.0 < across.1 && other.1 > across.0).map(|(span, _)| *span);
+    let before = beside().filter(|span| (span.0 + span.1) / 2.0 < centre).map(|span| span.1).max_by(f64::total_cmp)?;
+    let after = beside().filter(|span| (span.0 + span.1) / 2.0 > centre).map(|span| span.0).min_by(f64::total_cmp)?;
+    let width = along.1 - along.0;
+    if after - before < width {
+        return None;
+    }
+    let middle = (before + after) / 2.0;
+    let shift = middle - centre;
+    (shift.abs() <= threshold).then_some((shift, middle))
+}
+
+#[cfg(test)]
+mod equal_gap_tests {
+    use super::equal_gap;
+
+    #[test]
+    fn a_box_between_two_others_is_pulled_to_equal_gaps() {
+        let others = [((0.0, 1.0), (0.0, 1.0)), ((5.0, 6.0), (0.5, 1.5))];
+        let along = (2.45, 3.45);
+        let (shift, centre) = equal_gap(along, (0.2, 1.2), &others, 0.1).unwrap();
+        let (left, right) = (along.0 + shift - 1.0, 5.0 - (along.1 + shift));
+        assert!((left - right).abs() < 1e-9 && (centre - 3.0).abs() < 1e-9);
+        // out of reach, passing above both, only one neighbour, or no room: no pull
+        assert!(equal_gap((1.2, 2.2), (0.2, 1.2), &others, 0.1).is_none());
+        assert!(equal_gap(along, (7.0, 8.0), &others, 0.1).is_none());
+        assert!(equal_gap(along, (0.2, 1.2), &others[..1], 0.1).is_none());
+        assert!(equal_gap((0.5, 5.6), (0.2, 1.2), &others, 10.0).is_none());
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -3573,20 +3612,9 @@ impl LayoutCraftApp {
         let (mut xs, mut ys) = (Vec::new(), Vec::new());
         let page_h = self.page_height_in;
         if self.snap_shapes {
-            let moving = self.all_selected();
-            if let Some(scene) = self.scene.as_ref() {
-                for item in &scene.items {
-                    let SceneItem::Shape(shape) = item else { continue };
-                    let Some(id) = shape.visio_id.as_deref() else { continue };
-                    if moving.iter().any(|m| m == id) || self.doc_shape(id).is_none_or(|doc| doc.group.is_some()) {
-                        continue;
-                    }
-                    let r = Self::selection_scene_rect(shape);
-                    let (x0, x1) = (f64::from(r.min.x) / DPI, f64::from(r.max.x) / DPI);
-                    let (y1, y0) = (page_h - f64::from(r.min.y) / DPI, page_h - f64::from(r.max.y) / DPI);
-                    xs.extend([x0, (x0 + x1) / 2.0, x1]);
-                    ys.extend([y0, (y0 + y1) / 2.0, y1]);
-                }
+            for ((x0, x1), (y0, y1)) in self.other_boxes() {
+                xs.extend([x0, (x0 + x1) / 2.0, x1]);
+                ys.extend([y0, (y0 + y1) / 2.0, y1]);
             }
         }
         if self.snap_guides {
@@ -3604,6 +3632,30 @@ impl LayoutCraftApp {
         (xs, ys)
     }
 
+    /// The boxes (x span, y span; page inches, y up) of the page's shapes that are not being moved.
+    fn other_boxes(&self) -> Vec<(Span, Span)> {
+        let page_h = self.page_height_in;
+        let moving = self.all_selected();
+        let Some(scene) = self.scene.as_ref() else {
+            return Vec::new();
+        };
+        scene
+            .items
+            .iter()
+            .filter_map(|item| {
+                let SceneItem::Shape(shape) = item else { return None };
+                let id = shape.visio_id.as_deref()?;
+                if moving.iter().any(|m| m == id) || self.doc_shape(id).is_none_or(|doc| doc.group.is_some()) {
+                    return None;
+                }
+                let r = Self::selection_scene_rect(shape);
+                let x = (f64::from(r.min.x) / DPI, f64::from(r.max.x) / DPI);
+                let y = (page_h - f64::from(r.max.y) / DPI, page_h - f64::from(r.min.y) / DPI);
+                Some((x, y))
+            })
+            .collect()
+    }
+
     fn snapping_on(&self) -> bool {
         self.snap_grid || self.snap_shapes || self.snap_guides
     }
@@ -3618,7 +3670,20 @@ impl LayoutCraftApp {
         let box_in = (f64::from(start.min.x) / DPI, page_h - f64::from(start.max.y) / DPI, f64::from(start.max.x) / DPI, page_h - f64::from(start.min.y) / DPI);
         let threshold = 8.0 / (DPI * f64::from(self.view_scale().max(0.01)));
         let grid = if self.snap_grid { self.grid_step } else { 0.0 };
-        let (dx, dy, gx, gy) = snap_move(box_in, f64::from(delta.x) / DPI, -f64::from(delta.y) / DPI, grid, &xs, &ys, threshold);
+        let raw = (f64::from(delta.x) / DPI, -f64::from(delta.y) / DPI);
+        let (mut dx, mut dy, mut gx, mut gy) = snap_move(box_in, raw.0, raw.1, grid, &xs, &ys, threshold);
+        // equal spacing between two neighbours wins over the grid and edges when it is within reach
+        if self.snap_shapes {
+            let others = self.other_boxes();
+            let (x, y) = ((box_in.0 + raw.0, box_in.2 + raw.0), (box_in.1 + raw.1, box_in.3 + raw.1));
+            if let Some((shift, centre)) = equal_gap(x, y, &others, threshold) {
+                (dx, gx) = (raw.0 + shift, Some(centre));
+            }
+            let swapped: Vec<(Span, Span)> = others.iter().map(|(x, y)| (*y, *x)).collect();
+            if let Some((shift, centre)) = equal_gap(y, x, &swapped, threshold) {
+                (dy, gy) = (raw.1 + shift, Some(centre));
+            }
+        }
         (egui::vec2((dx * DPI) as f32, (-dy * DPI) as f32), (gx.map(|x| (x * DPI) as f32), gy.map(|y| ((page_h - y) * DPI) as f32)))
     }
 
