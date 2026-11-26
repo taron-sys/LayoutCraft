@@ -1620,6 +1620,41 @@ fn wheel_view(zoom: f32, pan: egui::Vec2, pointer: egui::Vec2, factor: f32, scro
     }
 }
 
+/// One click of the magnifier zooms by this factor.
+const MAGNIFY_STEP: f32 = 1.5;
+
+/// The view (zoom, pan) that shows a box dragged with the magnifier as large as the canvas allows, in its middle. The box
+/// is given from the middle of the canvas.
+fn magnified_view(zoom: f32, pan: egui::Vec2, area: egui::Rect, canvas: egui::Vec2) -> (f32, egui::Vec2) {
+    let under = (area.center().to_vec2() - pan) / zoom;
+    let factor = (canvas.x / area.width().max(1.0)).min(canvas.y / area.height().max(1.0));
+    let zoom = (zoom * factor).clamp(0.05, 16.0);
+    (zoom, -under * zoom)
+}
+
+#[cfg(test)]
+mod magnifier_tests {
+    use super::magnified_view;
+    use eframe::egui::{pos2, vec2, Rect};
+
+    #[test]
+    fn the_dragged_box_ends_up_in_the_middle_and_inside_the_canvas() {
+        let canvas = vec2(800.0, 600.0);
+        for area in [Rect::from_min_max(pos2(-100.0, -40.0), pos2(60.0, 20.0)), Rect::from_min_max(pos2(120.0, -200.0), pos2(160.0, 100.0))] {
+            let (zoom, pan) = (1.25, vec2(30.0, -15.0));
+            let (new_zoom, new_pan) = magnified_view(zoom, pan, area, canvas);
+            assert!(new_zoom > zoom);
+            // where the corners of the box are afterwards
+            let moved = |point: eframe::egui::Pos2| (point.to_vec2() - pan) / zoom * new_zoom + new_pan;
+            let (low, high) = (moved(area.min), moved(area.max));
+            assert!((low + high).length() < 0.01, "in the middle: {low:?} {high:?}");
+            let size = high - low;
+            assert!(size.x <= canvas.x + 0.01 && size.y <= canvas.y + 0.01);
+            assert!((size.x - canvas.x).abs() < 0.01 || (size.y - canvas.y).abs() < 0.01, "as large as it fits: {size:?}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod wheel_tests {
     use super::wheel_view;
@@ -2561,6 +2596,62 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn ctrl_shift_magnifies_without_touching_the_drawing() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[1].clone());
+        driver.frames(3);
+        let held = Modifiers { shift: true, ..CTRL };
+        let canvas = driver.app.last_viewport;
+        let at = canvas.center() + vec2(60.0, 30.0);
+        // the page point under a screen position
+        let under = |driver: &Driver, at: egui::Pos2| driver.app.screen_to_scene(at, driver.app.image_rect(driver.app.last_viewport));
+        let before = (driver.app.zoom, under(&driver, at), driver.app.engine.undo_depth());
+        driver.click(at, held);
+        assert!(driver.app.zoom > before.0);
+        assert!((under(&driver, at) - before.1).length() < 0.5, "the clicked point stays put");
+        assert_eq!(driver.app.selected, Some(ids[1].clone()));
+        assert!(driver.app.extra_selected.is_empty());
+        // right click: out again, and no menu
+        let zoomed = driver.app.zoom;
+        driver.modifiers = held;
+        let right = |pressed| Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed, modifiers: held };
+        driver.run(vec![Event::PointerMoved(at)]);
+        driver.run(vec![right(true)]);
+        driver.run(vec![right(false)]);
+        driver.frames(3);
+        assert!(driver.app.zoom < zoomed);
+        assert!(driver.texts("Cut").is_empty() && driver.texts("Page setup...").is_empty(), "no menu opened");
+        // a dragged box is brought to the middle of the view
+        let (from, to) = (canvas.center() - vec2(120.0, 80.0), canvas.center() - vec2(20.0, 20.0));
+        let middle = under(&driver, from + (to - from) / 2.0);
+        let zoomed = driver.app.zoom;
+        driver.drag(from, to);
+        driver.modifiers = Modifiers::NONE;
+        driver.frames(2);
+        assert!(driver.app.zoom > zoomed);
+        assert!((under(&driver, canvas.center()) - middle).length() < 1.0);
+        assert_eq!(driver.app.engine.undo_depth(), before.2, "nothing was moved or drawn");
+        assert_eq!(driver.app.selected, Some(ids[1].clone()));
+    }
+
+    #[test]
+    fn ctrl_shift_pressed_during_a_drag_leaves_it_a_drag() {
+        let (mut driver, ids) = Driver::new();
+        (driver.app.snap_grid, driver.app.snap_shapes, driver.app.snap_guides) = (false, false, false);
+        let (start, zoom) = (driver.at(&ids[0]), driver.app.zoom);
+        let from = driver.middle_of(&ids[0]);
+        driver.drag_holding(from, from + vec2(90.0, 30.0), Modifiers { shift: true, ..CTRL });
+        let moved = driver.at(&ids[0]);
+        assert!(moved.0 > start.0 + 10.0, "{start:?} {moved:?} {}", driver.app.status);
+        assert_eq!(driver.app.zoom, zoom);
+        assert!(driver.app.engine.undo_depth() > 0 && driver.app.magnify_from.is_none());
+        // and the next click is an ordinary one
+        let middle = driver.middle_of(&ids[1]);
+        driver.click(middle, Modifiers::NONE);
+        assert_eq!(driver.app.selected, Some(ids[1].clone()));
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -3326,6 +3417,8 @@ struct LayoutCraftApp {
     snap_open: bool,
     /// The zoom window, while it is open.
     zoom_draft: Option<ZoomDraft>,
+    /// Where a box being dragged with the magnifier (Ctrl+Shift) began.
+    magnify_from: Option<egui::Pos2>,
     /// The Shapes panel is narrowed to a column.
     shapes_minimised: bool,
     /// The one stencil of the Shapes panel that is open (its engine slot).
@@ -3482,6 +3575,7 @@ impl LayoutCraftApp {
             focus_at_frame_start: false,
             snap_open: false,
             zoom_draft: None,
+            magnify_from: None,
             shapes_minimised: false,
             open_stencil_shown: None,
             sheet_pane: None,
@@ -7682,7 +7776,49 @@ impl eframe::App for LayoutCraftApp {
                 }
                 self.draw_guides(&painter, viewport, image_rect);
 
-                if response.drag_started_by(egui::PointerButton::Primary) {
+                // The magnifier: with Ctrl+Shift a click zooms in, a right click zooms out, a dragged box fills the view and a
+                // right drag moves the page. The pointer then does nothing else.
+                // a drag that was already going on stays what it is when the keys come down during it
+                let primary = egui::PointerButton::Primary;
+                let ordinary_drag = self.drag.is_some()
+                    || self.guide_drag.is_some()
+                    || (self.magnify_from.is_none() && (response.drag_stopped_by(primary) || (response.dragged_by(primary) && !response.drag_started_by(primary))));
+                let held = ctx.input(|input| input.modifiers.command && input.modifiers.shift);
+                let magnifier = self.magnify_from.is_some() || (held && !ordinary_drag);
+                if magnifier {
+                    let from_middle = |at: egui::Pos2| (at - viewport.center()).to_pos2();
+                    let factor = if response.clicked() { Some(MAGNIFY_STEP) } else if response.secondary_clicked() { Some(MAGNIFY_STEP.recip()) } else { None };
+                    if let Some((factor, at)) = factor.zip(response.interact_pointer_pos()) {
+                        (self.zoom, self.pan) = wheel_view(self.zoom, self.pan, at - viewport.center(), factor, egui::Vec2::ZERO);
+                        self.fit_pending = false;
+                    }
+                    if response.dragged_by(egui::PointerButton::Secondary) {
+                        self.pan += response.drag_delta();
+                        self.fit_pending = false;
+                    }
+                    if response.drag_started_by(egui::PointerButton::Primary) {
+                        self.magnify_from = ctx.input(|input| input.pointer.press_origin());
+                    }
+                    if let Some((from, to)) = self.magnify_from.zip(ctx.input(|input| input.pointer.latest_pos())) {
+                        let area = egui::Rect::from_two_pos(from, viewport.clamp(to));
+                        if response.drag_stopped_by(egui::PointerButton::Primary) {
+                            // a box too small to have been meant is ignored
+                            if area.width() > 8.0 && area.height() > 8.0 {
+                                let area = egui::Rect::from_min_max(from_middle(area.min), from_middle(area.max));
+                                (self.zoom, self.pan) = magnified_view(self.zoom, self.pan, area, viewport.size());
+                                self.fit_pending = false;
+                            }
+                            self.magnify_from = None;
+                        } else {
+                            painter.rect_stroke(area, 0.0, egui::Stroke::new(1.5, egui::Color32::from_rgb(20, 110, 220)), egui::StrokeKind::Middle);
+                        }
+                    }
+                    if !ctx.input(|input| input.pointer.primary_down()) {
+                        self.magnify_from = None;
+                    }
+                }
+
+                if !magnifier && response.drag_started_by(egui::PointerButton::Primary) {
                     self.panning = false;
                     let press = ctx
                         .input(|input| input.pointer.press_origin())
@@ -7700,7 +7836,7 @@ impl eframe::App for LayoutCraftApp {
                         }
                     }
                 }
-                if response.dragged_by(egui::PointerButton::Primary) {
+                if !magnifier && response.dragged_by(egui::PointerButton::Primary) {
                     if self.guide_drag.is_some() {
                         if let Some(pointer) = response.interact_pointer_pos() {
                             self.move_guide_drag(pointer, image_rect);
@@ -7713,7 +7849,7 @@ impl eframe::App for LayoutCraftApp {
                         self.pan += response.drag_delta();
                     }
                 }
-                if response.drag_stopped_by(egui::PointerButton::Primary) {
+                if !magnifier && response.drag_stopped_by(egui::PointerButton::Primary) {
                     if self.guide_drag.is_some() {
                         let on_page = ctx.pointer_latest_pos().is_some_and(|pointer| viewport.contains(pointer));
                         self.finish_guide_drag(&ctx, on_page);
@@ -7723,7 +7859,7 @@ impl eframe::App for LayoutCraftApp {
                 }
                 // the right-click menus (web/contextmenu.js): a shape or the selection, or the empty page. A right click on a shape that is not
                 // selected selects it first; on empty canvas it clears the selection.
-                if response.secondary_clicked() {
+                if !magnifier && response.secondary_clicked() {
                     if let Some(pointer) = response.interact_pointer_pos() {
                         let at = self.screen_to_scene(pointer, image_rect);
                         match self.pick_shape(at) {
@@ -7741,56 +7877,58 @@ impl eframe::App for LayoutCraftApp {
                 }
                 let has_selection = self.selected.is_some();
                 let can_paste = self.engine.clipboard_count() > 0;
-                response.context_menu(|ui| {
-                    if has_selection {
-                        let mut pick = |ui: &mut egui::Ui, label: &str, enabled: bool, command: Action| {
-                            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
-                                action = Some(command);
+                if !magnifier {
+                    response.context_menu(|ui| {
+                        if has_selection {
+                            let mut pick = |ui: &mut egui::Ui, label: &str, enabled: bool, command: Action| {
+                                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                                    action = Some(command);
+                                    ui.close();
+                                }
+                            };
+                            pick(ui, "Cut", true, Action::Cut);
+                            pick(ui, "Copy", true, Action::Copy);
+                            pick(ui, "Paste", can_paste, Action::Paste);
+                            pick(ui, "Duplicate", true, Action::Duplicate);
+                            pick(ui, "Delete", true, Action::DeleteSelected);
+                            ui.separator();
+                            pick(ui, "Group", true, Action::Arrange(ArrangeCmd::Group));
+                            pick(ui, "Ungroup", true, Action::Arrange(ArrangeCmd::Ungroup));
+                            ui.separator();
+                            pick(ui, "Bring to front", true, Action::Arrange(ArrangeCmd::Order(2)));
+                            pick(ui, "Bring forward", true, Action::Arrange(ArrangeCmd::Order(4)));
+                            pick(ui, "Send backward", true, Action::Arrange(ArrangeCmd::Order(5)));
+                            pick(ui, "Send to back", true, Action::Arrange(ArrangeCmd::Order(3)));
+                            ui.separator();
+                            pick(ui, "Rotate left", true, Action::Arrange(ArrangeCmd::RotateLeft));
+                            pick(ui, "Rotate right", true, Action::Arrange(ArrangeCmd::RotateQuarter));
+                            pick(ui, "Flip horizontal", true, Action::Arrange(ArrangeCmd::Flip(false)));
+                            pick(ui, "Flip vertical", true, Action::Arrange(ArrangeCmd::Flip(true)));
+                            ui.separator();
+                            pick(ui, "Edit text", true, Action::EditText);
+                        } else {
+                            let mut pick = |ui: &mut egui::Ui, label: &str, enabled: bool, command: Action| {
+                                if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                                    action = Some(command);
+                                    ui.close();
+                                }
+                            };
+                            pick(ui, "Paste", can_paste, Action::Paste);
+                            ui.separator();
+                            pick(ui, "Page setup...", true, Action::PageSetup);
+                            pick(ui, "Fit page to window", true, Action::Fit);
+                            ui.separator();
+                            ui.checkbox(&mut self.show_grid, "Grid");
+                            ui.checkbox(&mut self.snap_grid, "Snap to grid");
+                            ui.checkbox(&mut self.snap_shapes, "Snap to shapes");
+                            ui.checkbox(&mut self.snap_guides, "Snap to guides");
+                            if ui.button("Snap and Attach...").clicked() {
+                                self.snap_open = true;
                                 ui.close();
                             }
-                        };
-                        pick(ui, "Cut", true, Action::Cut);
-                        pick(ui, "Copy", true, Action::Copy);
-                        pick(ui, "Paste", can_paste, Action::Paste);
-                        pick(ui, "Duplicate", true, Action::Duplicate);
-                        pick(ui, "Delete", true, Action::DeleteSelected);
-                        ui.separator();
-                        pick(ui, "Group", true, Action::Arrange(ArrangeCmd::Group));
-                        pick(ui, "Ungroup", true, Action::Arrange(ArrangeCmd::Ungroup));
-                        ui.separator();
-                        pick(ui, "Bring to front", true, Action::Arrange(ArrangeCmd::Order(2)));
-                        pick(ui, "Bring forward", true, Action::Arrange(ArrangeCmd::Order(4)));
-                        pick(ui, "Send backward", true, Action::Arrange(ArrangeCmd::Order(5)));
-                        pick(ui, "Send to back", true, Action::Arrange(ArrangeCmd::Order(3)));
-                        ui.separator();
-                        pick(ui, "Rotate left", true, Action::Arrange(ArrangeCmd::RotateLeft));
-                        pick(ui, "Rotate right", true, Action::Arrange(ArrangeCmd::RotateQuarter));
-                        pick(ui, "Flip horizontal", true, Action::Arrange(ArrangeCmd::Flip(false)));
-                        pick(ui, "Flip vertical", true, Action::Arrange(ArrangeCmd::Flip(true)));
-                        ui.separator();
-                        pick(ui, "Edit text", true, Action::EditText);
-                    } else {
-                        let mut pick = |ui: &mut egui::Ui, label: &str, enabled: bool, command: Action| {
-                            if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
-                                action = Some(command);
-                                ui.close();
-                            }
-                        };
-                        pick(ui, "Paste", can_paste, Action::Paste);
-                        ui.separator();
-                        pick(ui, "Page setup...", true, Action::PageSetup);
-                        pick(ui, "Fit page to window", true, Action::Fit);
-                        ui.separator();
-                        ui.checkbox(&mut self.show_grid, "Grid");
-                        ui.checkbox(&mut self.snap_grid, "Snap to grid");
-                        ui.checkbox(&mut self.snap_shapes, "Snap to shapes");
-                        ui.checkbox(&mut self.snap_guides, "Snap to guides");
-                        if ui.button("Snap and Attach...").clicked() {
-                            self.snap_open = true;
-                            ui.close();
                         }
-                    }
-                });
+                    });
+                }
                 let mut dropped_now = false;
                 if let Some(label) = &self.pane_drag {
                     if let Some(at) = ctx.pointer_latest_pos() {
@@ -7812,7 +7950,7 @@ impl eframe::App for LayoutCraftApp {
                     }
                 }
                 // an arrow beside a shape takes the click before the picked master is dropped on the page
-                if response.clicked() && self.armed_master.is_some() && response.interact_pointer_pos().is_none_or(|pointer| self.connect_arrow_at(pointer, image_rect).is_none()) {
+                if !magnifier && response.clicked() && self.armed_master.is_some() && response.interact_pointer_pos().is_none_or(|pointer| self.connect_arrow_at(pointer, image_rect).is_none()) {
                     if let Some(pointer) = response.interact_pointer_pos() {
                         if image_rect.contains(pointer) {
                             let at = self.screen_to_scene(pointer, image_rect);
@@ -7828,11 +7966,13 @@ impl eframe::App for LayoutCraftApp {
                         }
                     }
                 }
-                if response.clicked() && !self.panning && !dropped_now {
+                if !magnifier && response.clicked() && !self.panning && !dropped_now {
                     if let Some(pointer) = response.interact_pointer_pos() {
                         dropped_now = self.click_connect_arrow(&ctx, pointer, image_rect);
                     }
                 }
+                // a magnifier click selects nothing
+                dropped_now |= magnifier;
                 if response.clicked() && self.drag.is_none() && !self.panning && self.add_down && !dropped_now {
                     if let Some(pointer) = response.interact_pointer_pos() {
                         if image_rect.contains(pointer) {
@@ -7855,7 +7995,7 @@ impl eframe::App for LayoutCraftApp {
                         self.selected_guide = guide.map(|guide| guide.0);
                     }
                 }
-                if response.double_clicked() && self.drag.is_none() {
+                if !magnifier && response.double_clicked() && self.drag.is_none() {
                     if let Some(pointer) = response.interact_pointer_pos() {
                         if image_rect.contains(pointer) {
                             let scene_pointer = self.screen_to_scene(pointer, image_rect);
@@ -8072,7 +8212,9 @@ impl eframe::App for LayoutCraftApp {
                     let at = |p: egui::Pos2| self.scene_rect_to_screen(egui::Rect::from_min_size(p, egui::Vec2::ZERO), image_rect).min;
                     painter.line_segment([at(*start_pointer), at(*end_pointer)], egui::Stroke::new(2.0, egui::Color32::from_rgb(255, 140, 0)));
                 }
-                if self.drag.is_some() {
+                if magnifier && response.hovered() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::ZoomIn);
+                } else if self.drag.is_some() {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
                 } else if hover_rotate {
                     ui.ctx().set_cursor_icon(egui::CursorIcon::Crosshair);
