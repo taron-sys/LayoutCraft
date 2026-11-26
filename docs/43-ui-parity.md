@@ -115,8 +115,8 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 35 present, 20 partial,
-70 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 36 present, 20 partial,
+69 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
 ### 3.1 File / Backstage
@@ -157,7 +157,7 @@ these are row counts, not a count of every Visio button.
 | Font: strikethrough, caps, sub/superscript, font colour | S1 for caps and sub/superscript; others unverified | p:strike | partial | partial | Desktop: strikethrough of the whole text | P2 |
 | Paragraph: align left / centre / right / justify | S1 | p:alignL | present | present | Desktop: the whole text of the selected shapes | P1 |
 | Paragraph: vertical align top / middle / bottom | S1 | p:alignL (menu) | missing | partial | | P2 |
-| Paragraph: indent, line spacing | unverified | p:indLeft, p:lineSp | missing | present | | P3 |
+| Paragraph: indent, line spacing | unverified | p:indLeft, p:lineSp | present | present | Desktop: fixed choices of left indent and line spacing, whole text | P3 |
 | Tools: Pointer Tool (Ctrl+1) | S5, S1 | - (default tool) | partial | partial | No button, Esc returns to select | P1 |
 | Tools: Text (Ctrl+2) | S9, S1 | insertTextBox | present | present | | P1 |
 | Tools: Text Block (Ctrl+Shift+4) | S5, S1 | - | missing | missing | Moves the text block inside a shape | P2 |

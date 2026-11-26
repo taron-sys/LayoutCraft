@@ -550,6 +550,41 @@ mod text_format_tests {
     }
 }
 
+/// The left indents the Paragraph group offers (inches) and the line spacings (multiples of the line height).
+const INDENTS_IN: [f64; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+const LINE_SPACINGS: [f64; 4] = [1.0, 1.15, 1.5, 2.0];
+
+/// `Engine::edit` op 13 specs: `IndLeft` is in inches, `SpLine` is a negative multiple of the line height (as `web/shell.js`).
+fn indent_spec(inches: f64) -> serde_json::Value {
+    serde_json::json!({ "para": { "IndLeft": inches.to_string() } })
+}
+
+fn line_spacing_spec(multiple: f64) -> serde_json::Value {
+    serde_json::json!({ "para": { "SpLine": (-multiple).to_string() } })
+}
+
+#[cfg(test)]
+mod paragraph_tests {
+    use super::{format_whole_text, indent_spec, line_spacing_spec};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn indent_and_spacing_reach_the_paragraph() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let id = engine.draw(0, 0, 1.0, 1.0, 3.0, 3.0).unwrap();
+        engine.edit(0, 8, &format!("{id}\ntwo words"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+        let ids = [id.clone()];
+        format_whole_text(&mut engine, 0, &ids, &indent_spec(0.5)).unwrap();
+        format_whole_text(&mut engine, 0, &ids, &line_spacing_spec(1.5)).unwrap();
+        let state: serde_json::Value = serde_json::from_str(&engine.text_state_json(0, &id, 0, 9).unwrap()).unwrap();
+        let cell = |name: &str| state["para"][name].as_str().and_then(|value| value.parse::<f64>().ok()).unwrap();
+        // a left indent to the right of the margin, and a relative (negative) spacing wider than single
+        assert!(cell("IndLeft") > 0.0);
+        assert!(cell("SpLine") < -1.0);
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -3158,7 +3193,7 @@ impl LayoutCraftApp {
             }
             return;
         }
-        if matches!(id, "p:bold" | "p:strike" | "p:alignL" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor") {
+        if matches!(id, "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor") {
             self.ribbon_format_controls(ui, id, action);
             return;
         }
@@ -3238,6 +3273,34 @@ impl LayoutCraftApp {
                         *action = Some(Action::FormatText(serde_json::json!({ "para": { "HorzAlign": cell } })));
                     }
                 }
+            }
+            "p:indLeft" => {
+                ui.add_enabled_ui(enabled, |ui| {
+                    ui.menu_button("Indent \u{25be}", |ui| {
+                        for inches in INDENTS_IN {
+                            if ui.button(format!("{inches} in")).clicked() {
+                                *action = Some(Action::FormatText(indent_spec(inches)));
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("Left indent of the whole text");
+                });
+            }
+            "p:lineSp" => {
+                ui.add_enabled_ui(enabled, |ui| {
+                    ui.menu_button("Line spacing \u{25be}", |ui| {
+                        for multiple in LINE_SPACINGS {
+                            if ui.button(format!("{multiple}")).clicked() {
+                                *action = Some(Action::FormatText(line_spacing_spec(multiple)));
+                                ui.close();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("Line spacing of the whole text, in lines");
+                });
             }
             "p:fontFamily" => {
                 let (name, replaced) = self.selected_font().unwrap_or_default();
