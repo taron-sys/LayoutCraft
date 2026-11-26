@@ -32,6 +32,21 @@ Connectors carry resolved world points, waypoints, arrows and labels.
   the stroke width and rounded for raster output. This matches Visio
   `Page.Export` content bounds for the goldens; text boxes are included when
   they extend the content box.
+- Arrowheads, on shape geometry (turned with the shape) and on connectors, are
+  part of the bounds too (issue #52). Measured with Visio 16.0.14332,
+  `Page.Export` at 96 dpi, width x height in pixels:
+
+  | Page | Visio | Without arrowheads | With arrowheads |
+  |---|---|---|---|
+  | two level 1 pt lines 5 in long, 2 in apart, no arrowheads | 481 x 193 | 481 x 193 | 481 x 193 |
+  | the same, `EndArrow` 13, `EndArrowSize` 2 | 481 x 201 | 481 x 193 | 481 x 201 |
+  | private corpus: arrowhead gallery; two BPMN master pages; one PERT page | equal in all four | up to 6 px smaller | equal to Visio |
+  | private corpus: four other master pages with arrowheads | | | within 2 px |
+
+  Two further master pages still differ widely (145 x 6 against 164 x 32 and
+  145 x 6 against 163 x 32): one was inspected, and its text label is missing
+  from our rendering. That is a separate gap. Ink can also sit a few pixels
+  differently inside a page of equal size.
 - The SVG keeps an exact `viewBox` and uses integer `width`/`height`; `resvg`
   rasterizes at 1× or a requested scale.
 

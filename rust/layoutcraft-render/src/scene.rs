@@ -1883,6 +1883,12 @@ impl Bounds {
                     self.add(shape.x + x1 + part_pad, shape.y + y1 + part_pad);
                 }
             }
+            // Arrowheads reach beyond the line they end (issue 52).
+            for part in &shape.parts {
+                for (x, y) in crate::svg::part_arrow_extent(part) {
+                    self.add(shape.x + x, shape.y + y);
+                }
+            }
             if let Some(shadow) = shape.shadow.as_ref().filter(|shadow| shadow.kind == 2) {
                 // an oblique shadow is the box tilted and scaled about its bottom edge (see `render_shadow`)
                 let (sin, cos) = shadow.oblique.sin_cos();
@@ -1956,6 +1962,13 @@ impl Bounds {
                 let (rx, ry) = (cx + dx * angle.cos() - dy * angle.sin(), cy + dx * angle.sin() + dy * angle.cos());
                 self.add(rx - part_pad, ry - part_pad);
                 self.add(rx + part_pad, ry + part_pad);
+            }
+        }
+        // the arrowheads of a turned shape turn with it
+        for part in &shape.parts {
+            for (x, y) in crate::svg::part_arrow_extent(part) {
+                let (dx, dy) = (shape.x + x - cx, shape.y + y - cy);
+                self.add(cx + dx * angle.cos() - dy * angle.sin(), cy + dx * angle.sin() + dy * angle.cos());
             }
         }
         let rotated_pad = shadow_pad.max(effect_pad);
@@ -2061,6 +2074,9 @@ impl Bounds {
     }
 
     fn add_connector(&mut self, connector: &SceneConnector) {
+        for (x, y) in crate::svg::connector_arrow_extent(connector) {
+            self.add(x, y);
+        }
         let pad = connector.stroke_width.max(0.0) / 2.0;
         self.add(connector.from.x - pad, connector.from.y - pad);
         self.add(connector.from.x + pad, connector.from.y + pad);

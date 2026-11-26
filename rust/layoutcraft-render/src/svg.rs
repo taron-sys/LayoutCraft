@@ -1807,23 +1807,23 @@ fn push_segment(d: &mut String, a: Point, b: Point, hops: &[SceneHop]) {
     d.push_str(&format!("L{} {}", num(b.x), num(b.y)));
 }
 
-fn render_connector(out: &mut String, connector: &SceneConnector) {
+/// The points of a connector's route without consecutive duplicates: elbow auto-routes can repeat the endpoints as
+/// waypoints, and a zero-length final segment would give the arrowhead no direction.
+fn connector_points(connector: &SceneConnector) -> Vec<Point> {
     let mut points = vec![connector.from];
     points.extend_from_slice(&connector.waypoints);
     points.push(connector.to);
-    // Elbow auto-routes can repeat the endpoints as waypoints. Drop
-    // consecutive duplicates, otherwise the final segment is zero-length and
-    // the arrowhead is skipped.
     let mut unique: Vec<Point> = Vec::with_capacity(points.len());
     for point in points {
-        if unique
-            .last()
-            .is_none_or(|last| (point.x - last.x).hypot(point.y - last.y) > 0.01)
-        {
+        if unique.last().is_none_or(|last| (point.x - last.x).hypot(point.y - last.y) > 0.01) {
             unique.push(point);
         }
     }
-    let points = unique;
+    unique
+}
+
+fn render_connector(out: &mut String, connector: &SceneConnector) {
+    let points = connector_points(connector);
     if points.len() < 2 {
         return;
     }
@@ -1919,20 +1919,9 @@ fn render_arrow(
     connector: &SceneConnector,
     filled: bool,
 ) {
-    let dx = tip.x - from.x;
-    let dy = tip.y - from.y;
-    let len = dx.hypot(dy);
-    if len < 1e-9 {
+    let Some([p1, p2]) = plain_arrow_corners(from, tip, connector.stroke_width) else {
         return;
-    }
-    let ux = dx / len;
-    let uy = dy / len;
-    let size = (connector.stroke_width * 4.0).max(6.0);
-    let half = size * 0.45;
-    let base_x = tip.x - ux * size;
-    let base_y = tip.y - uy * size;
-    let p1 = (base_x - uy * half, base_y + ux * half);
-    let p2 = (base_x + uy * half, base_y - ux * half);
+    };
     out.push_str(&format!(
         r#"<path d="M{} {}L{} {}L{} {}Z" fill="{}" stroke="{}" stroke-width="1"/>"#,
         num(tip.x),
@@ -1948,6 +1937,129 @@ fn render_arrow(
         },
         escape(&connector.stroke)
     ));
+}
+
+/// The size in scene px of a gallery line end: a base size per size index plus an amount per point of line weight,
+/// measured at 300 dpi.
+fn arrow_size_px(index: usize, weight_pt: f64) -> f64 {
+    const BASE: [f64; 7] = [11.5, 14.0, 20.0, 26.0, 31.5, 74.0, 149.0];
+    (BASE[index.min(6)] + 8.0 * weight_pt) / 300.0 * 96.0
+}
+
+/// The diameter in scene px of the dot end (type 42).
+fn dot_diameter_px(index: usize, weight_pt: f64) -> f64 {
+    const BASE: [f64; 7] = [10.0, 11.0, 16.0, 21.0, 25.0, 56.0, 112.0];
+    (BASE[index.min(6)] + 6.0 * weight_pt) / 300.0 * 96.0
+}
+
+/// The two back corners of the plain connector arrowhead whose tip is `tip`.
+fn plain_arrow_corners(from: Point, tip: Point, stroke_width: f64) -> Option<[(f64, f64); 2]> {
+    let (dx, dy) = (tip.x - from.x, tip.y - from.y);
+    let len = dx.hypot(dy);
+    if len < 1e-9 {
+        return None;
+    }
+    let (ux, uy) = (dx / len, dy / len);
+    let size = (stroke_width * 4.0).max(6.0);
+    let half = size * 0.45;
+    let (base_x, base_y) = (tip.x - ux * size, tip.y - uy * size);
+    Some([(base_x - uy * half, base_y + ux * half), (base_x + uy * half, base_y - ux * half)])
+}
+
+/// Add the two opposite corners of the square of half side `pad` around a point.
+fn push_padded(points: &mut Vec<(f64, f64)>, (x, y): (f64, f64), pad: f64) {
+    points.push((x - pad, y - pad));
+    points.push((x + pad, y + pad));
+}
+
+/// Points that enclose what `draw_gallery_end` paints for these arguments (curve control points count, which can only
+/// make the box a little larger).
+fn gallery_end_extent(points: &mut Vec<(f64, f64)>, kind: u32, index: usize, tip: (f64, f64), dir: (f64, f64), weight_pt: f64, stroke_width: f64) {
+    let Some(items) = arrow_items(kind) else { return };
+    let size = arrow_size_px(index, weight_pt);
+    let place = |x: f64, y: f64| (tip.0 + size * (x * dir.0 - y * dir.1), tip.1 + size * (x * dir.1 + y * dir.0));
+    for item in items {
+        match item {
+            ArrowItem::Path(d, style) => {
+                let pad = if matches!(style, ArrowStyle::Fill) { 0.0 } else { stroke_width / 2.0 };
+                let numbers: Vec<f64> = d.split(|c: char| c.is_ascii_alphabetic() || c == ',' || c == ' ').filter_map(|token| token.parse().ok()).collect();
+                for pair in numbers.chunks_exact(2) {
+                    push_padded(points, place(pair[0], pair[1]), pad);
+                }
+            }
+            ArrowItem::Circle(cx, radius, style) => {
+                let pad = if matches!(style, ArrowStyle::Fill) { 0.0 } else { stroke_width / 2.0 };
+                push_padded(points, place(*cx, 0.0), radius * size + pad);
+            }
+        }
+    }
+}
+
+/// Points (in the part's own coordinates) that enclose the arrowheads `render_part_arrows` paints. A part without a
+/// visible line has none to show.
+pub(crate) fn part_arrow_extent(part: &crate::scene::ScenePart) -> Vec<(f64, f64)> {
+    let mut points = Vec::new();
+    if part.stroke == "none" || part.stroke_opacity <= 0.0 || (part.begin_arrow.is_none() && part.end_arrow.is_none()) {
+        return points;
+    }
+    let Some([(start, after_start), (end, before_end)]) = crate::scene::path_ends(&part.d) else {
+        return points;
+    };
+    let weight_pt = part.stroke_width * 0.75;
+    for (arrow, tip, from) in [(part.begin_arrow, start, after_start), (part.end_arrow, end, before_end)] {
+        let Some((kind, size)) = arrow else { continue };
+        let index = (size as usize).min(6);
+        let (dx, dy) = (tip.0 - from.0, tip.1 - from.1);
+        let len = dx.hypot(dy);
+        if len < 1e-9 {
+            continue;
+        }
+        let (ux, uy) = (dx / len, dy / len);
+        match kind {
+            4 => {
+                let side = arrow_size_px(index, weight_pt);
+                let (bx, by, half) = (tip.0 - ux * side, tip.1 - uy * side, side / 2.0);
+                points.extend([tip, (bx - uy * half, by + ux * half), (bx + uy * half, by - ux * half)]);
+            }
+            1..=35 => gallery_end_extent(&mut points, kind, index, tip, (ux, uy), weight_pt, part.stroke_width),
+            42 => {
+                let radius = dot_diameter_px(index, weight_pt) / 2.0;
+                push_padded(&mut points, (tip.0 - ux * radius, tip.1 - uy * radius), radius);
+            }
+            _ => {}
+        }
+    }
+    points
+}
+
+/// Points that enclose the arrowheads `render_connector` paints.
+pub(crate) fn connector_arrow_extent(connector: &SceneConnector) -> Vec<(f64, f64)> {
+    let mut points = Vec::new();
+    let route = connector_points(connector);
+    if route.len() < 2 {
+        return points;
+    }
+    let ends = [
+        (connector.begin_line_end, connector.arrow_start.as_deref(), route[0], connector.curve.map_or(route[1], |(c1, _)| c1)),
+        (connector.end_line_end, connector.arrow_end.as_deref(), route[route.len() - 1], connector.curve.map_or(route[route.len() - 2], |(_, c2)| c2)),
+    ];
+    for (line_end, name, tip, from) in ends {
+        let (dx, dy) = (tip.x - from.x, tip.y - from.y);
+        let len = dx.hypot(dy);
+        if let Some((kind, size)) = line_end {
+            if len > 1e-9 {
+                gallery_end_extent(&mut points, kind, size as usize, (tip.x, tip.y), (dx / len, dy / len), connector.stroke_width * 0.75, connector.stroke_width);
+            }
+        } else if arrow_kind(name) {
+            if let Some(corners) = plain_arrow_corners(from, tip, connector.stroke_width) {
+                // the plain arrow has a one px outline
+                for corner in [(tip.x, tip.y), corners[0], corners[1]] {
+                    push_padded(&mut points, corner, 0.5);
+                }
+            }
+        }
+    }
+    points
 }
 
 #[derive(Clone, Copy)]
@@ -2012,9 +2124,8 @@ fn arrow_items(kind: u32) -> Option<&'static [ArrowItem]> {
 /// One gallery line end (kind 1-35, size index `index`) with its tip at `tip`, pointing along the unit vector `dir`.
 #[allow(clippy::too_many_arguments)]
 fn draw_gallery_end(out: &mut String, kind: u32, index: usize, tip: (f64, f64), dir: (f64, f64), weight_pt: f64, stroke_width: f64, fill: &str) {
-    const ARROW_BASE: [f64; 7] = [11.5, 14.0, 20.0, 26.0, 31.5, 74.0, 149.0];
     let Some(items) = arrow_items(kind) else { return };
-    let size_px = (ARROW_BASE[index.min(6)] + 8.0 * weight_pt) / 300.0 * 96.0;
+    let size_px = arrow_size_px(index, weight_pt);
     let angle = dir.1.atan2(dir.0).to_degrees();
     out.push_str(&format!(r#"<g transform="translate({} {}) rotate({}) scale({})">"#, num(tip.0), num(tip.1), num(angle), num(size_px)));
     let sw = stroke_width / size_px;
@@ -2039,8 +2150,6 @@ fn draw_gallery_end(out: &mut String, kind: u32, index: usize, tip: (f64, f64), 
 /// isosceles triangle as long as it is wide, a dot (type 42) a circle ending at the line's end; both
 /// grow by a fixed amount per point of line weight on top of a base size per size index.
 fn render_part_arrows(out: &mut String, part: &crate::scene::ScenePart) {
-    const ARROW_BASE: [f64; 7] = [11.5, 14.0, 20.0, 26.0, 31.5, 74.0, 149.0];
-    const DOT_BASE: [f64; 7] = [10.0, 11.0, 16.0, 21.0, 25.0, 56.0, 112.0];
     let Some([(start, after_start), (end, before_end)]) = crate::scene::path_ends(&part.d) else {
         return;
     };
@@ -2058,7 +2167,7 @@ fn render_part_arrows(out: &mut String, part: &crate::scene::ScenePart) {
         let fill = escape(&part.stroke);
         match kind {
             4 => {
-                let size_px = (ARROW_BASE[index] + 8.0 * weight_pt) / 300.0 * 96.0;
+                let size_px = arrow_size_px(index, weight_pt);
                 let (bx, by) = (tip.0 - ux * size_px, tip.1 - uy * size_px);
                 let half = size_px / 2.0;
                 out.push_str(&format!(
@@ -2074,7 +2183,7 @@ fn render_part_arrows(out: &mut String, part: &crate::scene::ScenePart) {
             }
             1..=35 => draw_gallery_end(out, kind, index, tip, (ux, uy), weight_pt, part.stroke_width, &fill),
             42 => {
-                let diameter = (DOT_BASE[index] + 6.0 * weight_pt) / 300.0 * 96.0;
+                let diameter = dot_diameter_px(index, weight_pt);
                 out.push_str(&format!(
                     r#"<circle cx="{}" cy="{}" r="{}" fill="{}" stroke="none"/>"#,
                     num(tip.0 - ux * diameter / 2.0),
