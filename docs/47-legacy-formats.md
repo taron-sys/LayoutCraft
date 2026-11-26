@@ -30,6 +30,13 @@ drawings also the formulas, the connections and the other sections the file hold
 * Both: macros, embedded OLE objects, links to external data. The conversion notes name what was found and dropped.
 * Binary text before version 11 is read as Windows-1252; other code pages show wrong letters.
 
+## XML drawings without a namespace
+
+Some programs write the XML format with no namespace at all; one sample, which marks itself as exported by Lucidchart, does. Such a
+file is recognised when its first element is a `VisioDocument` with content and no default namespace. Its cells are read as written:
+in that sample, the parts of a few groups are placed on top of each other by the file's own coordinates. How Visio shows that file
+has not been checked.
+
 ## Evidence and provenance
 
 Container: the public specification [MS-CFB]. XML format: the published Visio 2003 XML schema reference and drawings saved both as
