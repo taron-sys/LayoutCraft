@@ -2591,6 +2591,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Shapes panel is narrowed to a column.
+    shapes_minimised: bool,
     /// The one stencil of the Shapes panel that is open (its engine slot).
     open_stencil_shown: Option<usize>,
     /// The Shape Formulas window, while it is open.
@@ -2740,6 +2742,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            shapes_minimised: false,
             open_stencil_shown: None,
             sheet_pane: None,
             canvas_keys: false,
@@ -4645,6 +4648,7 @@ impl LayoutCraftApp {
                         self.change_shape = !self.change_shape && self.selected.is_some();
                         if self.change_shape {
                             self.shapes_open = true;
+                            self.shapes_minimised = false;
                             self.armed_master = None;
                             self.status = "Change Shape: click a shape in the Shapes panel (Esc cancels).".to_string();
                         } else if self.selected.is_none() {
@@ -6520,7 +6524,7 @@ impl eframe::App for LayoutCraftApp {
             self.armed_master = None;
             self.status = "Cancelled placing a shape.".to_string();
         }
-        if self.change_shape && (self.selected.is_none() || !self.shapes_open || ctx.input(|input| input.key_pressed(egui::Key::Escape))) {
+        if self.change_shape && (self.selected.is_none() || !self.shapes_open || self.shapes_minimised || ctx.input(|input| input.key_pressed(egui::Key::Escape))) {
             self.change_shape = false;
             self.status = "Change Shape cancelled.".to_string();
         }
@@ -6531,7 +6535,15 @@ impl eframe::App for LayoutCraftApp {
                 self.restore_stencils();
             }
         }
-        if self.shapes_open && !self.full_screen {
+        // minimised, the panel is a narrow column with the button that brings it back
+        if self.shapes_open && self.shapes_minimised && !self.full_screen {
+            egui::Panel::left("shapes-minimised").resizable(false).default_size(80.0).show(ui, |ui| {
+                if ui.button("Shapes \u{bb}").on_hover_text("Show the Shapes panel").clicked() {
+                    self.shapes_minimised = false;
+                }
+            });
+        }
+        if self.shapes_open && !self.shapes_minimised && !self.full_screen {
             let mut open_stencil = false;
             let mut builtin = false;
             let mut close = None;
@@ -6540,6 +6552,9 @@ impl eframe::App for LayoutCraftApp {
             egui::Panel::left("shapes").default_size(250.0).resizable(true).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading("Shapes");
+                    if ui.small_button("\u{ab} Minimise").on_hover_text("Narrow the Shapes panel to a column").clicked() {
+                        self.shapes_minimised = true;
+                    }
                     if ui.small_button("Open stencil…").clicked() {
                         open_stencil = true;
                     }
