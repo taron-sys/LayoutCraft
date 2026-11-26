@@ -116,8 +116,9 @@ pub fn media_bytes(package: &Package, media: &Media) -> Option<Vec<u8>> {
     // BMP pictures are served as PNG: the SVG/PNG renderers cannot draw an `image/bmp` data
     // URI, so every BMP shape used to come out blank (the scene sniffs the PNG signature).
     if media.ext.as_deref() == Some("bmp") {
-        let mut image = image::load_from_memory(bytes).ok()?.to_rgba8();
-        restore_bmp_alpha(bytes, &mut image);
+        let decoded = image::load_from_memory(bytes).ok()?;
+        // Only a picture whose transparency is restored changes its colour type: every other one stays as decoded.
+        let image = restore_bmp_alpha(bytes, &decoded).map_or(decoded, image::DynamicImage::ImageRgba8);
         let mut png = Vec::new();
         image
             .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
@@ -134,25 +135,23 @@ pub fn media_bytes(package: &Package, media: &Media) -> Option<Vec<u8>> {
 /// The format calls the fourth byte of an uncompressed 32 bit BMP with the 40 byte header unused, and the decoder drops it,
 /// but some files keep transparency there (docs/04-visio-import.md). It counts as alpha unless every pixel is 0 or every
 /// pixel is 255. A colour above its alpha means straight alpha; otherwise the colours are taken as premultiplied.
-fn restore_bmp_alpha(bytes: &[u8], image: &mut image::RgbaImage) {
+/// `None` when the picture has no transparency to restore.
+fn restore_bmp_alpha(bytes: &[u8], decoded: &image::DynamicImage) -> Option<image::RgbaImage> {
     let field = |at: usize| bytes.get(at..at + 4).and_then(|b| b.try_into().ok()).map(u32::from_le_bytes);
     // header size 40, then 32 bits per pixel (the upper half of the word at 26, after one plane), no compression
     if field(14) != Some(40) || field(26) != Some(32 << 16 | 1) || field(30) != Some(0) {
-        return;
+        return None;
     }
-    let (Some(start), Some(height)) = (field(10), field(22)) else {
-        return;
-    };
+    let (start, height) = (field(10)?, field(22)?);
     let top_down = (height as i32) < 0;
-    let (width, height) = (image.width() as usize, image.height() as usize);
-    let Some(pixels) = bytes.get(start as usize..).and_then(|rest| rest.get(..width * height * 4)) else {
-        return;
-    };
+    let (width, height) = (decoded.width() as usize, decoded.height() as usize);
+    let pixels = bytes.get(start as usize..)?.get(..width * height * 4)?;
     let all = |value: u8| pixels.chunks_exact(4).all(|pixel| pixel[3] == value);
     if all(0) || all(255) {
-        return;
+        return None;
     }
     let straight = pixels.chunks_exact(4).any(|pixel| pixel[..3].iter().any(|&colour| colour > pixel[3]));
+    let mut image = decoded.to_rgba8();
     for (x, y, pixel) in image.enumerate_pixels_mut() {
         let row = if top_down { y as usize } else { height - 1 - y as usize };
         let alpha = pixels[(row * width + x as usize) * 4 + 3];
@@ -163,6 +162,7 @@ fn restore_bmp_alpha(bytes: &[u8], image: &mut image::RgbaImage) {
             }
         }
     }
+    Some(image)
 }
 
 /// An OLE-embedded object (`ForeignType='Object'`, for example an embedded Visio

@@ -26,6 +26,11 @@ fn bmp(rows: &[[u8; 4]], top_down: bool) -> Vec<u8> {
 
 /// Insert the BMP into a blank drawing and return the (R, G, B, A) rows of the picture a renderer gets.
 fn served(data: &[u8]) -> Vec<[u8; 4]> {
+    picture(data).to_rgba8().pixels().map(|pixel| pixel.0).collect()
+}
+
+/// The picture a renderer gets for the BMP.
+fn picture(data: &[u8]) -> image::DynamicImage {
     let options = BlankOptions { width_in: 2.0, height_in: 2.0, metric: false, name: "Page-1".into() };
     let blank = Package::from_reader(Cursor::new(write_blank_document(&options).unwrap())).unwrap();
     let (bytes, _) = insert_picture(&blank, 0, data, 0.0, 0.0, 1.0, 1.0).unwrap();
@@ -33,7 +38,7 @@ fn served(data: &[u8]) -> Vec<[u8; 4]> {
     let document = import_document(&package).unwrap();
     let record = document.media.values().next().expect("a media record");
     let png = media_bytes(&package, record).expect("picture bytes");
-    image::load_from_memory(&png).unwrap().to_rgba8().pixels().map(|pixel| pixel.0).collect()
+    image::load_from_memory(&png).unwrap()
 }
 
 #[test]
@@ -62,4 +67,12 @@ fn an_unused_fourth_byte_leaves_the_picture_opaque() {
         let rows = served(&bmp(&[[0, 0, 0, fourth], [10, 20, 30, fourth]], false));
         assert_eq!(rows, vec![[0, 0, 0, 255], [30, 20, 10, 255]], "fourth byte {fourth}");
     }
+}
+
+#[test]
+fn only_a_picture_with_transparency_gets_an_alpha_channel() {
+    for fourth in [0, 255] {
+        assert!(!picture(&bmp(&[[0, 0, 0, fourth], [10, 20, 30, fourth]], false)).color().has_alpha(), "fourth byte {fourth}");
+    }
+    assert!(picture(&bmp(&[[0, 0, 0, 0], [10, 20, 30, 255]], false)).color().has_alpha());
 }
