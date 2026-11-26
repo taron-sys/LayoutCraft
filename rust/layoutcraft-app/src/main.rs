@@ -2401,6 +2401,19 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn f2_goes_into_the_text_and_back_keeping_it() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(2);
+        driver.key(Key::F2, Modifiers::NONE);
+        driver.write("kept");
+        driver.key(Key::F2, Modifiers::NONE);
+        assert!(driver.app.text_editor.is_none(), "{}", driver.app.status);
+        assert!(driver.app.doc_shape(&ids[0]).is_some_and(|shape| shape.label.contains("kept")), "{}", driver.app.status);
+        assert_eq!(driver.app.selected, Some(ids[0].clone()));
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -7886,7 +7899,9 @@ impl eframe::App for LayoutCraftApp {
                         ui.add(egui::DragValue::new(&mut editor.font_pt).range(1.0..=400.0).speed(0.5).suffix(" pt"));
                     });
                     ui.horizontal(|ui| {
+                        // F2 goes back from text editing to the selected shape, keeping the text
                         let apply = ui.button("Apply").clicked()
+                            || ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2))
                             || ui.input(|input| {
                                 input.modifiers.ctrl && input.key_pressed(egui::Key::Enter)
                             });
@@ -7913,7 +7928,7 @@ impl eframe::App for LayoutCraftApp {
                         }
                     });
                     ui.label(
-                        egui::RichText::new("Ctrl+Enter applies, Esc closes.")
+                        egui::RichText::new("Ctrl+Enter or F2 applies, Esc discards.")
                             .small()
                             .weak(),
                     );
