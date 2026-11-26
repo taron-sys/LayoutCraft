@@ -1,6 +1,6 @@
 [package]
 name = "layoutcraft-mcp"
-version = "0.1.0-rc.1"
+version = "0.1.0-rc.2"
 edition = "2021"
 description = "The LayoutCraft MCP server (Model Context Protocol over stdio) on the native engine (49 tools, one JSON-RPC message per line)"
 license = "MIT OR Apache-2.0"
