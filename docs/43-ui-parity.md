@@ -115,7 +115,7 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 38 present, 20 partial,
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 40 present, 18 partial,
 67 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
@@ -218,8 +218,8 @@ these are row counts, not a count of every Visio button.
 | Visio command | Src | LC id | Desktop | Browser | Notes | Prio |
 |---|---|---|---|---|---|---|
 | Page Setup: dialog (page size, orientation) | S4 (orientation and size under Design); dialog also from the page-tab menu | pageSetup | present | present | | P0 |
-| Page Setup: Orientation | S4 | designOrientation | partial | present | Desktop through dialog | P1 |
-| Page Setup: Size | S4 | designSize | partial | present | | P1 |
+| Page Setup: Orientation | S4 | designOrientation | present | present | | P1 |
+| Page Setup: Size | S4 | designSize | present | present | | P1 |
 | Themes (hover preview) | S8 | themeGallery | missing | present | Engine `themes_json`; hover preview unverified in LC | P1 |
 | Variants | S8 | variantGallery | missing | present | | P2 |
 | Backgrounds | S8 | paperColor | missing | partial | Visio adds a background page (S5, S8); LC sets a colour | P2 |

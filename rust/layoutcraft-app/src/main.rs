@@ -819,6 +819,49 @@ mod change_shape_tests {
     }
 }
 
+/// The paper sizes of the Design tab's Size menu: (name, short side, long side) in inches (`web/shell.html` `designSize`).
+const PAGE_SIZES: [(&str, f64, f64); 6] = [("Letter", 8.5, 11.0), ("Legal", 8.5, 14.0), ("Tabloid", 11.0, 17.0), ("A5", 5.8268, 8.2677), ("A4", 8.2677, 11.6929), ("A3", 11.6929, 16.5354)];
+
+/// (width, height) of the shown page from `Engine::page_size_json`.
+fn page_dimensions(engine: &Engine, page: usize) -> Option<(f64, f64)> {
+    let size: serde_json::Value = serde_json::from_str(&engine.page_size_json(page).ok()?).ok()?;
+    Some((size["w"].as_f64()?, size["h"].as_f64()?))
+}
+
+/// The new page size when a paper size (short, long) and / or an orientation is picked; what is not picked is kept
+/// (`web/shell.js` `applyPageShape`). `None` when nothing would change.
+fn shaped_page(current: (f64, f64), paper: Option<(f64, f64)>, portrait: Option<bool>) -> Option<(f64, f64)> {
+    let (short, long) = paper.unwrap_or((current.0.min(current.1), current.0.max(current.1)));
+    let portrait = portrait.unwrap_or(current.0 <= current.1);
+    let (w, h) = if portrait { (short, long) } else { (long, short) };
+    ((w - current.0).abs() > 1e-3 || (h - current.1).abs() > 1e-3).then_some((w, h))
+}
+
+#[cfg(test)]
+mod page_shape_tests {
+    use super::{page_dimensions, shaped_page};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn orientation_swaps_the_sides_and_a_paper_size_keeps_the_orientation() {
+        assert_eq!(shaped_page((8.5, 11.0), None, Some(false)), Some((11.0, 8.5)));
+        assert_eq!(shaped_page((11.0, 8.5), Some((8.5, 14.0)), None), Some((14.0, 8.5)));
+        assert_eq!(shaped_page((8.5, 11.0), Some((8.5, 14.0)), None), Some((8.5, 14.0)));
+        assert_eq!(shaped_page((8.5, 11.0), Some((8.5, 11.0)), None), None);
+        assert_eq!(shaped_page((8.5, 11.0), None, Some(true)), None);
+    }
+
+    #[test]
+    fn the_new_size_reaches_the_page() {
+        let mut engine = Engine::default();
+        engine.new_blank(8.5, 11.0, false, "Page-1").unwrap();
+        let (w, h) = shaped_page(page_dimensions(&engine, 0).unwrap(), None, Some(false)).unwrap();
+        engine.page_op(6, 0, 0, &format!("{w},{h}")).unwrap();
+        let (w, h) = page_dimensions(&engine, 0).unwrap();
+        assert!(w > h);
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -3427,6 +3470,10 @@ impl LayoutCraftApp {
             });
             return;
         }
+        if id == "designOrientation" || id == "designSize" {
+            self.ribbon_page_shape(ui, id, action);
+            return;
+        }
         if id == "pageTools" {
             for page_id in ["pageAdd", "pageDup", "pageRename", "pageDel", "pageLeft", "pageRight"] {
                 self.ribbon_button(ui, ctx, page_id, action);
@@ -4155,6 +4202,44 @@ impl LayoutCraftApp {
             }
             Err(error) => self.status = format!("Could not change the shape: {error}"),
         }
+    }
+
+    /// The Design tab's Orientation and Size menus; the current choice is marked.
+    fn ribbon_page_shape(&mut self, ui: &mut egui::Ui, id: &str, action: &mut Option<Action>) {
+        let (engine, page, enabled) = (&self.engine, self.page_index, self.texture.is_some());
+        let title = if id == "designSize" { "Size \u{25be}" } else { "Orientation \u{25be}" };
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.menu_button(title, |ui| {
+                let Some(current) = page_dimensions(engine, page) else {
+                    ui.label("The page size cannot be read.");
+                    return;
+                };
+                let choices: Vec<(&str, Option<(f64, f64)>, Option<bool>)> = if id == "designSize" {
+                    PAGE_SIZES.iter().map(|(name, short, long)| (*name, Some((*short, *long)), None)).collect()
+                } else {
+                    vec![("Portrait", None, Some(true)), ("Landscape", None, Some(false))]
+                };
+                for (name, paper, portrait) in choices {
+                    let next = shaped_page(current, paper, portrait);
+                    if ui.selectable_label(next.is_none(), name).clicked() {
+                        if let Some((w, h)) = next {
+                            *action = Some(Action::PageShape(w, h));
+                        }
+                        ui.close();
+                    }
+                }
+            });
+        });
+    }
+
+    /// Set the size of the shown page (the shapes keep their positions) and fit it to the window.
+    fn set_page_shape(&mut self, ctx: &egui::Context, w: f64, h: f64) {
+        let page = self.page_index;
+        let result = self.engine.page_op(6, page, 0, &format!("{w},{h}")).map(|_| ());
+        let changed = result.is_ok();
+        let selected = self.selected.clone();
+        self.finish_edit(ctx, result, "Page size changed", selected);
+        self.fit_pending |= changed;
     }
 
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
@@ -5742,6 +5827,7 @@ impl eframe::App for LayoutCraftApp {
             }
             Some(Action::DocProps) => self.doc_props_open = true,
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
+            Some(Action::PageShape(w, h)) => self.set_page_shape(&ctx, w, h),
             Some(Action::Find) => self.open_find(),
             Some(Action::HelpAbout) => self.help_about_open = true,
             Some(Action::HelpMcp) => self.mcp_open = true,
@@ -5836,6 +5922,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Set the shown page's width and height (inches).
+    PageShape(f64, f64),
     Find,
     /// Format the whole text of the selected shapes: `cells` and / or `para` of `Engine::edit` op 13.
     FormatText(serde_json::Value),
