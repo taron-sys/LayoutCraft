@@ -1,6 +1,6 @@
 [package]
 name = "layoutcraft-app"
-version = "0.1.0-rc.2"
+version = "0.1.0-rc.3"
 edition = "2021"
 description = "Native LayoutCraft editor shell"
 license = "MIT OR Apache-2.0"
