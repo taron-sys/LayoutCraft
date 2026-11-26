@@ -371,6 +371,62 @@ mod view_key_tests {
     }
 }
 
+/// The resizes of "same width / height": every other page-level shape of the selection takes the width and / or height of the
+/// FIRST one (the rule of `web/shell.js` `sameSize`). `frames` is `Engine::group_info_json`; connectors, group members and
+/// shapes without an editable frame are left out. Returns (id, width, height) in inches.
+fn same_size_plan(frames: &str, ids: &[String], is_connector: impl Fn(&str) -> bool, width: bool, height: bool) -> Result<Vec<(String, f64, f64)>, String> {
+    let frames: Vec<serde_json::Value> = serde_json::from_str(frames).map_err(|error| error.to_string())?;
+    let sizes: Vec<(&String, f64, f64)> = ids
+        .iter()
+        .filter(|id| !is_connector(id))
+        .filter_map(|id| {
+            let frame = frames.iter().find(|frame| frame["id"].as_str() == Some(id.as_str()))?;
+            if !frame["parentId"].is_null() || frame["editable"].as_bool() != Some(true) {
+                return None;
+            }
+            Some((id, frame["size"][0].as_f64()?, frame["size"][1].as_f64()?))
+        })
+        .collect();
+    let [(_, first_w, first_h), rest @ ..] = sizes.as_slice() else {
+        return Err("select two or more shapes of the page (shift-click)".to_string());
+    };
+    if rest.is_empty() {
+        return Err("select two or more shapes of the page (shift-click)".to_string());
+    }
+    Ok(rest.iter().map(|(id, w, h)| ((*id).clone(), if width { *first_w } else { *w }, if height { *first_h } else { *h })).collect())
+}
+
+#[cfg(test)]
+mod same_size_tests {
+    use super::same_size_plan;
+
+    const FRAMES: &str = r#"[
+        {"id":"1","parentId":null,"editable":true,"size":[2.0,1.0]},
+        {"id":"2","parentId":null,"editable":true,"size":[3.0,4.0]},
+        {"id":"3","parentId":"2","editable":true,"size":[5.0,5.0]},
+        {"id":"4","parentId":null,"editable":true,"size":[6.0,7.0]}
+    ]"#;
+
+    fn ids(list: &[&str]) -> Vec<String> {
+        list.iter().map(|id| id.to_string()).collect()
+    }
+
+    #[test]
+    fn the_others_take_the_size_of_the_first_selected() {
+        let plan = same_size_plan(FRAMES, &ids(&["2", "1", "4"]), |_| false, true, false).unwrap();
+        assert_eq!(plan, vec![("1".to_string(), 3.0, 1.0), ("4".to_string(), 3.0, 7.0)]);
+        let plan = same_size_plan(FRAMES, &ids(&["1", "2"]), |_| false, true, true).unwrap();
+        assert_eq!(plan, vec![("2".to_string(), 2.0, 1.0)]);
+    }
+
+    #[test]
+    fn connectors_and_group_members_are_left_out() {
+        let plan = same_size_plan(FRAMES, &ids(&["4", "1", "3", "2"]), |id| id == "4", false, true).unwrap();
+        assert_eq!(plan, vec![("2".to_string(), 3.0, 1.0)]);
+        assert!(same_size_plan(FRAMES, &ids(&["1", "3"]), |_| false, true, true).is_err());
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -866,6 +922,8 @@ enum ArrangeCmd {
     RotateLeft,
     /// `true` = about the horizontal axis
     Flip(bool),
+    /// (width, height): give the other shapes the first one's width and / or height.
+    SameSize(bool, bool),
 }
 
 /// What a drag on the canvas does: select / move / resize, or draw a shape.
@@ -3139,6 +3197,7 @@ impl LayoutCraftApp {
             N::RotateQuarter => Action::Arrange(ArrangeCmd::RotateQuarter),
             N::RotateLeft => Action::Arrange(ArrangeCmd::RotateLeft),
             N::Flip(vertical) => Action::Arrange(ArrangeCmd::Flip(vertical)),
+            N::SameSize(width, height) => Action::Arrange(ArrangeCmd::SameSize(width, height)),
             N::Align(mode) => Action::Arrange(ArrangeCmd::Align(mode)),
             N::Distribute(vertical) => Action::Arrange(ArrangeCmd::Distribute(vertical)),
             N::PageAdd => Action::PageAdd,
@@ -3398,6 +3457,7 @@ impl LayoutCraftApp {
             ArrangeCmd::RotateQuarter => ("Rotated right", self.engine.edit(page, 11, &list, -std::f64::consts::FRAC_PI_2, 0.0, 0.0, 0.0, 0).map(|_| None)),
             ArrangeCmd::RotateLeft => ("Rotated left", self.engine.edit(page, 11, &list, std::f64::consts::FRAC_PI_2, 0.0, 0.0, 0.0, 0).map(|_| None)),
             ArrangeCmd::Flip(vertical) => ("Flipped", self.engine.edit(page, 12, &list, 0.0, 0.0, 0.0, 0.0, vertical as i32).map(|_| None)),
+            ArrangeCmd::SameSize(width, height) => ("Resized", self.make_same_size(&ids, width, height).map(|_| None)),
         };
         match result {
             Ok(new_primary) => {
@@ -3408,6 +3468,21 @@ impl LayoutCraftApp {
             }
             Err(error) => self.status = format!("{verb} failed: {error}"),
         }
+    }
+
+    /// Resize the selection to the first shape's width and / or height, about each centre, as one undo step.
+    fn make_same_size(&mut self, ids: &[String], width: bool, height: bool) -> Result<(), String> {
+        let page = self.page_index;
+        let frames = self.engine.group_info_json(page)?;
+        let plan = same_size_plan(&frames, ids, |id| self.is_connector(id), width, height)?;
+        let depth = self.engine.undo_depth();
+        let result = plan.iter().try_for_each(|(id, w, h)| self.engine.edit(page, 3, id, *w, *h, 0.5, 0.5, 0));
+        self.engine.collapse_history(depth);
+        // all or nothing: a failure part way takes the earlier resizes back
+        if result.is_err() && self.engine.undo_depth() > depth {
+            let _ = self.engine.undo();
+        }
+        result
     }
 
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).

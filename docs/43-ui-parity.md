@@ -115,8 +115,8 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 32 present, 18 partial,
-75 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 33 present, 18 partial,
+74 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
 ### 3.1 File / Backstage
@@ -180,7 +180,7 @@ these are row counts, not a count of every Visio button.
 | Arrange: Bring to Front / Send to Back | S1 | zFront zBack | present | present | | P0 |
 | Arrange: Bring Forward / Send Backward | unverified | zFwd zBwd | present | present | | P1 |
 | Arrange: Group / Ungroup | S1 | grp ungrp | present | present | Grouped shapes are read-only for edits on desktop ("Grouped: read-only in this slice") | P0 |
-| Arrange: same width / height / size | unverified | sameW sameH sameWH | missing | present | | P2 |
+| Arrange: same width / height / size | unverified | sameW sameH sameWH | present | present | To the first shape selected; connectors and group members are left out | P2 |
 | Arrange: reverse connector ends | unverified | reverseEnds | missing | present | | P2 |
 | Arrange: lock | unverified | lockShape | missing | present | | P2 |
 | Arrange: shape operations (Union, Combine, Fragment, Intersect, Subtract, Join, Trim) | S18 for Trim (Developer tab, Shape Design, Operations); the others unverified | opUnion opCombine opFragment opIntersect opSubtract opJoin opTrim | missing | present | Visio puts them on Developer (S18); LayoutCraft shows them in Home > Arrange. Engine: `shape_operation`; follow Visio's place | P1 |

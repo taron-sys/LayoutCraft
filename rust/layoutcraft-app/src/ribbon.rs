@@ -101,6 +101,8 @@ pub enum Native {
     RotateQuarter,
     RotateLeft,
     Flip(bool),
+    /// (width, height): the other selected shapes take the first one's width and / or height
+    SameSize(bool, bool),
     /// 0 left, 1 centre, 2 right, 3 top, 4 middle, 5 bottom
     Align(u32),
     Distribute(bool),
@@ -168,6 +170,9 @@ pub fn native(id: &str) -> Option<Native> {
         "rotL" => Native::RotateLeft,
         "flipH" => Native::Flip(false),
         "flipV" => Native::Flip(true),
+        "sameW" => Native::SameSize(true, false),
+        "sameH" => Native::SameSize(false, true),
+        "sameWH" => Native::SameSize(true, true),
         "arrL" => Native::Align(0),
         "arrCx" => Native::Align(1),
         "arrRt" => Native::Align(2),
@@ -263,6 +268,9 @@ pub fn label(id: &str) -> String {
         "rotR" => "Rotate Right",
         "flipH" => "Flip Horizontal",
         "flipV" => "Flip Vertical",
+        "sameW" => "Same Width",
+        "sameH" => "Same Height",
+        "sameWH" => "Same Size",
         "arrL" => "Align Left",
         "arrCx" => "Align Center",
         "arrRt" => "Align Right",
@@ -376,7 +384,7 @@ mod tests {
         web_ids.extend(ribbon.icons.keys().cloned());
         web_ids.extend(["save", "undo", "redo"].map(String::from));
         let expected = [
-            "undo", "redo", "save", "copy", "cut", "paste", "dup", "del", "grp", "ungrp", "zFront", "zBack", "zFwd", "zBwd", "rotR", "rotL", "flipH", "flipV", "arrL", "arrCx", "arrRt", "arrT",
+            "undo", "redo", "save", "copy", "cut", "paste", "dup", "del", "grp", "ungrp", "zFront", "zBack", "zFwd", "zBwd", "rotR", "rotL", "flipH", "flipV", "sameW", "sameH", "sameWH", "arrL", "arrCx", "arrRt", "arrT",
             "arrM", "arrB", "arrDistH", "arrDistV", "pageAdd", "pageDup", "pageRename", "pageDel", "pageLeft", "pageRight", "connectTool", "handTool", "snapGrid", "snapShapes", "snapGuides", "showGrid", "gridStep", "fit", "zoom100", "zin", "zout", "newBtn", "file", "docPropsBtn", "helpShortcuts", "helpAbout", "mcpInfo", "insertTextBox", "pageSetup", "showComments", "newComment", "checkDiagram", "compareBtn", "reportBtn", "exportBtn", "paneShapes", "borderStyle", "borderTitle", "borderApply", "borderRemove",
         ];
         for id in expected {
