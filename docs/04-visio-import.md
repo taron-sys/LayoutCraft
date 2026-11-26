@@ -413,6 +413,14 @@ kept in `doc.media` (so patch saves and fresh rebuilds preserve them) but the
 editor shows a placeholder; Visio may still display the original in a patched
 file.
 
+**Transparency in 32-bit BMP pictures.** The BMP format calls the fourth byte of an uncompressed 32-bit picture with the
+40-byte header unused, yet a user's `.vsdx` held such pictures with transparency in it (byte counts only: clear pixels were
+black, edge pixels partial). Ignoring it drew a black background. The PNG served to renderers now treats the byte as alpha
+unless it is 0 in every pixel or 255 in every pixel. If any colour is above its alpha, the colours are straight; otherwise
+they are taken as premultiplied and scaled back. Some pictures of that file fitted each case. The package part is not changed.
+Limits: a very dark straight-alpha picture looks premultiplied, so its soft edges come out too light; bitmaps inside EMF and
+WMF pictures are not covered. This has **not been compared with Visio**.
+
 **Indexed-colour quirk.** Visio 2021 ignores Brightness/Contrast/Gamma on
 palette-indexed pictures (PNG colour type 3 and GIF). Transparency still
 applies. The importer records `media.adjust = false` and the renderer skips the
