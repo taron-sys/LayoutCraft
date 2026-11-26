@@ -115,8 +115,8 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 42 present, 20 partial,
-63 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 43 present, 20 partial,
+62 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
 ### 3.1 File / Backstage
@@ -260,7 +260,7 @@ these are row counts, not a count of every Visio button.
 
 | Visio command | Src | LC id | Desktop | Browser | Notes | Prio |
 |---|---|---|---|---|---|---|
-| Views: Full Screen (F5, Esc exits) | S1, S4 | fullScreen | missing | present | | P1 |
+| Views: Full Screen (F5, Esc exits) | S1, S4 | fullScreen | present | present | Desktop keeps the status bar | P1 |
 | Views: Normal / slide-show style views | unverified | fixedPage | missing | present | | P3 |
 | Views: print preview | unverified | print | missing | present | | P2 |
 | Show: Ruler | S26 | showRulers | missing | present | | P0 |
@@ -362,7 +362,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Format Shape pane | F3 | none | none | none |
 | Text dialog | F11 | none | none | none |
 | Snap & Glue dialog | Alt+F9 | none | none | none |
-| Full-screen view / exit | F5 / Esc | none | no key | none |
+| Full-screen view / exit | F5 / Esc | F5 / Esc | no key | same on desktop |
 | Fit page to window | Ctrl+Shift+W | Ctrl+Shift+W | none | same on desktop |
 | Zoom in / out | Alt+F6 / Alt+Shift+F6 (web: Ctrl+Plus / Ctrl+Minus) | Ctrl+= or Ctrl++ / Ctrl+- | same | diff on desktop key set; matches the web variant |
 | Cycle focus through shapes | Tab / Shift+Tab | none | Tab on the stage | none (desktop) |
@@ -386,7 +386,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Find | Ctrl+F (web `findBtn`) | Ctrl+F | Ctrl+F | same on desktop |
 | Hyperlink | Ctrl+K (unverified in S1) | Ctrl+K | Ctrl+K | same on desktop |
 
-Count of the 41 rows above: same 18, diff 2, partial 2, none 19. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 19, diff 2, partial 2, none 18. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 

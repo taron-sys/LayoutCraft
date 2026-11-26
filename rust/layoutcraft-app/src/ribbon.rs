@@ -135,6 +135,8 @@ pub enum Native {
     ShapesPane,
     /// The Find window.
     Find,
+    /// Enter or leave the full-screen view.
+    FullScreen,
     /// Show or hide the Shape Data window.
     ShapeData,
     /// The Hyperlink window of the selected shape.
@@ -229,6 +231,7 @@ pub fn native(id: &str) -> Option<Native> {
         "exportBtn" => Native::Export,
         "paneShapes" => Native::ShapesPane,
         "findBtn" => Native::Find,
+        "fullScreen" => Native::FullScreen,
         "dataBtn" => Native::ShapeData,
         "insertHyperlink" => Native::Hyperlink,
         "changeShapeBtn" => Native::ChangeShape,
@@ -280,6 +283,7 @@ pub fn label(id: &str) -> String {
         "stylesBtn" => "Styles",
         "changeShapeBtn" => "Change Shape",
         "findBtn" => "Find",
+        "fullScreen" => "Full Screen",
         "dataBtn" => "Shape Fields",
         "layersBtn" => "Layers",
         "zFront" => "Bring to Front",
@@ -414,7 +418,7 @@ mod tests {
         web_ids.extend(["save", "undo", "redo"].map(String::from));
         let expected = [
             "undo", "redo", "save", "copy", "cut", "paste", "dup", "del", "grp", "ungrp", "zFront", "zBack", "zFwd", "zBwd", "rotR", "rotL", "flipH", "flipV", "sameW", "sameH", "sameWH", "opUnion", "opCombine", "opFragment", "opIntersect", "opSubtract", "opJoin", "opTrim", "arrL", "arrCx", "arrRt", "arrT",
-            "arrM", "arrB", "arrDistH", "arrDistV", "pageAdd", "pageDup", "pageRename", "pageDel", "pageLeft", "pageRight", "connectTool", "handTool", "snapGrid", "snapShapes", "snapGuides", "showGrid", "gridStep", "fit", "zoom100", "zin", "zout", "newBtn", "file", "docPropsBtn", "helpShortcuts", "helpAbout", "mcpInfo", "insertTextBox", "pageSetup", "showComments", "newComment", "checkDiagram", "compareBtn", "reportBtn", "exportBtn", "paneShapes", "dataBtn", "findBtn", "insertHyperlink", "changeShapeBtn", "borderStyle", "borderTitle", "borderApply", "borderRemove",
+            "arrM", "arrB", "arrDistH", "arrDistV", "pageAdd", "pageDup", "pageRename", "pageDel", "pageLeft", "pageRight", "connectTool", "handTool", "snapGrid", "snapShapes", "snapGuides", "showGrid", "gridStep", "fit", "zoom100", "zin", "zout", "newBtn", "file", "docPropsBtn", "helpShortcuts", "helpAbout", "mcpInfo", "insertTextBox", "pageSetup", "showComments", "newComment", "checkDiagram", "compareBtn", "reportBtn", "exportBtn", "paneShapes", "fullScreen", "dataBtn", "findBtn", "insertHyperlink", "changeShapeBtn", "borderStyle", "borderTitle", "borderApply", "borderRemove",
         ];
         for id in expected {
             assert!(web_ids.contains(id), "{id} is a command id of the web ribbon");

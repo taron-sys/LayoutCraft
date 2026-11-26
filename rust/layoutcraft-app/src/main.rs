@@ -323,6 +323,7 @@ enum ViewKey {
     PreviousPage,
     Find,
     Hyperlink,
+    FullScreen,
 }
 
 /// Tool and view shortcuts for features the app has, with Visio's documented keys (`docs/43-ui-parity.md` 4.1). The draw
@@ -338,6 +339,7 @@ const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
     (egui::Modifiers::CTRL, egui::Key::PageUp, ViewKey::PreviousPage),
     (egui::Modifiers::CTRL, egui::Key::F, ViewKey::Find),
     (egui::Modifiers::CTRL, egui::Key::K, ViewKey::Hyperlink),
+    (egui::Modifiers::NONE, egui::Key::F5, ViewKey::FullScreen),
 ];
 
 /// Takes the first tool or view shortcut pressed in this frame out of the input.
@@ -375,6 +377,7 @@ mod view_key_tests {
         // Ctrl+Shift+F is "bring to front" and is taken by the arrange keys first
         assert!(press(Key::F, true, false) == Some(ViewKey::Find));
         assert!(press(Key::K, true, false) == Some(ViewKey::Hyperlink));
+        assert!(press(Key::F5, false, false) == Some(ViewKey::FullScreen));
     }
 }
 
@@ -1785,6 +1788,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The full-screen view is on.
+    full_screen: bool,
     /// The Shape Data window, while it is open.
     data_pane: Option<DataPane>,
     /// The Hyperlink window, while it is open.
@@ -1907,6 +1912,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            full_screen: false,
             data_pane: None,
             link_draft: None,
             theme_all_pages: false,
@@ -3975,6 +3981,7 @@ impl LayoutCraftApp {
             N::DocProps => Action::DocProps,
             N::HelpShortcuts => Action::HelpShortcuts,
             N::Hyperlink => Action::Hyperlink,
+            N::FullScreen => Action::FullScreen,
             N::ShapeData => Action::ShapeData,
             N::Find => Action::Find,
             N::HelpAbout => Action::HelpAbout,
@@ -4715,6 +4722,14 @@ impl LayoutCraftApp {
         }
     }
 
+    /// Enter or leave the full-screen view.
+    fn toggle_full_screen(&mut self, ctx: &egui::Context) {
+        self.full_screen = !self.full_screen;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.full_screen));
+        self.fit_pending = true;
+        self.status = if self.full_screen { "Full screen: Esc or F5 leaves it.".to_string() } else { "Left full screen.".to_string() };
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -4931,6 +4946,7 @@ impl eframe::App for LayoutCraftApp {
                 Some(ViewKey::PreviousPage) => action = Some(Action::Page(self.page_index.saturating_sub(1))),
                 Some(ViewKey::Find) => action = Some(Action::Find),
                 Some(ViewKey::Hyperlink) => action = Some(Action::Hyperlink),
+                Some(ViewKey::FullScreen) => action = Some(Action::FullScreen),
                 None => {}
             }
             if self.selected.is_some() {
@@ -4947,15 +4963,21 @@ impl eframe::App for LayoutCraftApp {
                     self.nudge_selected(&ctx, dx, dy);
                 }
             }
+            if self.full_screen && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                action = Some(Action::FullScreen);
+            }
             if ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
                 self.selected = None;
                 self.text_editor = None;
             }
         }
 
-        egui::Panel::top("ribbon").show(ui, |ui| {
-            self.draw_ribbon(ui, &mut action);
-        });
+        // the full-screen view shows the drawing and the status bar only
+        if !self.full_screen {
+            egui::Panel::top("ribbon").show(ui, |ui| {
+                self.draw_ribbon(ui, &mut action);
+            });
+        }
 
         if self.pending_open.is_some() {
             egui::Panel::top("pending").show(ui, |ui| {
@@ -4994,210 +5016,212 @@ impl eframe::App for LayoutCraftApp {
             ui.add_space(2.0);
         });
 
-        egui::Panel::right("inspector")
-            .default_size(250.0)
-            .resizable(true)
-            .show(ui, |ui| {
-                ui.heading("Document");
-                if let Some(document) = &self.engine.document {
-                    ui.label(format!("Pages: {}", document.pages.len()));
-                    ui.label(format!("Media: {}", document.media.len()));
-                    if let Some(page) = document.pages.get(self.page_index) {
-                        ui.label(format!("Page: {}", page.name));
-                        ui.label(format!(
-                            "Shapes: {}  Connectors: {}",
-                            page.shapes.len(),
-                            page.connectors.len()
-                        ));
+        if !self.full_screen {
+            egui::Panel::right("inspector")
+                .default_size(250.0)
+                .resizable(true)
+                .show(ui, |ui| {
+                    ui.heading("Document");
+                    if let Some(document) = &self.engine.document {
+                        ui.label(format!("Pages: {}", document.pages.len()));
+                        ui.label(format!("Media: {}", document.media.len()));
+                        if let Some(page) = document.pages.get(self.page_index) {
+                            ui.label(format!("Page: {}", page.name));
+                            ui.label(format!(
+                                "Shapes: {}  Connectors: {}",
+                                page.shapes.len(),
+                                page.connectors.len()
+                            ));
+                        }
+                        for found in &self.font_warnings {
+                            ui.colored_label(egui::Color32::from_rgb(255, 90, 90), format!("\u{26a0} Font {} is not installed: drawn with {}", found.requested, found.used))
+                                .on_hover_text("The file keeps the font it names; only this screen uses the replacement, so text may look and wrap a little differently.");
+                        }
+                    } else {
+                        ui.label("Nothing loaded.");
                     }
-                    for found in &self.font_warnings {
-                        ui.colored_label(egui::Color32::from_rgb(255, 90, 90), format!("\u{26a0} Font {} is not installed: drawn with {}", found.requested, found.used))
-                            .on_hover_text("The file keeps the font it names; only this screen uses the replacement, so text may look and wrap a little differently.");
-                    }
-                } else {
-                    ui.label("Nothing loaded.");
-                }
-                ui.separator();
-                ui.heading("Selection");
-                if let Some(selected) = self.selected.clone() {
-                    if let Some(shape) = self.scene_shape(&selected) {
-                        ui.label(format!("Shape {selected}"));
-                        ui.label(format!(
-                            "Box: {:.1} x {:.1} at {:.1}, {:.1}",
-                            shape.w, shape.h, shape.x, shape.y
-                        ));
-                        ui.label(format!("Parts: {}", shape.parts.len()));
-                        // the shape's hyperlinks (edited in the Hyperlink window, Ctrl+K)
-                        let key = (selected.clone(), self.page_index, self.engine.undo_depth());
-                        let cached = self.links_cache.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone());
-                        let links = cached.unwrap_or_else(|| {
-                            let parsed = self.engine.hyperlinks_json(self.page_index, &selected).map(|j| parse_links(&j)).unwrap_or_default();
-                            *self.links_cache.borrow_mut() = Some((key, parsed.clone()));
-                            parsed
-                        });
-                        for (name, address) in &links {
-                            ui.label(egui::RichText::new(format!("Link: {} {}", if name.is_empty() { "(unnamed)" } else { name }, address)).small());
-                        }
-                        if let Some(text) = shape_text(shape) {
-                            ui.add_space(4.0);
-                            ui.label(egui::RichText::new(text).monospace());
-                        }
-                    }
-                    if let Some(shape) = self.doc_shape(&selected) {
-                        ui.add_space(4.0);
-                        ui.label(format!(
-                            "Position: {:.3} x {:.3} in",
-                            (shape.w / DPI) as f32,
-                            (shape.h / DPI) as f32
-                        ));
-                        if shape.group.is_some() {
-                            ui.colored_label(
-                                egui::Color32::from_rgb(255, 196, 0),
-                                "Grouped: read-only in this slice",
-                            );
-                        } else if shape.rot.abs() >= 1e-6 {
-                            ui.label("Rotated: move only, resize disabled");
-                        }
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.button("Edit text").clicked() {
-                            action = Some(Action::EditText);
-                        }
-                        if ui
-                            .add_enabled(
-                                self.doc_shape(&selected)
-                                    .is_some_and(|shape| shape.group.is_none())
-                                    || self.is_connector(&selected),
-                                egui::Button::new("Delete"),
-                            )
-                            .clicked()
-                        {
-                            action = Some(Action::DeleteSelected);
-                        }
-                    });
-                    if let Some(shape) = self.doc_shape(&selected).filter(|shape| shape.group.is_none()).cloned() {
-                        if self.style_draft.as_ref().is_none_or(|draft| draft.id != selected) {
-                            self.style_draft = Some(StyleDraft::from_shape(&selected, &shape));
-                        }
-                        if let Some(draft) = &mut self.style_draft {
-                            ui.separator();
-                            ui.label("Style");
-                            ui.horizontal(|ui| {
-                                ui.checkbox(&mut draft.has_fill, "Fill");
-                                ui.color_edit_button_srgb(&mut draft.fill);
-                            });
-                            ui.horizontal(|ui| {
-                                ui.checkbox(&mut draft.has_line, "Line");
-                                ui.color_edit_button_srgb(&mut draft.line);
-                                ui.add(egui::DragValue::new(&mut draft.weight_px).range(0.0..=40.0).speed(0.1).suffix(" px"));
-                            });
-                            egui::ComboBox::from_label("Pattern")
-                                .selected_text(LINE_PATTERNS.iter().find(|(code, _)| *code == draft.pattern).map_or("Other", |(_, name)| *name))
-                                .show_ui(ui, |ui| {
-                                    for (code, name) in LINE_PATTERNS {
-                                        ui.selectable_value(&mut draft.pattern, code, name);
-                                    }
-                                });
-                            if ui.add_enabled(draft.changes().is_some(), egui::Button::new("Apply style")).clicked() {
-                                action = Some(Action::ApplyStyle);
-                            }
-                        }
-                    }
-                } else {
-                    ui.label("Click a shape on the canvas.");
-                }
-                if self.selected.is_some() {
                     ui.separator();
-                    ui.label(format!("Arrange ({} selected; shift-click adds)", 1 + self.extra_selected.len()));
-                    ui.horizontal_wrapped(|ui| {
-                        for (label, command) in [
-                            ("Group", ArrangeCmd::Group),
-                            ("Ungroup", ArrangeCmd::Ungroup),
-                            ("Front", ArrangeCmd::Order(2)),
-                            ("Back", ArrangeCmd::Order(3)),
-                            ("Fwd", ArrangeCmd::Order(4)),
-                            ("Bwd", ArrangeCmd::Order(5)),
-                            ("Rot R", ArrangeCmd::RotateQuarter),
-                            ("Flip H", ArrangeCmd::Flip(false)),
-                            ("Flip V", ArrangeCmd::Flip(true)),
-                        ] {
-                            if ui.small_button(label).clicked() {
-                                action = Some(Action::Arrange(command));
+                    ui.heading("Selection");
+                    if let Some(selected) = self.selected.clone() {
+                        if let Some(shape) = self.scene_shape(&selected) {
+                            ui.label(format!("Shape {selected}"));
+                            ui.label(format!(
+                                "Box: {:.1} x {:.1} at {:.1}, {:.1}",
+                                shape.w, shape.h, shape.x, shape.y
+                            ));
+                            ui.label(format!("Parts: {}", shape.parts.len()));
+                            // the shape's hyperlinks (edited in the Hyperlink window, Ctrl+K)
+                            let key = (selected.clone(), self.page_index, self.engine.undo_depth());
+                            let cached = self.links_cache.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone());
+                            let links = cached.unwrap_or_else(|| {
+                                let parsed = self.engine.hyperlinks_json(self.page_index, &selected).map(|j| parse_links(&j)).unwrap_or_default();
+                                *self.links_cache.borrow_mut() = Some((key, parsed.clone()));
+                                parsed
+                            });
+                            for (name, address) in &links {
+                                ui.label(egui::RichText::new(format!("Link: {} {}", if name.is_empty() { "(unnamed)" } else { name }, address)).small());
+                            }
+                            if let Some(text) = shape_text(shape) {
+                                ui.add_space(4.0);
+                                ui.label(egui::RichText::new(text).monospace());
                             }
                         }
-                    });
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Align");
-                        for (label, mode) in [("L", 0), ("C", 1), ("R", 2), ("T", 3), ("M", 4), ("B", 5)] {
-                            if ui.small_button(label).clicked() {
-                                action = Some(Action::Arrange(ArrangeCmd::Align(mode)));
+                        if let Some(shape) = self.doc_shape(&selected) {
+                            ui.add_space(4.0);
+                            ui.label(format!(
+                                "Position: {:.3} x {:.3} in",
+                                (shape.w / DPI) as f32,
+                                (shape.h / DPI) as f32
+                            ));
+                            if shape.group.is_some() {
+                                ui.colored_label(
+                                    egui::Color32::from_rgb(255, 196, 0),
+                                    "Grouped: read-only in this slice",
+                                );
+                            } else if shape.rot.abs() >= 1e-6 {
+                                ui.label("Rotated: move only, resize disabled");
                             }
                         }
-                        ui.label("Spread");
-                        if ui.small_button("H").clicked() {
-                            action = Some(Action::Arrange(ArrangeCmd::Distribute(false)));
+                        ui.horizontal(|ui| {
+                            if ui.button("Edit text").clicked() {
+                                action = Some(Action::EditText);
+                            }
+                            if ui
+                                .add_enabled(
+                                    self.doc_shape(&selected)
+                                        .is_some_and(|shape| shape.group.is_none())
+                                        || self.is_connector(&selected),
+                                    egui::Button::new("Delete"),
+                                )
+                                .clicked()
+                            {
+                                action = Some(Action::DeleteSelected);
+                            }
+                        });
+                        if let Some(shape) = self.doc_shape(&selected).filter(|shape| shape.group.is_none()).cloned() {
+                            if self.style_draft.as_ref().is_none_or(|draft| draft.id != selected) {
+                                self.style_draft = Some(StyleDraft::from_shape(&selected, &shape));
+                            }
+                            if let Some(draft) = &mut self.style_draft {
+                                ui.separator();
+                                ui.label("Style");
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut draft.has_fill, "Fill");
+                                    ui.color_edit_button_srgb(&mut draft.fill);
+                                });
+                                ui.horizontal(|ui| {
+                                    ui.checkbox(&mut draft.has_line, "Line");
+                                    ui.color_edit_button_srgb(&mut draft.line);
+                                    ui.add(egui::DragValue::new(&mut draft.weight_px).range(0.0..=40.0).speed(0.1).suffix(" px"));
+                                });
+                                egui::ComboBox::from_label("Pattern")
+                                    .selected_text(LINE_PATTERNS.iter().find(|(code, _)| *code == draft.pattern).map_or("Other", |(_, name)| *name))
+                                    .show_ui(ui, |ui| {
+                                        for (code, name) in LINE_PATTERNS {
+                                            ui.selectable_value(&mut draft.pattern, code, name);
+                                        }
+                                    });
+                                if ui.add_enabled(draft.changes().is_some(), egui::Button::new("Apply style")).clicked() {
+                                    action = Some(Action::ApplyStyle);
+                                }
+                            }
                         }
-                        if ui.small_button("V").clicked() {
-                            action = Some(Action::Arrange(ArrangeCmd::Distribute(true)));
-                        }
-                    });
-                }
-                ui.separator();
-                ui.label("Layers");
-                let layers = self
-                    .engine
-                    .document()
-                    .and_then(|document| document.pages.get(self.page_index))
-                    .map(|page| page.layers.clone())
-                    .unwrap_or_default();
-                let selected_layers: Vec<u32> = self
-                    .selected
-                    .as_deref()
-                    .and_then(|id| self.doc_shape(id))
-                    .map(|shape| shape.layers.clone())
-                    .unwrap_or_default();
-                let has_selection = self.selected.is_some();
-                if layers.is_empty() {
-                    ui.label(egui::RichText::new("This page has no layers.").small().weak());
-                }
-                for layer in &layers {
-                    ui.horizontal(|ui| {
-                        let (mut visible, mut print, mut locked) = (layer.visible, layer.print, layer.locked);
-                        let a = ui.checkbox(&mut visible, "V").on_hover_text("Visible");
-                        let b = ui.checkbox(&mut print, "P").on_hover_text("Prints");
-                        let c = ui.checkbox(&mut locked, "L").on_hover_text("Locked");
-                        if a.changed() || b.changed() || c.changed() {
-                            action = Some(Action::LayerOp(8, layer.index as usize, format!("|{}|{}|{}", visible as u8, print as u8, locked as u8)));
-                        }
-                        let mut on_layer = selected_layers.contains(&layer.index);
-                        let was = on_layer;
-                        if ui.add_enabled(has_selection, egui::Checkbox::new(&mut on_layer, "Sel")).on_hover_text("The selected shape is on this layer").changed() && on_layer != was {
-                            action = Some(Action::LayerShape(layer.index as usize, on_layer));
-                        }
-                        ui.label(&layer.name);
-                        if ui.small_button("x").on_hover_text("Delete the layer (shapes stay)").clicked() {
-                            action = Some(Action::LayerOp(9, layer.index as usize, String::new()));
-                        }
-                    });
-                }
-                ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.layer_name).desired_width(90.0).hint_text("Layer name"));
-                    if ui.add_enabled(!self.layer_name.trim().is_empty() && self.texture.is_some(), egui::Button::new("+ Layer")).clicked() {
-                        action = Some(Action::LayerOp(7, 0, self.layer_name.trim().to_string()));
-                        self.layer_name.clear();
+                    } else {
+                        ui.label("Click a shape on the canvas.");
                     }
+                    if self.selected.is_some() {
+                        ui.separator();
+                        ui.label(format!("Arrange ({} selected; shift-click adds)", 1 + self.extra_selected.len()));
+                        ui.horizontal_wrapped(|ui| {
+                            for (label, command) in [
+                                ("Group", ArrangeCmd::Group),
+                                ("Ungroup", ArrangeCmd::Ungroup),
+                                ("Front", ArrangeCmd::Order(2)),
+                                ("Back", ArrangeCmd::Order(3)),
+                                ("Fwd", ArrangeCmd::Order(4)),
+                                ("Bwd", ArrangeCmd::Order(5)),
+                                ("Rot R", ArrangeCmd::RotateQuarter),
+                                ("Flip H", ArrangeCmd::Flip(false)),
+                                ("Flip V", ArrangeCmd::Flip(true)),
+                            ] {
+                                if ui.small_button(label).clicked() {
+                                    action = Some(Action::Arrange(command));
+                                }
+                            }
+                        });
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label("Align");
+                            for (label, mode) in [("L", 0), ("C", 1), ("R", 2), ("T", 3), ("M", 4), ("B", 5)] {
+                                if ui.small_button(label).clicked() {
+                                    action = Some(Action::Arrange(ArrangeCmd::Align(mode)));
+                                }
+                            }
+                            ui.label("Spread");
+                            if ui.small_button("H").clicked() {
+                                action = Some(Action::Arrange(ArrangeCmd::Distribute(false)));
+                            }
+                            if ui.small_button("V").clicked() {
+                                action = Some(Action::Arrange(ArrangeCmd::Distribute(true)));
+                            }
+                        });
+                    }
+                    ui.separator();
+                    ui.label("Layers");
+                    let layers = self
+                        .engine
+                        .document()
+                        .and_then(|document| document.pages.get(self.page_index))
+                        .map(|page| page.layers.clone())
+                        .unwrap_or_default();
+                    let selected_layers: Vec<u32> = self
+                        .selected
+                        .as_deref()
+                        .and_then(|id| self.doc_shape(id))
+                        .map(|shape| shape.layers.clone())
+                        .unwrap_or_default();
+                    let has_selection = self.selected.is_some();
+                    if layers.is_empty() {
+                        ui.label(egui::RichText::new("This page has no layers.").small().weak());
+                    }
+                    for layer in &layers {
+                        ui.horizontal(|ui| {
+                            let (mut visible, mut print, mut locked) = (layer.visible, layer.print, layer.locked);
+                            let a = ui.checkbox(&mut visible, "V").on_hover_text("Visible");
+                            let b = ui.checkbox(&mut print, "P").on_hover_text("Prints");
+                            let c = ui.checkbox(&mut locked, "L").on_hover_text("Locked");
+                            if a.changed() || b.changed() || c.changed() {
+                                action = Some(Action::LayerOp(8, layer.index as usize, format!("|{}|{}|{}", visible as u8, print as u8, locked as u8)));
+                            }
+                            let mut on_layer = selected_layers.contains(&layer.index);
+                            let was = on_layer;
+                            if ui.add_enabled(has_selection, egui::Checkbox::new(&mut on_layer, "Sel")).on_hover_text("The selected shape is on this layer").changed() && on_layer != was {
+                                action = Some(Action::LayerShape(layer.index as usize, on_layer));
+                            }
+                            ui.label(&layer.name);
+                            if ui.small_button("x").on_hover_text("Delete the layer (shapes stay)").clicked() {
+                                action = Some(Action::LayerOp(9, layer.index as usize, String::new()));
+                            }
+                        });
+                    }
+                    ui.horizontal(|ui| {
+                        ui.add(egui::TextEdit::singleline(&mut self.layer_name).desired_width(90.0).hint_text("Layer name"));
+                        if ui.add_enabled(!self.layer_name.trim().is_empty() && self.texture.is_some(), egui::Button::new("+ Layer")).clicked() {
+                            action = Some(Action::LayerOp(7, 0, self.layer_name.trim().to_string()));
+                            self.layer_name.clear();
+                        }
+                    });
+                    ui.separator();
+                    ui.label(
+                        egui::RichText::new(
+                            "Drag a shape to move. Drag a corner handle to resize.\n\
+                             Ctrl+Z undo, Ctrl+Shift+Z redo, Ctrl+S save a copy.\n\
+                             Drag empty canvas to pan; wheel zooms.",
+                        )
+                        .small()
+                        .weak(),
+                    );
                 });
-                ui.separator();
-                ui.label(
-                    egui::RichText::new(
-                        "Drag a shape to move. Drag a corner handle to resize.\n\
-                         Ctrl+Z undo, Ctrl+Shift+Z redo, Ctrl+S save a copy.\n\
-                         Drag empty canvas to pan; wheel zooms.",
-                    )
-                    .small()
-                    .weak(),
-                );
-            });
+        }
 
         if ctx.input(|input| input.key_pressed(egui::Key::Escape)) && self.armed_master.is_some() {
             self.armed_master = None;
@@ -5214,7 +5238,7 @@ impl eframe::App for LayoutCraftApp {
                 self.restore_stencils();
             }
         }
-        if self.shapes_open {
+        if self.shapes_open && !self.full_screen {
             let mut open_stencil = false;
             let mut builtin = false;
             let mut close = None;
@@ -6304,6 +6328,7 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::DocProps) => self.doc_props_open = true,
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
             Some(Action::Hyperlink) => self.open_links(),
+            Some(Action::FullScreen) => self.toggle_full_screen(&ctx),
             Some(Action::ShapeData) => self.data_pane = if self.data_pane.is_some() { None } else { Some(DataPane::default()) },
             Some(Action::Theme(op, ref value)) => self.apply_theme(&ctx, op, value),
             Some(Action::PageShape(w, h)) => self.set_page_shape(&ctx, w, h),
@@ -6401,6 +6426,7 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    FullScreen,
     /// Show or hide the Shape Data window.
     ShapeData,
     Hyperlink,
