@@ -11,6 +11,7 @@ is intended to be read before changing the importer or writer.
 - [48 Features and file formats](48-features.md)
 - [49 Building and testing](49-building.md)
 - [32 AI assistant (MCP server)](32-mcp.md)
+- [50 Code signing policy (draft, not in effect)](50-code-signing-policy.md)
 
 ## Start here
 
