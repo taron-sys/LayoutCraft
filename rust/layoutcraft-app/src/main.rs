@@ -1758,6 +1758,84 @@ mod status_geometry_tests {
     }
 }
 
+/// One part of the Shape Formulas table: its title and rows of (cell, value, formula).
+#[derive(Debug, Clone, PartialEq)]
+struct SheetGroup {
+    title: String,
+    rows: Vec<(String, String, String)>,
+}
+
+/// `Engine::shape_sheet_json` as the table shows it: the shape's own cells first, then every section; a section the
+/// shape takes from its master says so. A value carries its unit.
+fn sheet_groups(json: &str) -> Vec<SheetGroup> {
+    let sheet: serde_json::Value = serde_json::from_str(json).unwrap_or_default();
+    let row = |prefix: &str, cell: &serde_json::Value| {
+        let text = |key: &str| cell[key].as_str().unwrap_or("").to_string();
+        let (value, unit) = (text("value"), text("unit"));
+        let value = if unit.is_empty() { value } else { format!("{value} {unit}") };
+        (format!("{prefix}{}", text("name")), value, text("formula"))
+    };
+    let list = |value: &serde_json::Value| value.as_array().cloned().unwrap_or_default();
+    let mut groups = Vec::new();
+    let cells = list(&sheet["cells"]);
+    if !cells.is_empty() {
+        groups.push(SheetGroup { title: "Shape".to_string(), rows: cells.iter().map(|cell| row("", cell)).collect() });
+    }
+    for section in list(&sheet["sections"]) {
+        let mut title = section["name"].as_str().unwrap_or("Section").to_string();
+        if let Some(index) = section["index"].as_u64() {
+            title.push_str(&format!(" {index}"));
+        }
+        if section["fromMaster"].as_bool() == Some(true) {
+            title.push_str(" (from the master)");
+        }
+        let mut rows: Vec<_> = list(&section["cells"]).iter().map(|cell| row("", cell)).collect();
+        for entry in list(&section["rows"]) {
+            let name = entry["name"].as_str().map(str::to_string).or_else(|| entry["index"].as_u64().map(|index| index.to_string())).unwrap_or_default();
+            let kind = entry["type"].as_str().map(|kind| format!(" {kind}")).unwrap_or_default();
+            rows.extend(list(&entry["cells"]).iter().map(|cell| row(&format!("{name}{kind} / "), cell)));
+        }
+        groups.push(SheetGroup { title, rows });
+    }
+    groups
+}
+
+/// The Shape Formulas window (read only) and what it last read.
+#[derive(Default)]
+struct SheetPane {
+    /// (page, shape, undo depth) the groups were read at.
+    key: Option<(usize, String, usize)>,
+    groups: Vec<SheetGroup>,
+}
+
+#[cfg(test)]
+mod sheet_tests {
+    use super::sheet_groups;
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn a_drawn_shape_lists_its_size_cells_and_sections() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let id = engine.draw(0, 0, 1.0, 1.0, 3.0, 2.0).unwrap();
+        let groups = sheet_groups(&engine.shape_sheet_json(0, &id).unwrap());
+        let width = groups[0].rows.iter().find(|row| row.0 == "Width").expect("the width cell");
+        assert!(width.1.starts_with('2'), "{width:?}");
+        // the outline of a drawn rectangle is a section with rows
+        assert!(groups.iter().skip(1).any(|group| group.title.starts_with("Geometry") && !group.rows.is_empty()), "{groups:?}");
+    }
+
+    #[test]
+    fn units_and_inherited_sections_are_said() {
+        let json = r#"{"cells":[{"name":"Angle","value":"1.5","unit":"RAD","formula":null}],"sections":[{"name":"User","index":null,"fromMaster":true,"cells":[],"rows":[{"name":"A","index":0,"type":null,"cells":[{"name":"Value","value":"3","formula":"1+2"}]}]}]}"#;
+        let groups = sheet_groups(json);
+        assert_eq!(groups[0].rows[0], ("Angle".to_string(), "1.5 RAD".to_string(), String::new()));
+        assert!(groups[1].title.contains("from the master"));
+        assert_eq!(groups[1].rows[0], ("A / Value".to_string(), "3".to_string(), "1+2".to_string()));
+        assert!(sheet_groups("nonsense").is_empty());
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -2495,6 +2573,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Shape Formulas window, while it is open.
+    sheet_pane: Option<SheetPane>,
     /// The last press was on the canvas (or all shapes were selected by key); a Tab to apply to the shapes.
     canvas_keys: bool,
     tab_cycle: Option<bool>,
@@ -2640,6 +2720,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            sheet_pane: None,
             canvas_keys: false,
             tab_cycle: None,
             show_guides: true,
@@ -2820,6 +2901,9 @@ impl LayoutCraftApp {
         let _timer = Timer::new("build_page (whole)", 0.0);
         self.sites_cache.clear();
         self.struck_cache = None;
+        if let Some(pane) = self.sheet_pane.as_mut() {
+            pane.key = None;
+        }
         self.guides = self.engine.guides_json(self.page_index).map(|json| guide_lines(&json)).unwrap_or_default();
         self.selected_guide = None;
         self.guide_drag = None;
@@ -4781,6 +4865,7 @@ impl LayoutCraftApp {
             N::HelpShortcuts => Action::HelpShortcuts,
             N::Hyperlink => Action::Hyperlink,
             N::Layers => Action::Layers,
+            N::ShapeFormulas => Action::ShapeFormulas,
             N::FullScreen => Action::FullScreen,
             N::ShapeData => Action::ShapeData,
             N::Find => Action::Find,
@@ -5851,6 +5936,55 @@ impl LayoutCraftApp {
             self.status = format!("Shape {next} selected ({at} of {}); Esc leaves the shapes.", ids.len());
             self.selected = Some(next);
             self.extra_selected.clear();
+        }
+    }
+
+    /// The Shape Formulas window: the cells of the one selected shape with their values and formulas. Read only.
+    fn draw_sheet_pane(&mut self, ctx: &egui::Context) {
+        let Some(mut pane) = self.sheet_pane.take() else {
+            return;
+        };
+        let page = self.page_index;
+        let selection = self.all_selected();
+        let key = match &selection[..] {
+            [one] => Some((page, one.clone(), self.engine.undo_depth())),
+            _ => None,
+        };
+        if pane.key != key {
+            pane.groups = key.as_ref().and_then(|(page, shape, _)| self.engine.shape_sheet_json(*page, shape).ok()).map(|json| sheet_groups(&json)).unwrap_or_default();
+            pane.key = key;
+        }
+        let mut open = true;
+        egui::Window::new("Shape Formulas").open(&mut open).collapsible(true).default_width(460.0).show(ctx, |ui| {
+            let Some((_, shape, _)) = &pane.key else {
+                ui.label("Select one shape to see its formulas.");
+                return;
+            };
+            ui.label(format!("Shape {shape} (read only)"));
+            if pane.groups.is_empty() {
+                ui.label("The cells of this shape cannot be read.");
+            }
+            egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
+                for (at, group) in pane.groups.iter().enumerate() {
+                    egui::CollapsingHeader::new(&group.title).id_salt(("sheet", at)).default_open(at == 0).show(ui, |ui| {
+                        egui::Grid::new(("sheet-grid", at)).num_columns(3).striped(true).show(ui, |ui| {
+                            for heading in ["Cell", "Value", "Formula"] {
+                                ui.strong(heading);
+                            }
+                            ui.end_row();
+                            for (cell, value, formula) in &group.rows {
+                                ui.label(cell);
+                                ui.label(value);
+                                ui.label(formula);
+                                ui.end_row();
+                            }
+                        });
+                    });
+                }
+            });
+        });
+        if open {
+            self.sheet_pane = Some(pane);
         }
     }
 
@@ -7379,6 +7513,7 @@ impl eframe::App for LayoutCraftApp {
         }
         self.draw_find(&ctx);
         self.draw_links(&ctx);
+        self.draw_sheet_pane(&ctx);
         self.draw_data_pane(&ctx);
         if self.help_shortcuts_open {
             let mut open = true;
@@ -7518,6 +7653,7 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
             Some(Action::Hyperlink) => self.open_links(),
             Some(Action::Layers) => self.layers_open = !self.layers_open,
+            Some(Action::ShapeFormulas) => self.sheet_pane = if self.sheet_pane.is_some() { None } else { Some(SheetPane::default()) },
             Some(Action::DeleteGuide) => self.delete_selected_guide(&ctx),
             Some(Action::SizeField(ref id, field, value, per_inch)) => self.set_size_field(&ctx, id, field, value, per_inch),
             Some(Action::FullScreen) => self.toggle_full_screen(&ctx),
@@ -7626,6 +7762,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Show or hide the Shape Formulas window.
+    ShapeFormulas,
     /// Reverse the ends of the selected connectors.
     ReverseEnds,
     /// Move the page at the first position to the second.
