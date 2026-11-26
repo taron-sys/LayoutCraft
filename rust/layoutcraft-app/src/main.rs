@@ -12,6 +12,7 @@ use layoutcraft_vsdx::{
     patch_page_cells, ShapeCellPatch,
 };
 
+mod connectors;
 mod help;
 mod mcpinfo;
 mod ribbon;
@@ -2338,6 +2339,10 @@ struct LayoutCraftApp {
     stencils: Vec<StencilEntry>,
     stencil_textures: std::collections::HashMap<(usize, String), egui::TextureHandle>,
     armed_master: Option<(usize, String, String)>,
+    /// View > Add and Connect Arrows, the shape whose arrows are shown, and the line ends read for the menu.
+    connect_arrows: bool,
+    arrow_shape: Option<String>,
+    line_ends_read: Option<connectors::LineEndsRead>,
     export_open: bool,
     export_format: usize,
     borders_open: bool,
@@ -2424,6 +2429,9 @@ impl LayoutCraftApp {
             doc_props_open: false,
             help_shortcuts_open: false,
             show_guides: true,
+            connect_arrows: true,
+            arrow_shape: None,
+            line_ends_read: None,
             guides: Vec::new(),
             selected_guide: None,
             guide_drag: None,
@@ -3310,8 +3318,19 @@ impl LayoutCraftApp {
                     });
                     self.preview = Some(start);
                 }
-                None => self.status = "Press on a shape to start the connector.".to_string(),
+                // from the empty page: the start is loose
+                None => {
+                    let at = self.snapped_point(scene_pointer);
+                    let start = egui::Rect::from_min_size(at, egui::Vec2::ZERO);
+                    self.connect_from_site = None;
+                    self.drag = Some(DragState { visio_id: String::new(), mode: DragMode::Connect, start_pointer: at, end_pointer: at, start_rect: start });
+                    self.preview = Some(start);
+                    self.status = "Release on a shape to connect to it, or on the empty page.".to_string();
+                }
             }
+            return;
+        }
+        if self.press_connect_arrow(pointer, image_rect) {
             return;
         }
         if let Some(selected_id) = self.selected.clone() {
@@ -3498,7 +3517,7 @@ impl LayoutCraftApp {
             return;
         };
         if drag.mode == DragMode::Connect {
-            self.commit_connector(ctx, &drag.visio_id, drag.end_pointer);
+            self.commit_connector(ctx, &drag.visio_id, drag.start_pointer, drag.end_pointer);
             return;
         }
         if drag.mode == DragMode::Marquee {
@@ -3613,28 +3632,6 @@ impl LayoutCraftApp {
         let ay = if fy == 0.0 { 0.0 } else if fy == 1.0 { 1.0 } else { 0.5 };
         let result = self.engine.edit(self.page_index, 3, id, w, h, ax, ay, 0);
         self.finish_edit(ctx, result, "Resized", Some(id.to_string()));
-    }
-
-    /// The drag of the connector tool ended at `end`: glue a connector from shape `from` to the shape under it (one undo step).
-    fn commit_connector(&mut self, ctx: &egui::Context, from: &str, end: egui::Pos2) {
-        let from_site = self.connect_from_site.take();
-        let Some(to) = self.pick_shape_near(end) else {
-            self.status = "Release on a shape to connect to it.".to_string();
-            return;
-        };
-        if to == from {
-            self.status = "Release on a different shape.".to_string();
-            return;
-        }
-        let to_site = self.nearest_site(&to, end).1;
-        let page = self.page_index;
-        match self.engine.add_connector(page, from, from_site, &to, to_site) {
-            Ok(id) => {
-                self.tool = Tool::Select;
-                self.finish_edit(ctx, Ok(()), &format!("Connected {from} to {to}"), Some(id));
-            }
-            Err(error) => self.status = format!("Could not connect: {error}"),
-        }
     }
 
     /// The drag of a draw tool ended: draw the shape through the engine (one undo step), select it and go back to the Select tool.
@@ -4283,6 +4280,7 @@ impl LayoutCraftApp {
         let mut enabled = native.is_some_and(|command| !command.needs_document() || self.texture.is_some());
         match native {
             Some(ribbon::Native::Undo) => enabled &= self.engine.undo_depth() > 0,
+            Some(ribbon::Native::ReverseEnds) => enabled &= !self.selected_connectors().is_empty(),
             Some(ribbon::Native::Redo) => enabled &= self.engine.can_redo(),
             _ => {}
         }
@@ -4295,7 +4293,8 @@ impl LayoutCraftApp {
             || (native == Some(ribbon::Native::SnapGuides) && self.snap_guides)
             || (native == Some(ribbon::Native::ShowGrid) && self.show_grid)
             || (native == Some(ribbon::Native::ShowRulers) && self.show_rulers)
-            || (native == Some(ribbon::Native::ShowGuides) && self.show_guides);
+            || (native == Some(ribbon::Native::ShowGuides) && self.show_guides)
+            || (native == Some(ribbon::Native::ConnectArrows) && self.connect_arrows);
         let compact = self.ribbon_compact;
         let response = match icon.and_then(|name| self.icon_texture(ctx, &name)) {
             Some(texture) => {
@@ -4330,6 +4329,7 @@ impl LayoutCraftApp {
                     ribbon::Native::SnapShapes => self.snap_shapes = !self.snap_shapes,
                     ribbon::Native::SnapGuides => self.snap_guides = !self.snap_guides,
                     ribbon::Native::ShowGrid => self.show_grid = !self.show_grid,
+                    ribbon::Native::ConnectArrows => self.connect_arrows = !self.connect_arrows,
                     ribbon::Native::ShowRulers => self.show_rulers = !self.show_rulers,
                     ribbon::Native::ShowGuides => {
                         self.show_guides = !self.show_guides;
@@ -4454,6 +4454,8 @@ impl LayoutCraftApp {
             }
             _ => {
                 let (label, key) = if id == "p:fillColor" { ("Fill ▾", "fill") } else { ("Line ▾", "line") };
+                // a connector has a line (and line ends) but no fill
+                let enabled = enabled || (key == "line" && self.can_set_line_ends());
                 ui.add_enabled_ui(enabled, |ui| {
                     ui.menu_button(label, |ui| {
                         const SWATCHES: [[u8; 3]; 12] = [
@@ -4476,6 +4478,9 @@ impl LayoutCraftApp {
                         });
                     });
                 });
+                if key == "line" {
+                    self.line_ends_menu(ui, action);
+                }
             }
         }
     }
@@ -4577,7 +4582,8 @@ impl LayoutCraftApp {
             // the Pan tool is a tool too
             N::Hand => Action::Fit,
             // the snap switches and the grid step are state, handled where the button is drawn
-            N::SnapGrid | N::SnapShapes | N::SnapGuides | N::GridStep | N::ShowGrid | N::ShowRulers | N::ShowGuides => Action::Fit,
+            N::SnapGrid | N::SnapShapes | N::SnapGuides | N::GridStep | N::ShowGrid | N::ShowRulers | N::ShowGuides | N::ConnectArrows => Action::Fit,
+            N::ReverseEnds => Action::ReverseEnds,
         }
     }
 
@@ -6406,7 +6412,8 @@ impl eframe::App for LayoutCraftApp {
                         dropped_now = true;
                     }
                 }
-                if response.clicked() && self.armed_master.is_some() {
+                // an arrow beside a shape takes the click before the picked master is dropped on the page
+                if response.clicked() && self.armed_master.is_some() && response.interact_pointer_pos().is_none_or(|pointer| self.connect_arrow_at(pointer, image_rect).is_none()) {
                     if let Some(pointer) = response.interact_pointer_pos() {
                         if image_rect.contains(pointer) {
                             let at = self.screen_to_scene(pointer, image_rect);
@@ -6420,6 +6427,11 @@ impl eframe::App for LayoutCraftApp {
                                 dropped_now = true;
                             }
                         }
+                    }
+                }
+                if response.clicked() && !self.panning && !dropped_now {
+                    if let Some(pointer) = response.interact_pointer_pos() {
+                        dropped_now = self.click_connect_arrow(&ctx, pointer, image_rect);
                     }
                 }
                 if response.clicked() && self.drag.is_none() && !self.panning && self.shift_down && !dropped_now {
@@ -6643,6 +6655,7 @@ impl eframe::App for LayoutCraftApp {
                         }
                     }
                 }
+                self.show_connect_arrows(&response, &painter, image_rect);
                 if let (Some(DragState { mode: DragMode::Draw(kind), start_pointer, end_pointer, .. }), Some(rect)) = (&self.drag, self.preview) {
                     let stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 160, 255));
                     if *kind == 6 {
@@ -7274,6 +7287,7 @@ impl eframe::App for LayoutCraftApp {
                 }
             }
             Some(Action::StyleSelected(ref json)) => self.style_selected(&ctx, json),
+            Some(Action::ReverseEnds) => self.reverse_selected_ends(&ctx),
             Some(Action::FormatText(ref spec)) => self.format_selected_text(&ctx, spec),
             Some(Action::Paste) => self.paste_clipboard(&ctx),
             Some(Action::Duplicate) => {
@@ -7331,6 +7345,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Reverse the ends of the selected connectors.
+    ReverseEnds,
     /// Move the page at the first position to the second.
     PageReorder(usize, usize),
     /// Show the page at this percentage of actual size.
