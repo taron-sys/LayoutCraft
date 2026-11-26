@@ -1241,6 +1241,71 @@ mod width_view_tests {
     }
 }
 
+/// The width of the left ruler and the height of the top ruler, logical px.
+const RULER_BANDS: egui::Vec2 = egui::vec2(34.0, 20.0);
+/// The least distance between two numbered marks of a ruler, logical px.
+const RULER_SPACING: f64 = 50.0;
+
+/// The unit the rulers count in: (units per inch of paper, name). Metric pages count in millimetres. A drawing with a
+/// scale is still counted on the paper, and the name says so.
+fn ruler_unit(page_size: &str) -> (f64, &'static str) {
+    let size: serde_json::Value = serde_json::from_str(page_size).unwrap_or_default();
+    let metric = size["metric"].as_bool() == Some(true);
+    let scale = &size["scale"];
+    let scaled = match (scale["paper"].as_f64(), scale["drawing"].as_f64()) {
+        (Some(paper), Some(drawing)) => (paper - drawing).abs() > 1e-9 || scale["paperUnit"] != scale["drawingUnit"],
+        _ => false,
+    };
+    match (metric, scaled) {
+        (false, false) => (1.0, "in"),
+        (false, true) => (1.0, "in*"),
+        (true, false) => (25.4, "mm"),
+        (true, true) => (25.4, "mm*"),
+    }
+}
+
+/// The numbered marks between `from` and `to` (in the ruler's unit): multiples of the smallest step that keeps them
+/// `RULER_SPACING` apart at `px_per_unit`. Inches step by halves of an inch below one, millimetres by 1, 2, 5.
+fn ruler_marks(from: f64, to: f64, px_per_unit: f64, metric: bool) -> Vec<f64> {
+    if !(px_per_unit > 0.0) || !from.is_finite() || !to.is_finite() || to < from {
+        return Vec::new();
+    }
+    let steps: &[f64] = if metric { &[1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0, 200.0, 500.0, 1000.0] } else { &[0.125, 0.25, 0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 50.0, 100.0] };
+    let step = steps.iter().copied().find(|step| step * px_per_unit >= RULER_SPACING).unwrap_or_else(|| (RULER_SPACING / px_per_unit / 1000.0).ceil() * 1000.0);
+    let first = (from / step).ceil() as i64;
+    let last = (to / step).floor() as i64;
+    (first..=last).take(1000).map(|at| at as f64 * step).collect()
+}
+
+#[cfg(test)]
+mod ruler_tests {
+    use super::{ruler_marks, ruler_unit, RULER_SPACING};
+
+    #[test]
+    fn marks_stay_apart_inside_the_range_and_get_finer_when_zoomed_in() {
+        for metric in [false, true] {
+            let mut previous = f64::MAX;
+            for px_per_unit in [0.5, 4.0, 40.0, 400.0] {
+                let marks = ruler_marks(-3.0, 900.0, px_per_unit, metric);
+                assert!(marks.iter().all(|mark| (-3.0..=900.0).contains(mark)));
+                assert!(marks.contains(&0.0), "the page's zero is marked");
+                let step = marks[1] - marks[0];
+                assert!(step * px_per_unit >= RULER_SPACING && step <= previous);
+                previous = step;
+            }
+        }
+        assert!(ruler_marks(0.0, 10.0, 0.0, false).is_empty());
+    }
+
+    #[test]
+    fn the_unit_follows_the_page_and_marks_a_scaled_drawing() {
+        let size = |metric: bool, drawing: f64| format!(r#"{{"metric":{metric},"scale":{{"paper":1.0,"paperUnit":"in","drawing":{drawing},"drawingUnit":"in"}}}}"#);
+        assert_eq!(ruler_unit(&size(false, 1.0)).1, "in");
+        assert!(ruler_unit(&size(true, 1.0)).0 > 25.0);
+        assert!(ruler_unit(&size(false, 12.0)).1.ends_with('*'));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -1978,6 +2043,9 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// Rulers beside the canvas, and what they count in (read when the page is built).
+    show_rulers: bool,
+    ruler_unit: (f64, &'static str),
     /// The Size and Position fields of the inspector.
     size_pos: SizePos,
     /// The Layers window is open.
@@ -2107,6 +2175,8 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            show_rulers: true,
+            ruler_unit: (1.0, "in"),
             size_pos: SizePos::default(),
             layers_open: false,
             full_screen: false,
@@ -2276,6 +2346,9 @@ impl LayoutCraftApp {
         let _timer = Timer::new("build_page (whole)", 0.0);
         self.sites_cache.clear();
         self.struck_cache = None;
+        if let Ok(size) = self.engine.page_size_json(self.page_index) {
+            self.ruler_unit = ruler_unit(&size);
+        }
         self.size_pos.key = None;
         self.theme_cache = None;
         *self.routes_cache.borrow_mut() = None;
@@ -3926,7 +3999,8 @@ impl LayoutCraftApp {
             || (native == Some(ribbon::Native::SnapGrid) && self.snap_grid)
             || (native == Some(ribbon::Native::SnapShapes) && self.snap_shapes)
             || (native == Some(ribbon::Native::SnapGuides) && self.snap_guides)
-            || (native == Some(ribbon::Native::ShowGrid) && self.show_grid);
+            || (native == Some(ribbon::Native::ShowGrid) && self.show_grid)
+            || (native == Some(ribbon::Native::ShowRulers) && self.show_rulers);
         let compact = self.ribbon_compact;
         let response = match icon.and_then(|name| self.icon_texture(ctx, &name)) {
             Some(texture) => {
@@ -3961,6 +4035,7 @@ impl LayoutCraftApp {
                     ribbon::Native::SnapShapes => self.snap_shapes = !self.snap_shapes,
                     ribbon::Native::SnapGuides => self.snap_guides = !self.snap_guides,
                     ribbon::Native::ShowGrid => self.show_grid = !self.show_grid,
+                    ribbon::Native::ShowRulers => self.show_rulers = !self.show_rulers,
                     other => *action = Some(Self::action_for(other)),
                 }
             }
@@ -4203,7 +4278,7 @@ impl LayoutCraftApp {
             // the Pan tool is a tool too
             N::Hand => Action::Fit,
             // the snap switches and the grid step are state, handled where the button is drawn
-            N::SnapGrid | N::SnapShapes | N::SnapGuides | N::GridStep | N::ShowGrid => Action::Fit,
+            N::SnapGrid | N::SnapShapes | N::SnapGuides | N::GridStep | N::ShowGrid | N::ShowRulers => Action::Fit,
         }
     }
 
@@ -5045,6 +5120,45 @@ impl LayoutCraftApp {
         self.finish_edit(ctx, result, "Changed size and position", selected);
     }
 
+    /// The rulers beside the canvas, counting from the page's lower left corner (y up).
+    fn draw_rulers(&self, ui: &egui::Ui, area: egui::Rect, canvas: egui::Rect, image_rect: egui::Rect) {
+        let (per_inch, unit) = self.ruler_unit;
+        let metric = per_inch > 1.0;
+        let origin = self.scene_origin();
+        let scale = f64::from(self.view_scale());
+        // screen position of a ruler value, and the ruler value at a screen position
+        let page_h = self.page_height_in;
+        let x_at = |value: f64| f64::from(image_rect.min.x) + (value / per_inch * DPI - f64::from(origin.x)) * scale;
+        let y_at = |value: f64| f64::from(image_rect.min.y) + ((page_h - value / per_inch) * DPI - f64::from(origin.y)) * scale;
+        let x_value = |screen: f32| ((f64::from(screen - image_rect.min.x) / scale + f64::from(origin.x)) / DPI) * per_inch;
+        let y_value = |screen: f32| (page_h - (f64::from(screen - image_rect.min.y) / scale + f64::from(origin.y)) / DPI) * per_inch;
+        let px_per_unit = DPI * scale / per_inch;
+        let band = egui::Color32::from_rgb(45, 48, 54);
+        let ink = egui::Color32::from_gray(220);
+        let font = egui::FontId::proportional(10.0);
+        let top = egui::Rect::from_min_max(egui::pos2(canvas.min.x, area.min.y), egui::pos2(canvas.max.x, canvas.min.y));
+        let left = egui::Rect::from_min_max(egui::pos2(area.min.x, canvas.min.y), egui::pos2(canvas.min.x, canvas.max.y));
+        ui.painter().rect_filled(egui::Rect::from_min_max(area.min, canvas.min), 0.0, band);
+        ui.painter().text(area.min + RULER_BANDS / 2.0, egui::Align2::CENTER_CENTER, unit, font.clone(), ink);
+        let counts = if metric { "Millimetres" } else { "Inches" };
+        let scaled = if unit.ends_with('*') { " on the printed page: the drawing scale is not applied" } else { " from the page's lower left corner" };
+        ui.interact(egui::Rect::from_min_max(area.min, canvas.min), egui::Id::new("ruler-corner"), egui::Sense::hover()).on_hover_text(format!("{counts}{scaled}"));
+        let painter = ui.painter_at(top);
+        painter.rect_filled(top, 0.0, band);
+        for mark in ruler_marks(x_value(top.min.x), x_value(top.max.x), px_per_unit, metric) {
+            let x = x_at(mark) as f32;
+            painter.vline(x, top.max.y - 6.0..=top.max.y, egui::Stroke::new(1.0, ink));
+            painter.text(egui::pos2(x + 2.0, top.min.y + 2.0), egui::Align2::LEFT_TOP, mark.to_string(), font.clone(), ink);
+        }
+        let painter = ui.painter_at(left);
+        painter.rect_filled(left, 0.0, band);
+        for mark in ruler_marks(y_value(left.max.y), y_value(left.min.y), px_per_unit, metric) {
+            let y = y_at(mark) as f32;
+            painter.hline(left.max.x - 6.0..=left.max.x, y, egui::Stroke::new(1.0, ink));
+            painter.text(egui::pos2(left.min.x + 2.0, y - 1.0), egui::Align2::LEFT_BOTTOM, mark.to_string(), font.clone(), ink);
+        }
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -5624,7 +5738,11 @@ impl eframe::App for LayoutCraftApp {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE)
             .show(ui, |ui| {
-                let available = ui.available_size();
+                // the rulers take a band above and to the left of the canvas, so a click on them does not reach the page
+                let area = ui.available_rect_before_wrap();
+                let rulers = self.show_rulers && !self.full_screen && self.texture.is_some();
+                let canvas = egui::Rect::from_min_max(area.min + if rulers { RULER_BANDS } else { egui::Vec2::ZERO }, area.max);
+                let available = canvas.size();
                 if self.fit_pending {
                     self.fit_to_view(available);
                 }
@@ -5633,8 +5751,8 @@ impl eframe::App for LayoutCraftApp {
                     self.fit_pending = false;
                     self.fit_width_pending = false;
                 }
-                let (viewport, response) =
-                    ui.allocate_exact_size(available, egui::Sense::click_and_drag());
+                let response = ui.allocate_rect(canvas, egui::Sense::click_and_drag());
+                let viewport = response.rect;
                 let painter = ui.painter_at(viewport);
                 painter.rect_filled(viewport, 0.0, egui::Color32::from_rgb(28, 30, 34));
                 let Some(texture_id) = self.texture.as_ref().map(|texture| texture.id()) else {
@@ -5679,6 +5797,9 @@ impl eframe::App for LayoutCraftApp {
                         egui::vec2(r[2] as f32, r[3] as f32) * view,
                     );
                     painter.image(detail.texture.id(), rect, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                }
+                if rulers {
+                    self.draw_rulers(ui, area, viewport, image_rect);
                 }
 
                 if response.drag_started_by(egui::PointerButton::Primary) {
