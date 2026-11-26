@@ -30,7 +30,7 @@ pub const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Click, Shift+click", "Select, add to or remove from the selection"),
             ("Drag a shape", "Move it"),
             ("Drag a corner handle", "Resize it"),
-            ("Ctrl+A", "Select all"),
+            ("Ctrl+A", "Select all"), ("Tab / Shift+Tab", "Next / previous shape (a shape selected on the page)"),
             ("Arrow keys, with Shift", "Move the selection a small or a large step"),
         ],
     ),
@@ -52,7 +52,7 @@ pub const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+6 / Ctrl+8 / Ctrl+9", "Draw a line / rectangle / ellipse"),
         ],
     ),
-    ("View", &[("Ctrl+F", "Find text on the page"), ("Ctrl+K", "Hyperlinks of the selected shape"), ("F5, Esc", "Full screen, and leave it"), ("Ctrl+Shift+W", "Fit the page to the window"), ("Ctrl+Page Down / Ctrl+Page Up", "Next / previous page"), ("Ctrl+Plus / Ctrl+Minus", "Zoom in / out"), ("Mouse wheel", "Zoom"), ("Drag the empty page", "Pan the page")]),
+    ("View", &[("Ctrl+F", "Find text on the page"), ("Ctrl+K", "Hyperlinks of the selected shape"), ("F5, Esc", "Full screen, and leave it"), ("Ctrl+Shift+W", "Fit the page to the window"), ("Ctrl+Page Down / Ctrl+Page Up", "Next / previous page"), ("Ctrl+Plus / Ctrl+Minus", "Zoom in / out"), ("Mouse wheel, with Shift", "Scroll up and down, or sideways"), ("Ctrl+mouse wheel", "Zoom at the pointer"), ("Drag the empty page", "Pan the page")]),
 ];
 
 #[cfg(test)]

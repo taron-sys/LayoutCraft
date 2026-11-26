@@ -1551,6 +1551,124 @@ mod zoom_slider_tests {
     }
 }
 
+/// The view (zoom, pan) after a wheel or pinch over the canvas: a zoom factor (Ctrl+wheel) zooms about the pointer, whose
+/// position is given from the middle of the canvas; otherwise the scroll moves the page.
+fn wheel_view(zoom: f32, pan: egui::Vec2, pointer: egui::Vec2, factor: f32, scroll: egui::Vec2) -> (f32, egui::Vec2) {
+    if (factor - 1.0).abs() > 1e-4 {
+        let under = (pointer - pan) / zoom;
+        let zoom = (zoom * factor).clamp(0.05, 16.0);
+        (zoom, pointer - under * zoom)
+    } else {
+        (zoom, pan + scroll)
+    }
+}
+
+#[cfg(test)]
+mod wheel_tests {
+    use super::wheel_view;
+    use eframe::egui::{self, vec2, Event, Modifiers, MouseWheelSource, MouseWheelUnit, TouchPhase};
+
+    #[test]
+    fn zooming_keeps_the_point_under_the_pointer_and_scrolling_only_moves() {
+        let (zoom, pan, pointer) = (1.0, vec2(20.0, -10.0), vec2(100.0, 50.0));
+        let under = (pointer - pan) / zoom;
+        for factor in [1.5, 0.5, 1000.0] {
+            let (new_zoom, new_pan) = wheel_view(zoom, pan, pointer, factor, vec2(0.0, 40.0));
+            assert!(new_zoom != zoom);
+            assert!(((pointer - new_pan) / new_zoom - under).length() < 0.01);
+        }
+        assert_eq!(wheel_view(zoom, pan, pointer, 1.0, vec2(5.0, 40.0)), (zoom, pan + vec2(5.0, 40.0)));
+    }
+
+    /// What egui reports for one wheel notch: (zoom factor, scroll).
+    fn notch(modifiers: Modifiers) -> (f32, egui::Vec2) {
+        let ctx = egui::Context::default();
+        let event = Event::MouseWheel { unit: MouseWheelUnit::Line, delta: vec2(0.0, 1.0), modifiers, phase: TouchPhase::Move, source: MouseWheelSource::Wheel };
+        let (mut factor, mut scroll) = (1.0, egui::Vec2::ZERO);
+        for events in [Vec::new(), vec![event]] {
+            let output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+                (factor, scroll) = ui.input(|input| (input.zoom_delta(), input.smooth_scroll_delta));
+            });
+            // nothing paints here: the texture changes of the frame are not applied, so the output must not be dropped
+            std::mem::forget(output);
+        }
+        (factor, scroll)
+    }
+
+    #[test]
+    fn the_toolkit_gives_ctrl_wheel_as_zoom_and_the_plain_wheel_as_scroll() {
+        let (factor, scroll) = notch(Modifiers::NONE);
+        assert!((factor - 1.0).abs() < 1e-4 && scroll.y > 0.0);
+        let ctrl = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
+        let (factor, scroll) = notch(ctrl);
+        assert!(factor > 1.0 && scroll.y.abs() < 1e-4);
+        let (factor, scroll) = notch(Modifiers { shift: true, ..Modifiers::NONE });
+        assert!((factor - 1.0).abs() < 1e-4 && scroll.x > 0.0 && scroll.y.abs() < 1e-4);
+    }
+}
+
+/// Takes the Tab presses (without Ctrl or Alt) out of a frame's events, so that the toolkit does not move its focus with
+/// them. `Some(true)` for Shift+Tab (backwards), `Some(false)` for Tab.
+fn take_shape_tab(events: &mut Vec<egui::Event>) -> Option<bool> {
+    let mut taken = None;
+    events.retain(|event| match event {
+        egui::Event::Key { key: egui::Key::Tab, pressed: true, modifiers, .. } if !modifiers.ctrl && !modifiers.alt && !modifiers.command => {
+            taken = Some(modifiers.shift);
+            false
+        }
+        _ => true,
+    });
+    taken
+}
+
+/// The shape after (or before) `current` in `ids`, wrapping round; the first (or last) when `current` is not among them.
+fn next_in_cycle(ids: &[String], current: Option<&str>, backwards: bool) -> Option<String> {
+    let count = ids.len();
+    if count == 0 {
+        return None;
+    }
+    let at = match current.and_then(|current| ids.iter().position(|id| id == current)) {
+        Some(at) if backwards => (at + count - 1) % count,
+        Some(at) => (at + 1) % count,
+        None if backwards => count - 1,
+        None => 0,
+    };
+    Some(ids[at].clone())
+}
+
+#[cfg(test)]
+mod shape_tab_tests {
+    use super::{next_in_cycle, take_shape_tab};
+    use eframe::egui::{Event, Key, Modifiers};
+
+    fn key(key: Key, modifiers: Modifiers) -> Event {
+        Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers }
+    }
+
+    #[test]
+    fn only_tab_and_shift_tab_are_taken() {
+        let ctrl = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
+        let mut events = vec![key(Key::Tab, ctrl), key(Key::A, Modifiers::NONE)];
+        assert_eq!(take_shape_tab(&mut events), None);
+        assert_eq!(events.len(), 2);
+        events.push(key(Key::Tab, Modifiers::SHIFT));
+        assert_eq!(take_shape_tab(&mut events), Some(true));
+        assert_eq!(events.len(), 2);
+        events.push(key(Key::Tab, Modifiers::NONE));
+        assert_eq!(take_shape_tab(&mut events), Some(false));
+        assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn the_cycle_goes_both_ways_and_wraps() {
+        let ids: Vec<String> = ["a", "b", "c"].iter().map(|id| id.to_string()).collect();
+        let step = |current: Option<&str>, backwards: bool| next_in_cycle(&ids, current, backwards).unwrap();
+        assert_eq!((step(Some("a"), false), step(Some("c"), false)), ("b".to_string(), "a".to_string()));
+        assert_eq!((step(Some("a"), true), step(Some("gone"), false), step(None, true)), ("c".to_string(), "a".to_string(), "c".to_string()));
+        assert_eq!(next_in_cycle(&[], None, false), None);
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -2288,6 +2406,9 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The last press was on the canvas (or all shapes were selected by key); a Tab to apply to the shapes.
+    canvas_keys: bool,
+    tab_cycle: Option<bool>,
     /// The ruler guides of the page: shown or not, the lines (read when the page is built), the selected and the dragged one.
     show_guides: bool,
     guides: Vec<GuideLine>,
@@ -2430,6 +2551,8 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            canvas_keys: false,
+            tab_cycle: None,
             show_guides: true,
             connect_arrows: true,
             arrow_shape: None,
@@ -4034,6 +4157,7 @@ impl LayoutCraftApp {
         self.selected = ids.next();
         self.extra_selected = ids.collect();
         self.status = format!("{} shape(s) selected", self.all_selected().len());
+        self.canvas_keys = true;
     }
 
     /// An arrow key: move the selection by (dx, dy) inches (y up), one undo step; the web's `moveMembers`.
@@ -5612,6 +5736,30 @@ impl LayoutCraftApp {
         });
     }
 
+    /// Tab / Shift+Tab: select the next or previous shape of the page (a group as one shape), in drawing order.
+    fn cycle_shape(&mut self, backwards: bool) {
+        let Some(scene) = self.scene.as_ref() else {
+            return;
+        };
+        let mut ids: Vec<String> = Vec::new();
+        for item in &scene.items {
+            if let SceneItem::Shape(shape) = item {
+                if let Some(id) = shape.visio_id.as_deref() {
+                    let root = self.group_root(id);
+                    if self.doc_shape(&root).is_some_and(|doc| !doc.layer_hidden) && !ids.contains(&root) {
+                        ids.push(root);
+                    }
+                }
+            }
+        }
+        if let Some(next) = next_in_cycle(&ids, self.selected.as_deref(), backwards) {
+            let at = ids.iter().position(|id| *id == next).map_or(0, |at| at + 1);
+            self.status = format!("Shape {next} selected ({at} of {}); Esc leaves the shapes.", ids.len());
+            self.selected = Some(next);
+            self.extra_selected.clear();
+        }
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -5735,6 +5883,14 @@ impl LayoutCraftApp {
 }
 
 impl eframe::App for LayoutCraftApp {
+    /// While the canvas has the keyboard and a shape is selected, Tab steps through the shapes instead of through the
+    /// buttons; Esc clears the selection and gives Tab back.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        if self.canvas_keys && self.selected.is_some() && ctx.memory(|memory| memory.focused()).is_none() {
+            self.tab_cycle = take_shape_tab(&mut raw_input.events).or(self.tab_cycle);
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let _frame_timer = Timer::new("frame", 16.0);
         let ctx = ui.ctx().clone();
@@ -5742,6 +5898,9 @@ impl eframe::App for LayoutCraftApp {
         self.settle_raster(&ctx);
         self.shift_down = ctx.input(|input| input.modifiers.shift);
         let mut action: Option<Action> = None;
+        if let Some(backwards) = self.tab_cycle.take() {
+            self.cycle_shape(backwards);
+        }
 
         let dropped = ctx.input(|input| {
             input
@@ -6069,7 +6228,7 @@ impl eframe::App for LayoutCraftApp {
                         egui::RichText::new(
                             "Drag a shape to move. Drag a corner handle to resize.\n\
                              Ctrl+Z undo, Ctrl+Shift+Z redo, Ctrl+S save a copy.\n\
-                             Drag empty canvas to pan; wheel zooms.",
+                             Wheel scrolls, Ctrl+wheel zooms; drag empty canvas to pan.",
                         )
                         .small()
                         .weak(),
@@ -6228,6 +6387,9 @@ impl eframe::App for LayoutCraftApp {
                 }
                 let response = ui.allocate_rect(canvas, egui::Sense::click_and_drag());
                 let viewport = response.rect;
+                if ctx.input(|input| input.pointer.any_pressed()) {
+                    self.canvas_keys = response.contains_pointer();
+                }
                 let painter = ui.painter_at(viewport);
                 let colours = appearance::chrome(ui.visuals().dark_mode);
                 painter.rect_filled(viewport, 0.0, colours.canvas);
@@ -6246,15 +6408,11 @@ impl eframe::App for LayoutCraftApp {
                     self.pan += response.drag_delta();
                 }
                 if response.hovered() {
-                    let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-                    if scroll.abs() > 0.01 {
-                        if let Some(pointer) = response.hover_pos() {
-                            let center = viewport.center();
-                            let before = (pointer - center - self.pan) / self.zoom;
-                            let factor = (scroll * 0.0015).exp();
-                            self.zoom = (self.zoom * factor).clamp(0.05, 16.0);
-                            self.pan = pointer - center - before * self.zoom;
-                        }
+                    // Ctrl+wheel (or a pinch) zooms at the pointer; the wheel alone scrolls, sideways with Shift
+                    let (factor, scroll) = ui.input(|input| (input.zoom_delta(), input.smooth_scroll_delta));
+                    if let Some(pointer) = response.hover_pos().filter(|_| (factor - 1.0).abs() > 1e-4 || scroll != egui::Vec2::ZERO) {
+                        (self.zoom, self.pan) = wheel_view(self.zoom, self.pan, pointer - viewport.center(), factor, scroll);
+                        self.fit_pending = false;
                     }
                 }
                 self.last_viewport = viewport;
