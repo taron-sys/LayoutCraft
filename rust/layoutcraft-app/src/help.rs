@@ -20,7 +20,7 @@ pub const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
             ("Ctrl+X / Ctrl+C / Ctrl+V", "Cut / copy / paste"),
             ("Ctrl+D", "Duplicate"),
             ("Delete or Backspace", "Delete the selection"),
-            ("F2 or Ctrl+E", "Edit the text of the selected shape"), ("Type", "Add to the text of the one selected shape"),
+            ("F2 or Ctrl+E", "Edit the text of the selected shape"), ("Type", "Add to the text of the one selected shape"), ("F2 or Ctrl+Enter while editing", "Keep the text and return to the shape"),
             ("Ctrl+S", "Save a copy"), ("Ctrl+B / Ctrl+I / Ctrl+U", "Bold / italic / underline"), ("Ctrl+Shift+> / Ctrl+Shift+<", "Larger / smaller font"), ("Ctrl+Shift+L / C / R / J", "Align text left / centre / right / justify"),
         ],
     ),

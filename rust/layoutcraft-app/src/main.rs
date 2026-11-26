@@ -2091,6 +2091,8 @@ mod app_frame_tests {
         frame: eframe::Frame,
         time: f64,
         modifiers: Modifiers,
+        /// What the last frame drew.
+        drawn: Vec<egui::epaint::ClippedShape>,
     }
 
     impl Driver {
@@ -2107,7 +2109,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
             }
             app.baseline = app.engine.document().cloned();
             app.build_page(&ctx, true);
-            let mut driver = Driver { ctx, app, frame: eframe::Frame::_new_kittest(), time: 0.0, modifiers: Modifiers::NONE };
+            let mut driver = Driver { ctx, app, frame: eframe::Frame::_new_kittest(), time: 0.0, modifiers: Modifiers::NONE, drawn: Vec::new() };
             driver.frames(3);
             (driver, ids)
         }
@@ -2124,8 +2126,26 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
             self.app.raw_input_hook(&self.ctx, &mut raw);
             let (app, frame) = (&mut self.app, &mut self.frame);
             let output = self.ctx.run_ui(raw, |ui| app.ui(ui, frame));
+            self.drawn = output.shapes.clone();
             // nothing paints here: the texture changes of the frame are not applied, so the output must not be dropped
             std::mem::forget(output);
+        }
+
+        /// The boxes of every drawn text that reads exactly `wanted`.
+        fn texts(&self, wanted: &str) -> Vec<egui::Rect> {
+            self.drawn
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(shown) if shown.galley.text() == wanted => Some(egui::Rect::from_min_size(shown.pos, shown.galley.size())),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        /// Where the page's lower left corner is on the screen.
+        fn page_corner(&self) -> egui::Pos2 {
+            let image = self.app.image_rect(self.app.last_viewport);
+            self.app.scene_to_screen(pos2(0.0, (self.app.page_height_in * super::DPI) as f32), image)
         }
 
         fn frames(&mut self, count: usize) {
@@ -2398,6 +2418,48 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         driver.key(Key::A, CTRL);
         driver.write("x");
         assert!(driver.app.text_editor.is_none() && ids.iter().all(|id| driver.app.doc_shape(id).is_some_and(|shape| shape.label == "label")));
+    }
+
+    #[test]
+    fn f2_goes_into_the_text_and_back_keeping_it() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(2);
+        driver.key(Key::F2, Modifiers::NONE);
+        driver.write("kept");
+        driver.key(Key::F2, Modifiers::NONE);
+        assert!(driver.app.text_editor.is_none(), "{}", driver.app.status);
+        assert!(driver.app.doc_shape(&ids[0]).is_some_and(|shape| shape.label.contains("kept")), "{}", driver.app.status);
+        assert_eq!(driver.app.selected, Some(ids[0].clone()));
+    }
+
+    /// The "0" of the top ruler stands over the page's left edge and the "0" of the left ruler beside its bottom edge,
+    /// at any zoom and after the page was moved.
+    #[test]
+    fn the_ruler_zeroes_sit_at_the_lower_left_corner_of_the_page() {
+        let (mut driver, _) = Driver::new();
+        // fitted, then zoomed in and out with the corner moved to a chosen place inside the canvas
+        for (zoom, inset) in [(None, vec2(0.0, 0.0)), (Some(100), vec2(120.0, 90.0)), (Some(50), vec2(310.0, 40.0))] {
+            if let Some(percent) = zoom {
+                driver.app.zoom = super::zoom_for_percent(f64::from(percent), driver.app.raster_scale);
+                driver.app.fit_pending = false;
+                driver.app.pan = vec2(0.0, 0.0);
+                driver.frames(2);
+                let canvas = driver.app.last_viewport;
+                let target = pos2(canvas.left() + inset.x, canvas.bottom() - inset.y);
+                driver.app.pan = target - driver.page_corner();
+            }
+            driver.frames(4);
+            let corner = driver.page_corner();
+            let canvas = driver.app.last_viewport;
+            assert!(canvas.contains(corner), "{zoom:?}: the corner {corner:?} is in view {canvas:?}");
+            let zeroes = driver.texts("0");
+            let top = zeroes.iter().find(|text| text.center().y < canvas.top()).expect("a 0 on the top ruler");
+            let left = zeroes.iter().find(|text| text.center().x < canvas.left()).expect("a 0 on the left ruler");
+            // a number is written 2 px right of its mark on the top ruler, and 1 px above it on the left one
+            assert!((top.left() - 2.0 - corner.x).abs() < 1.5, "{zoom:?}: top {top:?}, corner {corner:?}");
+            assert!((left.bottom() + 1.0 - corner.y).abs() < 1.5, "{zoom:?}: left {left:?}, corner {corner:?}");
+        }
     }
 
     #[test]
@@ -7886,7 +7948,9 @@ impl eframe::App for LayoutCraftApp {
                         ui.add(egui::DragValue::new(&mut editor.font_pt).range(1.0..=400.0).speed(0.5).suffix(" pt"));
                     });
                     ui.horizontal(|ui| {
+                        // F2 goes back from text editing to the selected shape, keeping the text
                         let apply = ui.button("Apply").clicked()
+                            || ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::F2))
                             || ui.input(|input| {
                                 input.modifiers.ctrl && input.key_pressed(egui::Key::Enter)
                             });
@@ -7913,7 +7977,7 @@ impl eframe::App for LayoutCraftApp {
                         }
                     });
                     ui.label(
-                        egui::RichText::new("Ctrl+Enter applies, Esc closes.")
+                        egui::RichText::new("Ctrl+Enter or F2 applies, Esc discards.")
                             .small()
                             .weak(),
                     );
