@@ -862,6 +862,57 @@ mod page_shape_tests {
     }
 }
 
+/// The theme (name) and colour variant the page shows, from `Engine::themes_json`, as `web/shell.js` `buildThemeGallery`
+/// reads it: when some page states a theme of its own, the page's own one counts (none if it states none), else the drawing's.
+fn current_theme(info: &serde_json::Value, page: usize) -> (Option<String>, u64) {
+    let pages = info["pages"].as_array().cloned().unwrap_or_default();
+    if pages.iter().any(|entry| entry["theme"].as_u64().is_some_and(|index| index != 0)) {
+        let own = pages.get(page).and_then(|entry| entry["theme"].as_u64());
+        let name = info["themes"].as_array().and_then(|themes| themes.iter().find(|theme| theme["index"].as_u64() == own)).and_then(|theme| theme["name"].as_str());
+        (name.map(str::to_string), pages.get(page).and_then(|entry| entry["variant"].as_u64()).unwrap_or(0))
+    } else {
+        (info["current"].as_str().map(str::to_string), info["variant"].as_u64().unwrap_or(0))
+    }
+}
+
+/// The `Engine::page_op` number that applies a theme (or, with `variant`, a colour variant) to every page or to one page.
+fn theme_op(variant: bool, all_pages: bool) -> i32 {
+    match (variant, all_pages) {
+        (false, true) => 30,
+        (true, true) => 31,
+        (false, false) => 32,
+        (true, false) => 33,
+    }
+}
+
+#[cfg(test)]
+mod theme_tests {
+    use super::{current_theme, theme_op};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn a_theme_and_a_variant_are_applied_and_marked() {
+        for all_pages in [true, false] {
+            let mut engine = Engine::default();
+            engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+            let info = |engine: &Engine| serde_json::from_str::<serde_json::Value>(&engine.themes_json().unwrap()).unwrap();
+            let name = info(&engine)["themes"][1]["name"].as_str().unwrap().to_string();
+            assert_ne!(current_theme(&info(&engine), 0).0.as_deref(), Some(name.as_str()));
+            engine.page_op(theme_op(false, all_pages), 0, 0, &name).unwrap();
+            assert_eq!(current_theme(&info(&engine), 0).0.as_deref(), Some(name.as_str()));
+            engine.page_op(theme_op(true, all_pages), 0, 0, "2").unwrap();
+            assert_eq!(current_theme(&info(&engine), 0), (Some(name), 2));
+        }
+    }
+
+    #[test]
+    fn a_page_without_a_theme_of_its_own_shows_none_when_others_have_one() {
+        let info = serde_json::json!({ "themes": [{ "index": 5, "name": "A" }], "current": "A", "variant": 1, "pages": [{ "theme": 5, "variant": 3 }, { "theme": null, "variant": 0 }] });
+        assert_eq!(current_theme(&info, 0), (Some("A".to_string()), 3));
+        assert_eq!(current_theme(&info, 1), (None, 0));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -1585,6 +1636,9 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Themes menus: apply to every page instead of the shown one; and the gallery, until the page is rebuilt.
+    theme_all_pages: bool,
+    theme_cache: Option<serde_json::Value>,
     /// "Change Shape" is waiting for a click on a shape of the Shapes panel.
     change_shape: bool,
     /// The Find window, while it is open.
@@ -1700,6 +1754,8 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            theme_all_pages: false,
+            theme_cache: None,
             change_shape: false,
             find: None,
             struck_cache: None,
@@ -1860,6 +1916,7 @@ impl LayoutCraftApp {
         let _timer = Timer::new("build_page (whole)", 0.0);
         self.sites_cache.clear();
         self.struck_cache = None;
+        self.theme_cache = None;
         *self.routes_cache.borrow_mut() = None;
         let (Some(package), Some(document)) = (self.engine.package.as_ref(), self.engine.document.as_ref())
         else {
@@ -3470,6 +3527,10 @@ impl LayoutCraftApp {
             });
             return;
         }
+        if id == "themeGallery" || id == "variantGallery" {
+            self.ribbon_themes(ui, id == "variantGallery", action);
+            return;
+        }
         if id == "designOrientation" || id == "designSize" {
             self.ribbon_page_shape(ui, id, action);
             return;
@@ -4202,6 +4263,56 @@ impl LayoutCraftApp {
             }
             Err(error) => self.status = format!("Could not change the shape: {error}"),
         }
+    }
+
+    /// `Engine::themes_json`, read once per page build (it parses every theme of the gallery).
+    fn theme_info(&mut self) -> Option<serde_json::Value> {
+        if self.theme_cache.is_none() {
+            self.theme_cache = self.engine.themes_json().ok().and_then(|text| serde_json::from_str(&text).ok());
+        }
+        self.theme_cache.clone()
+    }
+
+    /// The Design tab's Themes and Variants menus: for the shown page, or for all pages when the box is ticked.
+    fn ribbon_themes(&mut self, ui: &mut egui::Ui, variants: bool, action: &mut Option<Action>) {
+        let enabled = self.texture.is_some();
+        ui.add_enabled_ui(enabled, |ui| {
+            ui.menu_button(if variants { "Variants \u{25be}" } else { "Themes \u{25be}" }, |ui| {
+                let Some(info) = self.theme_info() else {
+                    ui.label("The themes cannot be read.");
+                    return;
+                };
+                let (current, variant) = current_theme(&info, self.page_index);
+                ui.checkbox(&mut self.theme_all_pages, "Apply to all pages");
+                let op = theme_op(variants, self.theme_all_pages);
+                if !variants {
+                    for theme in info["themes"].as_array().into_iter().flatten() {
+                        let Some(name) = theme["name"].as_str() else { continue };
+                        if ui.selectable_label(current.as_deref() == Some(name), name).clicked() {
+                            *action = Some(Action::Theme(op, name.to_string()));
+                            ui.close();
+                        }
+                    }
+                } else if current.is_none() {
+                    ui.label("Apply a theme first (Design > Themes).");
+                } else {
+                    for choice in 0..4u64 {
+                        if ui.selectable_label(choice == variant, format!("Variant {}", choice + 1)).clicked() {
+                            *action = Some(Action::Theme(op, choice.to_string()));
+                            ui.close();
+                        }
+                    }
+                }
+            });
+        });
+    }
+
+    /// Apply a theme or variant (`theme_op`) with the shown page as the target.
+    fn apply_theme(&mut self, ctx: &egui::Context, op: i32, value: &str) {
+        let page = self.page_index;
+        let result = self.engine.page_op(op, page, 0, value).map(|_| ());
+        let selected = self.selected.clone();
+        self.finish_edit(ctx, result, "Changed the theme", selected);
     }
 
     /// The Design tab's Orientation and Size menus; the current choice is marked.
@@ -5827,6 +5938,7 @@ impl eframe::App for LayoutCraftApp {
             }
             Some(Action::DocProps) => self.doc_props_open = true,
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
+            Some(Action::Theme(op, ref value)) => self.apply_theme(&ctx, op, value),
             Some(Action::PageShape(w, h)) => self.set_page_shape(&ctx, w, h),
             Some(Action::Find) => self.open_find(),
             Some(Action::HelpAbout) => self.help_about_open = true,
@@ -5922,6 +6034,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// `Engine::page_op` `theme_op` with the theme name or variant number.
+    Theme(i32, String),
     /// Set the shown page's width and height (inches).
     PageShape(f64, f64),
     Find,
