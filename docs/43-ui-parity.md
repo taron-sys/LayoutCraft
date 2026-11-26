@@ -93,7 +93,7 @@ nice to have. Effort is an estimate in hours.
 | Page tabs | Tabs at the lower edge of the drawing: Page-1 and background pages such as VBackground-1 (S5); right-click a page tab for page properties (S1 snippet context, S27). | Browser: `#pageBar` with context menu (`contextmenu.js`). Desktop: page buttons only in the status bar ("<  page n / m  >") plus ribbon page commands. | Desktop page tab strip with right-click menu, drag to reorder, background pages. | P0 | 8-14 |
 | Status bar | Left: items that act as shortcuts, e.g. clicking the width item opens Size & Position (S4); right: zoom controls, Full Screen, window switching (S4); zoom slider and Fit Page to Window at the lower right, and a button to open Pan & Zoom (S11). Page number and language: unverified. | Desktop bottom panel: previous / next page, "page n / m", status message, "zoom nn%", "modified". Browser: `#statusbar`. | Zoom slider; Fit button; shape-geometry items (width, height, angle) that open Size & Position; language item unverified. | P0 | 8-12 |
 | Zoom and pan | Zoom slider, Fit Page to Window, Pan & Zoom button (S11); Ctrl+wheel zooms, plain wheel scrolls, Ctrl+Shift magnifier (click zoom in, right-click out, drag a rectangle) (S11). | Desktop: wheel zooms at the pointer (`exp(scroll*0.0015)`), middle button / Space / Pan tool move; Ctrl+= / Ctrl+-. Browser: wheel option (`wheelZoom`), Pan & Zoom pane. | Desktop: plain wheel should scroll, Ctrl+wheel zoom (Visio default; the wheel-zooms option is under Advanced options, S11). Zoom slider, magnifier gesture, Pan & Zoom pane. | P1 | 8-14 |
-| Task pane: Size & Position | View > Show > Task Panes > Size & Position: Width, Height, X, Y (pin position), Pin Pos, Angle; units typed in text; formulas (S12). | Desktop inspector prints a read-only "Box" and "Position" line. Browser: `paneSizePos`. | Editable fields on desktop; pin position; units and formulas (formulas: P3). | P0 | 8-14 |
+| Task pane: Size & Position | View > Show > Task Panes > Size & Position: Width, Height, X, Y (pin position), Pin Pos, Angle; units typed in text; formulas (S12). | Desktop inspector: editable pin X and Y, width, height and angle (shapes of the page, not locked), in the page unit (in or mm). Browser: `paneSizePos`. | Choice of the reference point; typed units; formulas (P3); a dockable window. | P0 | 8-14 |
 | Task pane: Shape Data | Data entered per shape and shown in a window (View > Task Panes, Data > Show/Hide; S5). | Browser: Data panel (`dataBtn`). Desktop: a window for one selected shape (values, add, remove). | Type, prompt, hidden and order editing; several shapes at once; docking. | P1 | 10-16 |
 | Task pane: Pan & Zoom | Thumbnail of the page with a blue frame; drag the frame to pan, resize to zoom, has a slider (S11). | Browser `panePanZoom` (frame drag, wheel). Desktop none. | Port to desktop. | P2 | 6-10 |
 | Task pane: Layers | Layer Properties dialog with Visible, Print, Active, Lock, Snap, Glue, Color columns; Assign to Layer (S22). | Desktop inspector: per layer Visible / Prints / Locked checkboxes, shape-on-layer checkbox, add and delete layer. Browser: layers panel. | Active, Snap, Glue, Color columns; Assign to Layer command in the Editing group. | P2 | 8-12 |
@@ -115,7 +115,7 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 43 present, 20 partial,
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 44 present, 19 partial,
 62 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
@@ -270,7 +270,7 @@ these are row counts, not a count of every Visio button.
 | Show: Task Panes menu | S12, S11 | paneShapes paneSizePos paneSheet panePanZoom | partial | present | Desktop: Shapes pane only from the ribbon | P0 |
 | Zoom: Zoom (dialog) | S11 | zl | missing | present | | P1 |
 | Zoom: Fit Page to Window (Ctrl+Shift+W) | S11, S1 | fit | present | present | Desktop has no key | P0 |
-| Zoom: 100%, Page Width | unverified | zoom100 zoomWidth | partial | present | Page Width missing on desktop | P2 |
+| Zoom: 100%, Page Width | unverified | zoom100 zoomWidth | present | present | | P2 |
 | Zoom: zoom in / out (Alt+F6, Alt+Shift+F6 desktop; Ctrl+Plus/Minus web) | S1 | zin zout | present | present | LC uses Ctrl+= / Ctrl+- (web style) | P1 |
 | Visual Aids: Snap & Glue (dialog Alt+F9) | S1 | snapGrid snapShapes snapGuides gridStep | partial | present | Desktop has toggles but no dialog or key | P1 |
 | Visual Aids: Dynamic Grid (alignment, spacing, resizing guides; snap strength) | S10 | snapShapes | partial | partial | Desktop snaps to shapes and draws a guide (`snap_guide`); spacing guides and resize guides unverified | P0 |

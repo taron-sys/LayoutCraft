@@ -1053,6 +1053,194 @@ mod data_row_tests {
     }
 }
 
+/// The frame of a shape of the page as the Size and Position fields show it: pin (inches, y up), size, the pin inside the
+/// box, and the angle (radians, counter-clockwise).
+#[derive(Clone, Copy, Debug)]
+struct SizeFrame {
+    pin: (f64, f64),
+    size: (f64, f64),
+    loc: (f64, f64),
+    angle: f64,
+}
+
+/// The labels of the Size and Position fields, in order.
+const SIZE_FIELDS: [&str; 5] = ["X", "Y", "Width", "Height", "Angle"];
+/// The smallest width and height the fields accept, inches (`web/shell.js` `applySizePos`).
+const MIN_SIDE_IN: f64 = 0.05;
+
+/// The frame of `id` from `Engine::group_info_json`, or why its size and position cannot be edited.
+fn size_frame(frames: &str, id: &str) -> Result<SizeFrame, &'static str> {
+    let frames: Vec<serde_json::Value> = serde_json::from_str(frames).map_err(|_| "The shape cannot be read.")?;
+    let frame = frames.iter().find(|frame| frame["id"].as_str() == Some(id)).ok_or("The shape cannot be read.")?;
+    if !frame["parentId"].is_null() {
+        return Err("A shape inside a group cannot be edited here.");
+    }
+    if frame["locked"].as_bool() == Some(true) {
+        return Err("The shape is locked.");
+    }
+    let pair = |key: &str| Some((frame[key][0].as_f64()?, frame[key][1].as_f64()?));
+    match (frame["editable"].as_bool(), pair("pin"), pair("size"), pair("loc"), frame["angle"].as_f64()) {
+        (Some(true), Some(pin), Some(size), Some(loc), Some(angle)) => Ok(SizeFrame { pin, size, loc, angle }),
+        _ => Err("This shape cannot be edited (a flipped group)."),
+    }
+}
+
+/// The text of the five fields; lengths in the page unit (`per_inch` of them make an inch), the angle in degrees 0..360.
+fn size_texts(frame: SizeFrame, per_inch: f64) -> [String; 5] {
+    let number = |value: f64| ((value * 10_000.0).round() / 10_000.0 + 0.0).to_string();
+    let degrees = (frame.angle.to_degrees().rem_euclid(360.0) * 1000.0).round() / 1000.0;
+    [frame.pin.0, frame.pin.1, frame.size.0, frame.size.1].map(|length| number(length * per_inch)).into_iter().chain([number(degrees % 360.0)]).collect::<Vec<_>>().try_into().unwrap_or_default()
+}
+
+/// Write one field (index into `SIZE_FIELDS`): X / Y move the pin there, width / height keep the pin where it is, the angle
+/// turns the shape about its pin. One undo step.
+fn apply_size_field(engine: &mut Engine, page: usize, id: &str, field: usize, value: f64, per_inch: f64) -> Result<(), String> {
+    if !value.is_finite() {
+        return Err(format!("{} must be a number", SIZE_FIELDS[field]));
+    }
+    let frame = size_frame(&engine.group_info_json(page)?, id)?;
+    let length = value / per_inch;
+    match field {
+        0 => engine.edit(page, 2, id, length - frame.pin.0, 0.0, 0.0, 0.0, 0),
+        1 => engine.edit(page, 2, id, 0.0, length - frame.pin.1, 0.0, 0.0, 0),
+        2 | 3 => {
+            if length < MIN_SIDE_IN {
+                return Err("a shape must be at least 0.05 in wide and high".to_string());
+            }
+            let (w, h) = if field == 2 { (length, frame.size.1) } else { (frame.size.0, length) };
+            let fraction = |at: f64, side: f64| if side.abs() > 1e-9 { at / side } else { 0.5 };
+            engine.edit(page, 3, id, w, h, fraction(frame.loc.0, frame.size.0), fraction(frame.loc.1, frame.size.1), 0)
+        }
+        _ => engine.edit(page, 7, id, value.rem_euclid(360.0).to_radians(), 0.0, 0.0, 0.0, 0),
+    }
+}
+
+/// The working copy of the Size and Position fields of the selected shape.
+#[derive(Default)]
+struct SizePos {
+    /// (page, shape) the texts were read for; `None` reads them again.
+    key: Option<(usize, String)>,
+    /// What the fields hold, and what they held when read; or why there are none.
+    fields: Option<Result<([String; 5], [String; 5]), &'static str>>,
+    unit: &'static str,
+    per_inch: f64,
+}
+
+#[cfg(test)]
+mod size_pos_tests {
+    use super::{apply_size_field, size_frame, SizeFrame};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn fields_move_resize_and_turn_about_the_pin() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let id = engine.draw(0, 0, 1.0, 1.0, 3.0, 2.0).unwrap();
+        let frame = |engine: &Engine| -> SizeFrame { size_frame(&engine.group_info_json(0).unwrap(), &id).unwrap() };
+        let close = |a: f64, b: f64| (a - b).abs() < 1e-6;
+        let start = frame(&engine);
+        apply_size_field(&mut engine, 0, &id, 0, 5.0, 1.0).unwrap();
+        let moved = frame(&engine);
+        assert!(close(moved.pin.0, 5.0) && close(moved.pin.1, start.pin.1));
+        // millimetres: 101.6 mm are 4 inches
+        apply_size_field(&mut engine, 0, &id, 2, 101.6, 25.4).unwrap();
+        let wider = frame(&engine);
+        assert!(close(wider.size.0, 4.0) && close(wider.size.1, moved.size.1) && close(wider.pin.0, moved.pin.0));
+        apply_size_field(&mut engine, 0, &id, 4, 90.0, 1.0).unwrap();
+        let turned = frame(&engine);
+        assert!(close(turned.angle, std::f64::consts::FRAC_PI_2) && close(turned.pin.1, wider.pin.1));
+        let depth = engine.undo_depth();
+        assert!(apply_size_field(&mut engine, 0, &id, 3, 0.01, 1.0).is_err());
+        assert_eq!(engine.undo_depth(), depth);
+    }
+
+    #[test]
+    fn locked_shapes_and_group_members_are_refused() {
+        let frames = r#"[{"id":"1","parentId":null,"locked":true,"editable":true},{"id":"2","parentId":"1","locked":false,"editable":true}]"#;
+        assert!(size_frame(frames, "1").is_err() && size_frame(frames, "2").is_err() && size_frame(frames, "3").is_err());
+    }
+}
+
+/// How a text field of a window was left this frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Left {
+    /// Enter, Tab or a click elsewhere: what was typed counts.
+    Apply,
+    /// Esc: what was typed is thrown away.
+    Revert,
+}
+
+fn field_left(ui: &egui::Ui, field: &egui::Response) -> Option<Left> {
+    field.lost_focus().then(|| if ui.input(|input| input.key_pressed(egui::Key::Escape)) { Left::Revert } else { Left::Apply })
+}
+
+#[cfg(test)]
+mod field_left_tests {
+    use super::{field_left, Left};
+    use eframe::egui::{self, Event, Key, Modifiers};
+
+    /// One frame with a single focused-on-demand text field; what `field_left` says in it.
+    fn frame(ctx: &egui::Context, text: &mut String, focus: bool, events: Vec<Event>) -> Option<Left> {
+        let mut left = None;
+        let output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+            let field = ui.text_edit_singleline(text);
+            if focus {
+                field.request_focus();
+            }
+            left = field_left(ui, &field);
+        });
+        // nothing paints here: the texture changes of the frame are not applied, so the output must not be dropped
+        std::mem::forget(output);
+        left
+    }
+
+    fn press(key: Key) -> Vec<Event> {
+        vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]
+    }
+
+    #[test]
+    fn escape_reverts_and_enter_applies() {
+        for (key, expected) in [(Key::Escape, Left::Revert), (Key::Enter, Left::Apply)] {
+            let ctx = egui::Context::default();
+            let mut text = "typed".to_string();
+            assert_eq!(frame(&ctx, &mut text, true, Vec::new()), None);
+            assert_eq!(frame(&ctx, &mut text, false, Vec::new()), None);
+            assert_eq!(frame(&ctx, &mut text, false, press(key)), Some(expected));
+        }
+    }
+}
+
+/// The zoom and pan that make an image of `size` (at zoom 1) as wide as the view of `available`, its top at the top of
+/// the view when it is taller than the view, else centred. The zoom stays within the app's zoom range.
+fn width_view(size: egui::Vec2, available: egui::Vec2) -> (f32, egui::Vec2) {
+    let zoom = (available.x / size.x * 0.98).clamp(0.05, 8.0);
+    let margin = available.x * 0.01;
+    let down = ((size.y * zoom - available.y) / 2.0 + margin).max(0.0);
+    (zoom, egui::vec2(0.0, down))
+}
+
+#[cfg(test)]
+mod width_view_tests {
+    use super::width_view;
+    use eframe::egui::vec2;
+
+    #[test]
+    fn a_tall_page_fills_the_width_and_shows_its_top() {
+        let (size, view) = (vec2(800.0, 3000.0), vec2(1000.0, 600.0));
+        let (zoom, pan) = width_view(size, view);
+        let width = size.x * zoom;
+        assert!(width <= view.x && width > view.x * 0.9);
+        // top edge of the image relative to the top edge of the view: just inside it
+        let top = view.y / 2.0 + pan.y - size.y * zoom / 2.0;
+        assert!(top >= 0.0 && top < view.y * 0.1);
+    }
+
+    #[test]
+    fn a_wide_page_stays_centred() {
+        assert_eq!(width_view(vec2(1000.0, 200.0), vec2(1000.0, 600.0)).1, vec2(0.0, 0.0));
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -1759,6 +1947,8 @@ struct LayoutCraftApp {
     zoom: f32,
     pan: egui::Vec2,
     fit_pending: bool,
+    /// "Page Width" was chosen: apply it when the view size is known.
+    fit_width_pending: bool,
     panning: bool,
     selected: Option<String>,
     tool: Tool,
@@ -1788,6 +1978,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Size and Position fields of the inspector.
+    size_pos: SizePos,
     /// The Layers window is open.
     layers_open: bool,
     /// The full-screen view is on.
@@ -1891,6 +2083,7 @@ impl LayoutCraftApp {
             zoom: 1.0,
             pan: egui::Vec2::ZERO,
             fit_pending: true,
+            fit_width_pending: false,
             panning: false,
             selected: None,
             tool: Tool::Select,
@@ -1914,6 +2107,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            size_pos: SizePos::default(),
             layers_open: false,
             full_screen: false,
             data_pane: None,
@@ -2082,6 +2276,7 @@ impl LayoutCraftApp {
         let _timer = Timer::new("build_page (whole)", 0.0);
         self.sites_cache.clear();
         self.struck_cache = None;
+        self.size_pos.key = None;
         self.theme_cache = None;
         *self.routes_cache.borrow_mut() = None;
         let (Some(package), Some(document)) = (self.engine.package.as_ref(), self.engine.document.as_ref())
@@ -3976,6 +4171,7 @@ impl LayoutCraftApp {
             N::PageDelete => Action::PageDelete,
             N::PageMove(direction) => Action::PageMove(direction),
             N::Fit => Action::Fit,
+            N::FitWidth => Action::FitWidth,
             N::ActualSize => Action::ActualSize,
             N::ZoomIn => Action::ZoomIn,
             N::ZoomOut => Action::ZoomOut,
@@ -4645,6 +4841,7 @@ impl LayoutCraftApp {
         let mut open = true;
         // the row to write, or the name of the row to remove
         let mut write: Option<DataRow> = None;
+        let mut reread = false;
         let mut remove: Option<String> = None;
         egui::Window::new("Shape Fields").open(&mut open).collapsible(true).default_width(360.0).show(ctx, |ui| {
             if shape.is_none() {
@@ -4681,8 +4878,13 @@ impl LayoutCraftApp {
                             if row.value != before {
                                 write = Some(row.clone());
                             }
-                        } else if ui.text_edit_singleline(&mut row.value).labelled_by(label.id).lost_focus() {
-                            write = Some(row.clone());
+                        } else {
+                            let field = ui.text_edit_singleline(&mut row.value).labelled_by(label.id);
+                            match field_left(ui, &field) {
+                                Some(Left::Apply) => write = Some(row.clone()),
+                                Some(Left::Revert) => reread = true,
+                                None => {}
+                            }
                         }
                         if ui.button("Remove").on_hover_text(format!("Remove the field {title}")).clicked() {
                             remove = Some(row.name.clone());
@@ -4720,6 +4922,9 @@ impl LayoutCraftApp {
                 pane.key = None;
                 self.finish_edit(ctx, result, "Changed shape fields", Some(shape));
             }
+        }
+        if reread {
+            pane.key = None;
         }
         if open {
             self.data_pane = Some(pane);
@@ -4779,6 +4984,65 @@ impl LayoutCraftApp {
                 self.layer_name.clear();
             }
         });
+    }
+
+    /// The Size and Position fields of the selected shape. A field is applied when it is left (or Enter is pressed) with
+    /// a new content.
+    fn size_pos_controls(&mut self, ui: &mut egui::Ui, id: &str, action: &mut Option<Action>) {
+        let key = (self.page_index, id.to_string());
+        if self.size_pos.key.as_ref() != Some(&key) {
+            let metric = self.engine.page_size_json(self.page_index).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).is_some_and(|size| size["metric"].as_bool() == Some(true));
+            (self.size_pos.unit, self.size_pos.per_inch) = if metric { ("mm", 25.4) } else { ("in", 1.0) };
+            let per_inch = self.size_pos.per_inch;
+            self.size_pos.fields = Some(if self.is_connector(id) {
+                Err("A connector is edited by its ends.")
+            } else {
+                self.engine
+                    .group_info_json(self.page_index)
+                    .map_err(|_| "The shape cannot be read.")
+                    .and_then(|frames| size_frame(&frames, id))
+                    .map(|frame| (size_texts(frame, per_inch), size_texts(frame, per_inch)))
+            });
+            self.size_pos.key = Some(key);
+        }
+        ui.add_space(4.0);
+        ui.label("Size and Position");
+        let unit = self.size_pos.unit;
+        let per_inch = self.size_pos.per_inch;
+        match self.size_pos.fields.as_mut() {
+            Some(Ok((texts, read))) => {
+                egui::Grid::new("size-pos").num_columns(3).show(ui, |ui| {
+                    for (field, name) in SIZE_FIELDS.iter().enumerate() {
+                        let label = ui.label(*name);
+                        let edit = ui.add(egui::TextEdit::singleline(&mut texts[field]).desired_width(80.0)).labelled_by(label.id);
+                        ui.label(if field == 4 { "deg" } else { unit });
+                        ui.end_row();
+                        match field_left(ui, &edit) {
+                            // Esc gives the old value back instead of applying what was typed
+                            Some(Left::Revert) => texts[field] = read[field].clone(),
+                            Some(Left::Apply) if texts[field] != read[field] => match texts[field].trim().parse::<f64>() {
+                                Ok(value) => *action = Some(Action::SizeField(id.to_string(), field, value, per_inch)),
+                                Err(_) => texts[field] = read[field].clone(),
+                            },
+                            _ => {}
+                        }
+                    }
+                });
+            }
+            Some(Err(reason)) => {
+                ui.label(egui::RichText::new(*reason).small());
+            }
+            None => {}
+        }
+    }
+
+    fn set_size_field(&mut self, ctx: &egui::Context, id: &str, field: usize, value: f64, per_inch: f64) {
+        let page = self.page_index;
+        let result = apply_size_field(&mut self.engine, page, id, field, value, per_inch);
+        // read the fields again, also after a refused value
+        self.size_pos.key = None;
+        let selected = self.selected.clone();
+        self.finish_edit(ctx, result, "Changed size and position", selected);
     }
 
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
@@ -5096,10 +5360,6 @@ impl eframe::App for LayoutCraftApp {
                     if let Some(selected) = self.selected.clone() {
                         if let Some(shape) = self.scene_shape(&selected) {
                             ui.label(format!("Shape {selected}"));
-                            ui.label(format!(
-                                "Box: {:.1} x {:.1} at {:.1}, {:.1}",
-                                shape.w, shape.h, shape.x, shape.y
-                            ));
                             ui.label(format!("Parts: {}", shape.parts.len()));
                             // the shape's hyperlinks (edited in the Hyperlink window, Ctrl+K)
                             let key = (selected.clone(), self.page_index, self.engine.undo_depth());
@@ -5119,11 +5379,6 @@ impl eframe::App for LayoutCraftApp {
                         }
                         if let Some(shape) = self.doc_shape(&selected) {
                             ui.add_space(4.0);
-                            ui.label(format!(
-                                "Position: {:.3} x {:.3} in",
-                                (shape.w / DPI) as f32,
-                                (shape.h / DPI) as f32
-                            ));
                             if shape.group.is_some() {
                                 ui.colored_label(
                                     egui::Color32::from_rgb(255, 196, 0),
@@ -5133,6 +5388,7 @@ impl eframe::App for LayoutCraftApp {
                                 ui.label("Rotated: move only, resize disabled");
                             }
                         }
+                        self.size_pos_controls(ui, &selected, &mut action);
                         ui.horizontal(|ui| {
                             if ui.button("Edit text").clicked() {
                                 action = Some(Action::EditText);
@@ -5371,6 +5627,11 @@ impl eframe::App for LayoutCraftApp {
                 let available = ui.available_size();
                 if self.fit_pending {
                     self.fit_to_view(available);
+                }
+                if self.fit_width_pending && self.texture.is_some() && self.texture_size.x > 0.0 && available.x > 1.0 {
+                    (self.zoom, self.pan) = width_view(self.texture_size, available);
+                    self.fit_pending = false;
+                    self.fit_width_pending = false;
                 }
                 let (viewport, response) =
                     ui.allocate_exact_size(available, egui::Sense::click_and_drag());
@@ -6347,6 +6608,7 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
             Some(Action::Hyperlink) => self.open_links(),
             Some(Action::Layers) => self.layers_open = !self.layers_open,
+            Some(Action::SizeField(ref id, field, value, per_inch)) => self.set_size_field(&ctx, id, field, value, per_inch),
             Some(Action::FullScreen) => self.toggle_full_screen(&ctx),
             Some(Action::ShapeData) => self.data_pane = if self.data_pane.is_some() { None } else { Some(DataPane::default()) },
             Some(Action::Theme(op, ref value)) => self.apply_theme(&ctx, op, value),
@@ -6417,6 +6679,7 @@ impl eframe::App for LayoutCraftApp {
             }
             Some(Action::Page(page)) => self.go_to_page(&ctx, page),
             Some(Action::Fit) => self.fit_pending = true,
+            Some(Action::FitWidth) => self.fit_width_pending = true,
             Some(Action::ActualSize) => {
                 self.zoom = 1.0;
                 self.pan = egui::Vec2::ZERO;
@@ -6445,6 +6708,10 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Make the page as wide as the view.
+    FitWidth,
+    /// (shape, field, value, page units per inch) of a Size and Position field.
+    SizeField(String, usize, f64, f64),
     /// Show or hide the Layers window.
     Layers,
     FullScreen,
