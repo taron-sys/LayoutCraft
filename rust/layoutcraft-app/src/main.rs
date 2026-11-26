@@ -752,6 +752,73 @@ mod shadow_tests {
     }
 }
 
+/// The selected shapes "Change Shape" can work on (`web/shell.js` `changeableShapes`): shapes of the page itself that are
+/// editable and not locked, and are not connectors. `frames` is `Engine::group_info_json`.
+fn changeable_shapes(frames: &str, ids: &[String], is_connector: impl Fn(&str) -> bool) -> Vec<String> {
+    let frames: Vec<serde_json::Value> = serde_json::from_str(frames).unwrap_or_default();
+    ids.iter()
+        .filter(|id| !is_connector(id))
+        .filter(|id| {
+            frames.iter().any(|frame| {
+                frame["id"].as_str() == Some(id.as_str()) && frame["parentId"].is_null() && frame["editable"].as_bool() == Some(true) && frame["locked"].as_bool() != Some(true)
+            })
+        })
+        .cloned()
+        .collect()
+}
+
+/// Replace each shape with an instance of the stencil's master (`Engine::replace_shape`) as one undo step, all or nothing.
+/// Returns the new ids.
+fn change_shapes(engine: &mut Engine, page: usize, ids: &[String], stencil: i32, master: &str) -> Result<Vec<String>, String> {
+    if ids.is_empty() {
+        return Err("select a shape of the page that is not a connector and not locked".to_string());
+    }
+    let depth = engine.undo_depth();
+    let result: Result<Vec<String>, String> = ids.iter().map(|id| engine.replace_shape(page, stencil, &format!("{id}|{master}"))).collect();
+    engine.collapse_history(depth);
+    if result.is_err() && engine.undo_depth() > depth {
+        let _ = engine.undo();
+    }
+    result
+}
+
+#[cfg(test)]
+mod change_shape_tests {
+    use super::{change_shapes, changeable_shapes};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn connectors_members_and_locked_shapes_are_not_changed() {
+        let frames = r#"[
+            {"id":"1","parentId":null,"editable":true,"locked":false},
+            {"id":"2","parentId":null,"editable":true,"locked":true},
+            {"id":"3","parentId":"1","editable":true,"locked":false},
+            {"id":"4","parentId":null,"editable":true,"locked":false}
+        ]"#;
+        let ids: Vec<String> = ["1", "2", "3", "4"].iter().map(|id| id.to_string()).collect();
+        assert_eq!(changeable_shapes(frames, &ids, |id| id == "4"), ["1"]);
+    }
+
+    #[test]
+    fn several_shapes_change_in_one_undo_step() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let ids: Vec<String> = [1.0, 5.0].iter().map(|x| engine.draw(0, 0, *x, 1.0, x + 2.0, 3.0).unwrap()).collect();
+        let stencil: serde_json::Value = serde_json::from_str(&engine.stencil_builtin().unwrap()).unwrap();
+        let index = stencil["index"].as_i64().unwrap() as i32;
+        let master = &stencil["masters"][0]["id"];
+        let master = master.as_str().map_or_else(|| master.to_string(), str::to_string);
+        let depth = engine.undo_depth();
+        let made = change_shapes(&mut engine, 0, &ids, index, &master).unwrap();
+        assert_eq!(made.len(), 2);
+        assert_eq!(engine.undo_depth(), depth + 1);
+        // a shape that does not exist fails the whole change
+        let both = [made[0].clone(), "999".to_string()];
+        assert!(change_shapes(&mut engine, 0, &both, index, &master).is_err());
+        assert_eq!(engine.undo_depth(), depth + 1);
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -1475,6 +1542,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// "Change Shape" is waiting for a click on a shape of the Shapes panel.
+    change_shape: bool,
     /// The Find window, while it is open.
     find: Option<Find>,
     /// (selected ids, whether all their text is struck through) for the Strike button.
@@ -1588,6 +1657,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            change_shape: false,
             find: None,
             struck_cache: None,
             page_setup_open: false,
@@ -3377,6 +3447,7 @@ impl LayoutCraftApp {
         let label = ribbon::label(id);
         let icon = self.ribbon.icons.get(id).cloned();
         let selected = (native == Some(ribbon::Native::Connector) && self.tool == Tool::Connector) || (native == Some(ribbon::Native::TextBox) && self.tool == Tool::Draw(5)) || (native == Some(ribbon::Native::Hand) && self.tool == Tool::Hand)
+            || (native == Some(ribbon::Native::ChangeShape) && self.change_shape)
             || (native == Some(ribbon::Native::SnapGrid) && self.snap_grid)
             || (native == Some(ribbon::Native::SnapShapes) && self.snap_shapes)
             || (native == Some(ribbon::Native::SnapGuides) && self.snap_guides)
@@ -3401,6 +3472,16 @@ impl LayoutCraftApp {
                     ribbon::Native::Connector => self.tool = if selected { Tool::Select } else { Tool::Connector },
                     ribbon::Native::TextBox => self.tool = if selected { Tool::Select } else { Tool::Draw(5) },
                     ribbon::Native::Hand => self.tool = if selected { Tool::Select } else { Tool::Hand },
+                    ribbon::Native::ChangeShape => {
+                        self.change_shape = !self.change_shape && self.selected.is_some();
+                        if self.change_shape {
+                            self.shapes_open = true;
+                            self.armed_master = None;
+                            self.status = "Change Shape: click a shape in the Shapes panel (Esc cancels).".to_string();
+                        } else if self.selected.is_none() {
+                            self.status = "Select the shape to change first.".to_string();
+                        }
+                    }
                     ribbon::Native::SnapGrid => self.snap_grid = !self.snap_grid,
                     ribbon::Native::SnapShapes => self.snap_shapes = !self.snap_shapes,
                     ribbon::Native::SnapGuides => self.snap_guides = !self.snap_guides,
@@ -3637,6 +3718,8 @@ impl LayoutCraftApp {
             N::TextBox => Action::Fit,
             // the connector tool is a tool, not an action (handled by the caller)
             N::Connector => Action::Fit,
+            // "Change Shape" is a mode, handled where the button is drawn
+            N::ChangeShape => Action::Fit,
             // the Pan tool is a tool too
             N::Hand => Action::Fit,
             // the snap switches and the grid step are state, handled where the button is drawn
@@ -4052,6 +4135,25 @@ impl LayoutCraftApp {
             self.replace_text(ctx, all);
         } else if search {
             self.find_next();
+        }
+    }
+
+    /// Turn the selected shapes into instances of a stencil master; the new shapes stay selected.
+    fn change_selected_shapes(&mut self, ctx: &egui::Context, stencil: i32, master: &str, name: &str) {
+        let page = self.page_index;
+        let selection = self.all_selected();
+        let result = self.engine.group_info_json(page).and_then(|frames| {
+            let ids = changeable_shapes(&frames, &selection, |id| self.is_connector(id));
+            change_shapes(&mut self.engine, page, &ids, stencil, master)
+        });
+        match result {
+            Ok(mut made) => {
+                let rest = made.split_off(made.len().min(1));
+                let count = rest.len() + made.len();
+                self.finish_edit(ctx, Ok(()), &format!("Changed {count} shape(s) to \"{name}\""), made.pop());
+                self.extra_selected = rest;
+            }
+            Err(error) => self.status = format!("Could not change the shape: {error}"),
         }
     }
 
@@ -4542,6 +4644,10 @@ impl eframe::App for LayoutCraftApp {
             self.armed_master = None;
             self.status = "Cancelled placing a shape.".to_string();
         }
+        if self.change_shape && (self.selected.is_none() || !self.shapes_open || ctx.input(|input| input.key_pressed(egui::Key::Escape))) {
+            self.change_shape = false;
+            self.status = "Change Shape cancelled.".to_string();
+        }
         if self.shapes_open && !self.stencil_autoopen_done && self.texture.is_some() {
             self.stencil_autoopen_done = true;
             if self.stencils.is_empty() {
@@ -4566,7 +4672,9 @@ impl eframe::App for LayoutCraftApp {
                     }
                 });
                 ui.add(egui::TextEdit::singleline(&mut self.shape_search).hint_text("Search shapes").desired_width(f32::INFINITY));
-                if let Some((_, _, name)) = &self.armed_master {
+                if self.change_shape {
+                    ui.add(egui::Label::new(egui::RichText::new("Change Shape: click the new shape (Esc cancels).").small()).wrap());
+                } else if let Some((_, _, name)) = &self.armed_master {
                     ui.add(egui::Label::new(egui::RichText::new(format!("Click on the page to place \"{name}\" (Esc cancels).")).small()).wrap());
                 } else if self.stencils.is_empty() {
                     ui.label("No stencil open.");
@@ -4598,7 +4706,9 @@ impl eframe::App for LayoutCraftApp {
                                         }
                                     }
                                     let response = response.on_hover_text(mname.as_str());
-                                    if response.clicked() {
+                                    if response.clicked() && self.change_shape {
+                                        replace = Some((index, id.clone(), mname.clone()));
+                                    } else if response.clicked() {
                                         self.armed_master = Some((index, id.clone(), mname.clone()));
                                         self.status = format!("Click on the page to place \"{mname}\".");
                                     }
@@ -4636,17 +4746,8 @@ impl eframe::App for LayoutCraftApp {
                 });
             });
             if let Some((index, master, name)) = replace {
-                if let Some(shape) = self.selected.clone() {
-                    let page = self.page_index;
-                    let result = self.engine.replace_shape(page, index as i32, &format!("{shape}|{master}"));
-                    match result {
-                        Ok(new_id) => {
-                            self.extra_selected.clear();
-                            self.finish_edit(&ctx, Ok(()), &format!("Changed shape {shape} to \"{name}\""), Some(new_id));
-                        }
-                        Err(error) => self.status = format!("Could not change the shape: {error}"),
-                    }
-                }
+                self.change_shape = false;
+                self.change_selected_shapes(&ctx, index as i32, &master, &name);
             }
             if let Some(si) = close {
                 let index = self.stencils[si].index;

@@ -115,7 +115,7 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 37 present, 21 partial,
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 38 present, 20 partial,
 67 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
@@ -186,7 +186,7 @@ these are row counts, not a count of every Visio button.
 | Arrange: shape operations (Union, Combine, Fragment, Intersect, Subtract, Join, Trim) | S18 for Trim (Developer tab, Shape Design, Operations); the others unverified | opUnion opCombine opFragment opIntersect opSubtract opJoin opTrim | present | present | Visio puts them on Developer (S18); LayoutCraft shows them in Home > Arrange. Engine: `shape_operation`; follow Visio's place | P1 |
 | Editing: Select (Area Select, Lasso Select, Select All, Select by Type) | S19 | - | partial | partial | Rectangle drag and Ctrl+A exist; lasso and by-type missing | P1 |
 | Editing: Layers > Assign to Layer, Layer Properties | S22 | layersBtn | partial | present | Desktop in inspector only | P2 |
-| Editing: Change Shape | unverified | changeShapeBtn | partial | present | Desktop: stencil context menu "Replace the selected shape" | P2 |
+| Editing: Change Shape | unverified | changeShapeBtn | present | present | Desktop: the button, then a click in the Shapes panel, or the panel's context menu | P2 |
 | Editing: Find | unverified | findBtn | present | present | Desktop: finds and replaces on the current page | P2 |
 | Editing: Styles | unverified | stylesBtn | missing | present | | P2 |
 | Duplicate (Ctrl+D is a web shortcut) | S1 | dup | present | present | Not a Visio Home button (unverified) | P1 |
