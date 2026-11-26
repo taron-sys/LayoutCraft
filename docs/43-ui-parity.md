@@ -168,7 +168,7 @@ these are row counts, not a count of every Visio button.
 | Tools: Pan (hand) | none in S11 | handTool | present | present | LayoutCraft addition; Visio's pan is wheel, Ctrl+Shift drag, Pan & Zoom (S11) | P3 |
 | Tools: Edit points / Fit curve | unverified | editPointsBtn, fitCurveBtn | missing | present | | P2 |
 | Shape Styles: quick style gallery | S9 | p:fillColor (menu) | missing | partial | | P1 |
-| Shape Styles: Fill (colour, no fill, more colours) | S9 | p:fillColor | partial | present | Desktop: swatches and none on the ribbon, and the inspector's Style panel; no chooser for further colours on the ribbon | P0 |
+| Shape Styles: Fill (colour, no fill, more colours) | S9 | p:fillColor | present | present | Desktop: swatches, none and More colours (a typed code or a picker) on the ribbon, and the inspector's Style panel | P0 |
 | Shape Styles: Line (colour, weight, dashes, arrows) | S9 | p:lineColor | present | present | Desktop: colour swatches and the Line ends menu (arrowheads and sizes) on the ribbon; weight and dash pattern in the inspector | P0 |
 | Shape Styles: Effects (shadow, reflection, glow, soft edges, bevel, 3-D rotation) | S9 | p:shadow | partial | partial | Shadow only (on / off) | P2 |
 | Arrange: Align Left / Center / Right / Top / Middle / Bottom | S13 | arrL arrCx arrRt arrT arrM arrB | present | present | Aligns to the first selected; Visio aligns to the primary shape (S13) | P0 |

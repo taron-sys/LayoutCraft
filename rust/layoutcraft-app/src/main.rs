@@ -2919,6 +2919,34 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn another_fill_colour_can_be_typed() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        for label in ["Styles \u{25be}", "Fill \u{25be}", "More colours..."] {
+            let at = driver.texts(label).into_iter().min_by(|a, b| a.top().total_cmp(&b.top())).unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        }
+        assert!(driver.app.colour_draft.is_some());
+        let fill = |driver: &Driver| driver.app.doc_shape(&ids[0]).and_then(|shape| shape.fill.clone()).map(|fill| fill.to_lowercase());
+        let (before, depth) = (fill(&driver), driver.app.engine.undo_depth());
+        // refused: nothing changes and the window stays
+        driver.write("orange");
+        driver.key(Key::Enter, Modifiers::NONE);
+        assert!(driver.app.colour_draft.as_ref().is_some_and(|draft| draft.refused));
+        assert_eq!((fill(&driver), driver.app.engine.undo_depth()), (before, depth));
+        driver.key(Key::A, CTRL);
+        driver.write("3a7bd5");
+        driver.key(Key::Enter, Modifiers::NONE);
+        assert!(driver.app.colour_draft.is_none(), "{}", driver.app.status);
+        assert_eq!(fill(&driver).as_deref(), Some("#3a7bd5"), "{}", driver.app.status);
+        assert_eq!(driver.app.engine.undo_depth(), depth + 1);
+        assert_eq!(driver.app.selected, Some(ids[0].clone()));
+        assert!(driver.app.extra_selected.is_empty(), "Ctrl+A stayed in the field");
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -3552,6 +3580,36 @@ fn parse_hex(text: &str) -> Option<[u8; 3]> {
     Some([byte(0)?, byte(2)?, byte(4)?])
 }
 
+/// A typed colour, "#rrggbb" with or without the "#".
+fn typed_colour(text: &str) -> Option<[u8; 3]> {
+    let digits = text.trim().trim_start_matches('#');
+    (digits.len() == 6 && digits.bytes().all(|byte| byte.is_ascii_hexdigit())).then(|| parse_hex(&format!("#{digits}"))).flatten()
+}
+
+/// The window for a colour that is not among the ribbon's swatches: which style it sets ("fill" or "line"), the code typed or
+/// picked, why it was refused, and whether the field still has to take the keyboard.
+struct ColourDraft {
+    key: &'static str,
+    text: String,
+    refused: bool,
+    focus: bool,
+}
+
+#[cfg(test)]
+mod typed_colour_tests {
+    use super::{hex, typed_colour};
+
+    #[test]
+    fn a_colour_code_is_six_hex_digits() {
+        assert_eq!(typed_colour(" #1a2B3c "), Some([0x1a, 0x2b, 0x3c]));
+        assert_eq!(typed_colour(&hex([200, 3, 99])), Some([200, 3, 99]));
+        assert_eq!(typed_colour("ff8000"), Some([255, 128, 0]));
+        for refused in ["", "#", "red", "#12345", "#1234567", "#+f+f+f", "#a\u{e9}bcd", "#\u{e9}\u{e9}\u{e9}"] {
+            assert_eq!(typed_colour(refused), None, "{refused:?}");
+        }
+    }
+}
+
 fn hex(color: [u8; 3]) -> String {
     format!("#{:02x}{:02x}{:02x}", color[0], color[1], color[2])
 }
@@ -3684,6 +3742,8 @@ struct LayoutCraftApp {
     snap_open: bool,
     /// The zoom window, while it is open.
     zoom_draft: Option<ZoomDraft>,
+    /// The window for another fill or line colour, while it is open.
+    colour_draft: Option<ColourDraft>,
     /// Where a box being dragged with the magnifier (Ctrl+Shift) began.
     magnify_from: Option<egui::Pos2>,
     /// The Shapes panel is narrowed to a column.
@@ -3844,6 +3904,7 @@ impl LayoutCraftApp {
             focus_at_frame_start: false,
             snap_open: false,
             zoom_draft: None,
+            colour_draft: None,
             magnify_from: None,
             shapes_minimised: false,
             open_stencil_shown: None,
@@ -6004,6 +6065,10 @@ impl LayoutCraftApp {
                                 ui.close();
                             }
                         });
+                        if ui.button("More colours...").clicked() {
+                            *action = Some(Action::ColourDialog(key));
+                            ui.close();
+                        }
                     });
                 });
                 if key == "line" {
@@ -7247,6 +7312,54 @@ impl LayoutCraftApp {
         });
         if open {
             self.sheet_pane = Some(pane);
+        }
+    }
+
+    /// The window for another colour: type its code or pick it; Enter or Apply gives it to the selection (one undo step),
+    /// Esc or Cancel changes nothing.
+    fn draw_colour_window(&mut self, ctx: &egui::Context, action: &mut Option<Action>) {
+        // what the picker shows before anything is typed
+        let current = self.selected.as_deref().and_then(|id| self.doc_shape(id).map(|shape| StyleDraft::from_shape(id, shape)));
+        let Some(draft) = self.colour_draft.as_mut() else {
+            return;
+        };
+        let current = current.map_or([0, 0, 0], |style| if draft.key == "fill" { style.fill } else { style.line });
+        let (mut open, mut apply, mut cancel) = (true, false, false);
+        let title = if draft.key == "fill" { "Fill colour" } else { "Line colour" };
+        egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+            let label = ui.label("Colour code (#rrggbb)");
+            let field = ui.add(egui::TextEdit::singleline(&mut draft.text).hint_text(hex(current)).desired_width(100.0)).labelled_by(label.id);
+            if std::mem::take(&mut draft.focus) {
+                field.request_focus();
+            }
+            apply = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+            let [r, g, b] = typed_colour(&draft.text).unwrap_or(current);
+            let mut picked = egui::Color32::from_rgb(r, g, b);
+            if egui::widgets::color_picker::color_picker_color32(ui, &mut picked, egui::widgets::color_picker::Alpha::Opaque) {
+                draft.text = hex([picked.r(), picked.g(), picked.b()]);
+            }
+            if draft.refused {
+                ui.colored_label(appearance::chrome(ui.visuals().dark_mode).warning, "Type a colour as #rrggbb, or pick one.");
+            }
+            ui.horizontal(|ui| {
+                apply |= ui.button("Apply").clicked();
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
+        if apply {
+            match typed_colour(&draft.text) {
+                Some(colour) => {
+                    *action = Some(Action::StyleSelected(serde_json::json!({ draft.key: hex(colour) }).to_string()));
+                    cancel = true;
+                }
+                None => {
+                    draft.refused = true;
+                    draft.focus = true;
+                }
+            }
+        }
+        if cancel || !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.colour_draft = None;
         }
     }
 
@@ -8986,6 +9099,7 @@ impl eframe::App for LayoutCraftApp {
         self.draw_links(&ctx);
         self.draw_snap_window(&ctx);
         self.draw_zoom_window(&ctx);
+        self.draw_colour_window(&ctx, &mut action);
         self.draw_sheet_pane(&ctx);
         self.draw_data_pane(&ctx);
         if self.help_shortcuts_open {
@@ -9224,6 +9338,7 @@ impl eframe::App for LayoutCraftApp {
                 self.fit_pending = false;
             }
             Some(Action::Say(ref message)) => self.status = message.clone(),
+            Some(Action::ColourDialog(key)) => self.colour_draft = Some(ColourDraft { key, text: String::new(), refused: false, focus: true }),
             Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
                 self.zoom = zoom_for_percent(f64::from(percent), self.raster_scale);
@@ -9267,6 +9382,8 @@ enum Action {
     /// Show the page at this percentage of actual size.
     ZoomTo(u32),
     ZoomDialog,
+    /// Ask for another colour for "fill" or "line".
+    ColourDialog(&'static str),
     /// Put a message in the status bar.
     Say(String),
     DeleteGuide,
