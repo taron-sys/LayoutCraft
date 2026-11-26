@@ -115,8 +115,8 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 37 present, 20 partial,
-68 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 37 present, 21 partial,
+67 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
 ### 3.1 File / Backstage
@@ -170,7 +170,7 @@ these are row counts, not a count of every Visio button.
 | Shape Styles: quick style gallery | S9 | p:fillColor (menu) | missing | partial | | P1 |
 | Shape Styles: Fill (colour, no fill, more colours) | S9 | p:fillColor | partial | present | Desktop inspector "Style" panel | P0 |
 | Shape Styles: Line (colour, weight, dashes, arrows) | S9 | p:lineColor | partial | present | Arrowheads missing on desktop | P0 |
-| Shape Styles: Effects (shadow, reflection, glow, soft edges, bevel, 3-D rotation) | S9 | p:shadow | missing | partial | Shadow only | P2 |
+| Shape Styles: Effects (shadow, reflection, glow, soft edges, bevel, 3-D rotation) | S9 | p:shadow | partial | partial | Shadow only (on / off) | P2 |
 | Arrange: Align Left / Center / Right / Top / Middle / Bottom | S13 | arrL arrCx arrRt arrT arrM arrB | present | present | Aligns to the first selected; Visio aligns to the primary shape (S13) | P0 |
 | Arrange: Auto Align | S13 | - | missing | missing | Straightens connector lines | P3 |
 | Arrange: Position > Auto Align & Space, Auto Space, Spacing Options | S13, S28 | - | missing | missing | | P2 |

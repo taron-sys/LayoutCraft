@@ -725,6 +725,33 @@ mod replace_tests {
     }
 }
 
+/// The `Engine::edit` op 10 style that switches the shadow on or off.
+fn shadow_style(on: bool) -> String {
+    serde_json::json!({ "shadow": on }).to_string()
+}
+
+#[cfg(test)]
+mod shadow_tests {
+    use super::shadow_style;
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn the_shadow_goes_on_and_off() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let id = engine.draw(0, 0, 1.0, 1.0, 3.0, 3.0).unwrap();
+        let shadowed = |engine: &Engine| {
+            let page = &engine.document().unwrap().pages[0];
+            page.shapes.iter().any(|shape| shape.visio_id.as_deref() == Some(id.as_str()) && shape.shadow.is_some())
+        };
+        assert!(!shadowed(&engine));
+        for on in [true, false] {
+            engine.edit(0, 10, &format!("{id}\n{}", shadow_style(on)), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+            assert_eq!(shadowed(&engine), on);
+        }
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -3336,7 +3363,7 @@ impl LayoutCraftApp {
             }
             return;
         }
-        if matches!(id, "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor") {
+        if matches!(id, "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor" | "p:shadow") {
             self.ribbon_format_controls(ui, id, action);
             return;
         }
@@ -3444,6 +3471,12 @@ impl LayoutCraftApp {
                     .response
                     .on_hover_text("Line spacing of the whole text, in lines");
                 });
+            }
+            "p:shadow" => {
+                let on = primary.as_ref().is_some_and(|shape| shape.shadow.is_some());
+                if ui.add_enabled(enabled, egui::Button::new("Shadow").selected(on)).on_hover_text("Shadow of the selected shapes").clicked() {
+                    *action = Some(Action::StyleSelected(shadow_style(!on)));
+                }
             }
             "p:fontFamily" => {
                 let (name, replaced) = self.selected_font().unwrap_or_default();
