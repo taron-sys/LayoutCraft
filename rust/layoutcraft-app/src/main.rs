@@ -2086,6 +2086,9 @@ mod recent_tests {
     }
 }
 
+/// The colour of the marks across equal gaps: a darker orange than the snap guides, readable on white.
+const SPACING_MARK: egui::Color32 = egui::Color32::from_rgb(184, 80, 0);
+
 /// A range (low, high) along one axis of the page, inches.
 type Span = (f64, f64);
 
@@ -2106,9 +2109,35 @@ fn equal_gap(along: Span, across: Span, others: &[(Span, Span)], threshold: f64)
     (shift.abs() <= threshold).then_some((shift, middle))
 }
 
+/// The two equal gaps of a box between its nearest neighbour on each side along one axis, as the ranges from the one
+/// neighbour to the box and from the box to the other; `None` unless both gaps are there and match.
+fn equal_gap_marks(along: Span, across: Span, others: &[(Span, Span)]) -> Option<[Span; 2]> {
+    let centre = (along.0 + along.1) / 2.0;
+    let beside = || others.iter().filter(|(_, other)| other.0 < across.1 && other.1 > across.0).map(|(span, _)| *span);
+    let before = beside().filter(|span| (span.0 + span.1) / 2.0 < centre).map(|span| span.1).max_by(f64::total_cmp)?;
+    let after = beside().filter(|span| (span.0 + span.1) / 2.0 > centre).map(|span| span.0).min_by(f64::total_cmp)?;
+    let (first, second) = (along.0 - before, after - along.1);
+    // a thousandth of an inch: the box is kept in single precision pixels
+    (first > 0.0 && (first - second).abs() < 1e-3).then_some([(before, along.0), (along.1, after)])
+}
+
 #[cfg(test)]
 mod equal_gap_tests {
-    use super::equal_gap;
+    use super::{equal_gap, equal_gap_marks};
+
+    #[test]
+    fn equal_gaps_are_marked_and_unequal_or_missing_ones_are_not() {
+        let others = [((0.0, 1.0), (0.0, 1.0)), ((5.0, 6.0), (0.5, 1.5))];
+        let across = (0.2, 1.2);
+        let (shift, _) = equal_gap((2.45, 3.45), across, &others, 0.1).unwrap();
+        let [left, right] = equal_gap_marks((2.45 + shift, 3.45 + shift), across, &others).unwrap();
+        assert!(left.0 == 1.0 && right.1 == 5.0 && ((left.1 - left.0) - (right.1 - right.0)).abs() < 1e-9);
+        // not equal, passing above both, one neighbour only, or touching both without a gap
+        assert!(equal_gap_marks((2.45, 3.45), across, &others).is_none());
+        assert!(equal_gap_marks((2.5, 3.5), (7.0, 8.0), &others).is_none());
+        assert!(equal_gap_marks((2.5, 3.5), across, &others[..1]).is_none());
+        assert!(equal_gap_marks((1.0, 5.0), across, &others).is_none());
+    }
 
     #[test]
     fn a_box_between_two_others_is_pulled_to_equal_gaps() {
@@ -2649,6 +2678,41 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         let middle = driver.middle_of(&ids[1]);
         driver.click(middle, Modifiers::NONE);
         assert_eq!(driver.app.selected, Some(ids[1].clone()));
+    }
+
+    #[test]
+    fn a_shape_dragged_to_equal_spacing_shows_both_gaps() {
+        let (mut driver, _) = Driver::new();
+        // a third shape between the two, off centre
+        let id = driver.app.engine.draw(0, 0, 3.2, 3.5, 4.2, 4.5).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        (driver.app.snap_grid, driver.app.snap_guides, driver.app.snap_shapes) = (false, false, true);
+        driver.frames(3);
+        let marks = |driver: &Driver| {
+            driver
+                .drawn
+                .iter()
+                .filter(|clipped| matches!(&clipped.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == super::SPACING_MARK))
+                .count()
+        };
+        assert_eq!(marks(&driver), 0);
+        let from = driver.middle_of(&id);
+        let inch = super::DPI as f32 * driver.app.view_scale();
+        let to = from + vec2(0.78 * inch, 0.0);
+        let button = |at, pressed| Event::PointerButton { pos: at, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+        driver.run(vec![Event::PointerMoved(from)]);
+        driver.run(vec![button(from, true)]);
+        for step in 1..=6 {
+            driver.run(vec![Event::PointerMoved(from + (to - from) * (step as f32 / 6.0))]);
+        }
+        driver.frames(2);
+        // two gaps, each a line and its two bars
+        assert_eq!(marks(&driver), 6, "{:?} {}", driver.app.preview, driver.app.status);
+        let gaps = driver.app.spacing_marks(driver.app.image_rect(driver.app.last_viewport));
+        assert!(gaps.len() == 2 && (gaps[0][0].distance(gaps[0][1]) - gaps[1][0].distance(gaps[1][1])).abs() < 0.5, "{gaps:?}");
+        driver.run(vec![button(to, false)]);
+        driver.frames(3);
+        assert_eq!(marks(&driver), 0, "gone after the drop");
     }
 
     #[test]
@@ -4333,6 +4397,31 @@ impl LayoutCraftApp {
             }
         }
         (egui::vec2((dx * DPI) as f32, (-dy * DPI) as f32), (gx.map(|x| (x * DPI) as f32), gy.map(|y| ((page_h - y) * DPI) as f32)))
+    }
+
+    /// While shapes are moved: a line (screen px) across each of two equal gaps between the moved box and its neighbours,
+    /// left and right of it or above and below.
+    fn spacing_marks(&self, image_rect: egui::Rect) -> Vec<[egui::Pos2; 2]> {
+        let (Some(DragState { mode: DragMode::Move, .. }), Some(rect), true) = (&self.drag, self.preview, self.snap_shapes) else {
+            return Vec::new();
+        };
+        let page_h = self.page_height_in;
+        let x = (f64::from(rect.min.x) / DPI, f64::from(rect.max.x) / DPI);
+        let y = (page_h - f64::from(rect.max.y) / DPI, page_h - f64::from(rect.min.y) / DPI);
+        let others = self.other_boxes();
+        let swapped: Vec<(Span, Span)> = others.iter().map(|(x, y)| (*y, *x)).collect();
+        // page inches (y up) to the screen
+        let at = |x: f64, y: f64| self.scene_to_screen(egui::pos2((x * DPI) as f32, ((page_h - y) * DPI) as f32), image_rect);
+        let mut marks = Vec::new();
+        if let Some(gaps) = equal_gap_marks(x, y, &others) {
+            let middle = (y.0 + y.1) / 2.0;
+            marks.extend(gaps.map(|gap| [at(gap.0, middle), at(gap.1, middle)]));
+        }
+        if let Some(gaps) = equal_gap_marks(y, x, &swapped) {
+            let middle = (x.0 + x.1) / 2.0;
+            marks.extend(gaps.map(|gap| [at(middle, gap.0), at(middle, gap.1)]));
+        }
+        marks
     }
 
     /// A point (scene px) pulled to the grid and the snap targets: the corners of a shape being drawn.
@@ -8034,6 +8123,14 @@ impl eframe::App for LayoutCraftApp {
                 if let Some(y) = self.snap_guide.1 {
                     let at = self.scene_to_screen(egui::pos2(0.0, y), image_rect).y;
                     painter.line_segment([egui::pos2(image_rect.left(), at), egui::pos2(image_rect.right(), at)], egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 120, 0)));
+                }
+                // equal spacing: each of the two gaps gets a line with a bar at both ends
+                for [from, to] in self.spacing_marks(image_rect) {
+                    let stroke = egui::Stroke::new(1.5, SPACING_MARK);
+                    let bar = (to - from).normalized().rot90() * 5.0;
+                    painter.line_segment([from, to], stroke);
+                    painter.line_segment([from - bar, from + bar], stroke);
+                    painter.line_segment([to - bar, to + bar], stroke);
                 }
                 for (_, points) in &self.live_routes {
                     let screen: Vec<egui::Pos2> = points.iter().map(|p| self.scene_to_screen(*p, image_rect)).collect();
