@@ -31,6 +31,8 @@ What LayoutCraft does today. For what is missing or inexact, see [Known gaps](07
 - Check Diagram (finds loose connectors, overlaps and similar problems), Compare File, Reports (inventory of shapes and
   Shape Data), and comments.
 - Visio containers and swimlanes are imported and rendered; the desktop ribbon has no dedicated container command.
+- View > Palette: the window is dark, light or follows the operating system (dark when the system does not say). The drawing
+  keeps its own colours; those are Design > Themes and Variants.
 - Keyboard shortcuts are listed under Help > Keyboard shortcuts.
 
 ## Browser version
