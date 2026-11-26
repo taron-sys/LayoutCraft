@@ -3610,7 +3610,6 @@ impl LayoutCraftApp {
     /// The positions other shapes and the ruler guides offer to snap to, in page inches: (x values, y values). The shapes being moved are left out.
     fn snap_targets(&self) -> (Vec<f64>, Vec<f64>) {
         let (mut xs, mut ys) = (Vec::new(), Vec::new());
-        let page_h = self.page_height_in;
         if self.snap_shapes {
             for ((x0, x1), (y0, y1)) in self.other_boxes() {
                 xs.extend([x0, (x0 + x1) / 2.0, x1]);
