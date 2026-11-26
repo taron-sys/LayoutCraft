@@ -115,8 +115,8 @@ Reading the table:
 - A Visio command carries the source in the Src column; "unverified" means no cited page names it.
 - Prio is the parity priority from section 2. Rows that LayoutCraft has but Visio does not (Compare, AI assistant) are in 3.14.
 
-**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 41 present, 19 partial,
-65 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
+**Totals (rows of 3.1 to 3.13, counted by script from the tables):** 125 Visio commands listed. Desktop: 42 present, 19 partial,
+64 missing. Browser: 79 present, 14 partial, 32 missing. A row can bundle several related commands (for example six drawing tools), so
 these are row counts, not a count of every Visio button.
 
 ### 3.1 File / Backstage
@@ -203,7 +203,7 @@ these are row counts, not a count of every Visio button.
 | Diagram Parts: Container | S20 | - | missing | missing | | P2 |
 | Diagram Parts: Callout | S25 | - | missing | missing | | P2 |
 | Diagram Parts: Connector | S25 snippet | connectTool | present | present | Same tool as Home | P2 |
-| Links: Hyperlink | S25 snippet (Links group) | insertHyperlink | missing | present | Desktop shows links read-only; engine `hyperlinks_json` | P1 |
+| Links: Hyperlink | S25 snippet (Links group) | insertHyperlink | present | present | Desktop: Hyperlinks window (address, sub-address, description) | P1 |
 | Text: Text Box | S25 snippet (Text group) | insertTextBox | present | present | | P1 |
 | Text: Field, Symbol | unverified | - | missing | missing | | P3 |
 
@@ -384,9 +384,9 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Delete | Delete | Delete or Backspace | same | same |
 | Save | Ctrl+S (assumed standard, not in S1) | Ctrl+S (saves a copy) | Ctrl+S | partial |
 | Find | Ctrl+F (web `findBtn`) | Ctrl+F | Ctrl+F | same on desktop |
-| Hyperlink | Ctrl+K (unverified in S1) | none | Ctrl+K | none (desktop) |
+| Hyperlink | Ctrl+K (unverified in S1) | Ctrl+K | Ctrl+K | same on desktop |
 
-Count of the 41 rows above: same 17, diff 2, partial 2, none 20. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 18, diff 2, partial 2, none 19. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 

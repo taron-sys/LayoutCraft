@@ -322,6 +322,7 @@ enum ViewKey {
     NextPage,
     PreviousPage,
     Find,
+    Hyperlink,
 }
 
 /// Tool and view shortcuts for features the app has, with Visio's documented keys (`docs/43-ui-parity.md` 4.1). The draw
@@ -336,6 +337,7 @@ const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
     (egui::Modifiers::CTRL, egui::Key::PageDown, ViewKey::NextPage),
     (egui::Modifiers::CTRL, egui::Key::PageUp, ViewKey::PreviousPage),
     (egui::Modifiers::CTRL, egui::Key::F, ViewKey::Find),
+    (egui::Modifiers::CTRL, egui::Key::K, ViewKey::Hyperlink),
 ];
 
 /// Takes the first tool or view shortcut pressed in this frame out of the input.
@@ -372,6 +374,7 @@ mod view_key_tests {
         assert!(press(Key::PageUp, true, false) == Some(ViewKey::PreviousPage));
         // Ctrl+Shift+F is "bring to front" and is taken by the arrange keys first
         assert!(press(Key::F, true, false) == Some(ViewKey::Find));
+        assert!(press(Key::K, true, false) == Some(ViewKey::Hyperlink));
     }
 }
 
@@ -910,6 +913,63 @@ mod theme_tests {
         let info = serde_json::json!({ "themes": [{ "index": 5, "name": "A" }], "current": "A", "variant": 1, "pages": [{ "theme": 5, "variant": 3 }, { "theme": null, "variant": 0 }] });
         assert_eq!(current_theme(&info, 0), (Some("A".to_string()), 3));
         assert_eq!(current_theme(&info, 1), (None, 0));
+    }
+}
+
+/// The Hyperlink window: the shape's links as `Engine::hyperlinks_json` gives them, edited in place (fields the window
+/// does not show are kept).
+struct LinkDraft {
+    page: usize,
+    shape: String,
+    links: Vec<serde_json::Value>,
+    error: String,
+    /// Put the keyboard focus in the first address field on the next frame.
+    focus: bool,
+}
+
+/// Replace the shape's hyperlinks (`Engine::page_op` 19). Every link needs an address or a sub-address. `Ok(false)` when
+/// nothing changed (no undo step).
+fn save_links(engine: &mut Engine, page: usize, shape: &str, links: &[serde_json::Value]) -> Result<bool, String> {
+    let blank = |link: &serde_json::Value, key: &str| link[key].as_str().unwrap_or("").trim().is_empty();
+    if links.iter().any(|link| blank(link, "address") && blank(link, "subAddress")) {
+        return Err("A hyperlink needs an address or a sub-address.".to_string());
+    }
+    let before: Vec<serde_json::Value> = serde_json::from_str(&engine.hyperlinks_json(page, shape)?).map_err(|error| error.to_string())?;
+    if before == links {
+        return Ok(false);
+    }
+    let json = serde_json::to_string(links).map_err(|error| error.to_string())?;
+    engine.page_op(19, page, 0, &format!("{shape}|{json}"))?;
+    Ok(true)
+}
+
+fn blank_link() -> serde_json::Value {
+    serde_json::json!({ "name": "", "description": "", "address": "", "subAddress": "", "extraInfo": "", "frame": "", "newWindow": false, "default": false, "invisible": false })
+}
+
+#[cfg(test)]
+mod link_edit_tests {
+    use super::{blank_link, parse_links, save_links};
+    use layoutcraft_engine::Engine;
+
+    #[test]
+    fn links_are_added_kept_and_removed() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let id = engine.draw(0, 0, 1.0, 1.0, 3.0, 3.0).unwrap();
+        let depth = engine.undo_depth();
+        assert!(save_links(&mut engine, 0, &id, &[blank_link()]).is_err());
+        assert_eq!(engine.undo_depth(), depth);
+        let mut link = blank_link();
+        link["address"] = serde_json::json!("https://example.org/");
+        assert_eq!(save_links(&mut engine, 0, &id, &[link]), Ok(true));
+        let read: Vec<serde_json::Value> = serde_json::from_str(&engine.hyperlinks_json(0, &id).unwrap()).unwrap();
+        assert_eq!(parse_links(&serde_json::to_string(&read).unwrap())[0].1, "https://example.org/");
+        // saving what was read changes nothing
+        assert_eq!(save_links(&mut engine, 0, &id, &read), Ok(false));
+        assert_eq!(engine.undo_depth(), depth + 1);
+        assert_eq!(save_links(&mut engine, 0, &id, &[]), Ok(true));
+        assert!(parse_links(&engine.hyperlinks_json(0, &id).unwrap()).is_empty());
     }
 }
 
@@ -1648,6 +1708,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Hyperlink window, while it is open.
+    link_draft: Option<LinkDraft>,
     /// The Themes menus: apply to every page instead of the shown one; and the gallery, until the page is rebuilt.
     theme_all_pages: bool,
     theme_cache: Option<serde_json::Value>,
@@ -1766,6 +1828,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            link_draft: None,
             theme_all_pages: false,
             theme_cache: None,
             change_shape: false,
@@ -3831,6 +3894,7 @@ impl LayoutCraftApp {
             N::OpenFile => Action::OpenDialog,
             N::DocProps => Action::DocProps,
             N::HelpShortcuts => Action::HelpShortcuts,
+            N::Hyperlink => Action::Hyperlink,
             N::Find => Action::Find,
             N::HelpAbout => Action::HelpAbout,
             N::HelpMcp => Action::HelpMcp,
@@ -4378,6 +4442,97 @@ impl LayoutCraftApp {
         self.fit_pending |= changed;
     }
 
+    /// Open the Hyperlink window for the one selected shape.
+    fn open_links(&mut self) {
+        let [shape] = &self.all_selected()[..] else {
+            self.status = "Select one shape to give it a hyperlink.".to_string();
+            return;
+        };
+        let shape = shape.clone();
+        let page = self.page_index;
+        match self.engine.hyperlinks_json(page, &shape).and_then(|json| serde_json::from_str::<Vec<serde_json::Value>>(&json).map_err(|error| error.to_string())) {
+            Ok(mut links) => {
+                if links.is_empty() {
+                    links.push(blank_link());
+                }
+                self.link_draft = Some(LinkDraft { page, shape, links, error: String::new(), focus: true });
+            }
+            Err(error) => self.status = format!("Could not read the hyperlinks: {error}"),
+        }
+    }
+
+    /// The Hyperlink window: OK saves (one undo step), Cancel or Esc closes.
+    fn draw_links(&mut self, ctx: &egui::Context) {
+        let Some(draft) = self.link_draft.as_mut() else {
+            return;
+        };
+        let mut open = true;
+        let (mut save, mut cancel) = (false, false);
+        egui::Window::new("Hyperlinks").open(&mut open).collapsible(false).default_width(420.0).show(ctx, |ui| {
+            ui.label(format!("Shape {}", draft.shape));
+            let mut remove = None;
+            egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                for (at, link) in draft.links.iter_mut().enumerate() {
+                    ui.group(|ui| {
+                        egui::Grid::new(("link", at)).num_columns(2).show(ui, |ui| {
+                            for (label, key) in [("Address", "address"), ("Sub-address (page or bookmark)", "subAddress"), ("Description", "description")] {
+                                let name = ui.label(label);
+                                let mut value = link[key].as_str().unwrap_or("").to_string();
+                                let edit = ui.text_edit_singleline(&mut value).labelled_by(name.id);
+                                if at == 0 && key == "address" && std::mem::take(&mut draft.focus) {
+                                    edit.request_focus();
+                                }
+                                if edit.changed() {
+                                    link[key] = serde_json::Value::String(value);
+                                    draft.error.clear();
+                                }
+                                ui.end_row();
+                            }
+                        });
+                        if ui.button("Remove this link").clicked() {
+                            remove = Some(at);
+                        }
+                    });
+                }
+            });
+            if let Some(at) = remove {
+                draft.links.remove(at);
+            }
+            if ui.button("Add a link").clicked() {
+                draft.links.push(blank_link());
+            }
+            if !draft.error.is_empty() {
+                ui.label(&draft.error);
+            }
+            ui.horizontal(|ui| {
+                save = ui.button("OK").clicked();
+                cancel = ui.button("Cancel").clicked();
+            });
+        });
+        if cancel || !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.link_draft = None;
+        } else if save {
+            self.apply_links(ctx);
+        }
+    }
+
+    fn apply_links(&mut self, ctx: &egui::Context) {
+        let Some(mut draft) = self.link_draft.take() else {
+            return;
+        };
+        match save_links(&mut self.engine, draft.page, &draft.shape, &draft.links) {
+            Ok(true) => {
+                let selected = self.selected.clone();
+                self.finish_edit(ctx, Ok(()), "Changed hyperlinks", selected);
+            }
+            Ok(false) => {}
+            Err(error) => {
+                draft.error = error;
+                self.link_draft = Some(draft);
+            }
+        }
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -4593,6 +4748,7 @@ impl eframe::App for LayoutCraftApp {
                 Some(ViewKey::NextPage) => action = Some(Action::Page(self.page_index + 1)),
                 Some(ViewKey::PreviousPage) => action = Some(Action::Page(self.page_index.saturating_sub(1))),
                 Some(ViewKey::Find) => action = Some(Action::Find),
+                Some(ViewKey::Hyperlink) => action = Some(Action::Hyperlink),
                 None => {}
             }
             if self.selected.is_some() {
@@ -4689,7 +4845,7 @@ impl eframe::App for LayoutCraftApp {
                             shape.w, shape.h, shape.x, shape.y
                         ));
                         ui.label(format!("Parts: {}", shape.parts.len()));
-                        // the shape's hyperlinks (read-only here; the web edits them in a dialog)
+                        // the shape's hyperlinks (edited in the Hyperlink window, Ctrl+K)
                         let key = (selected.clone(), self.page_index, self.engine.undo_depth());
                         let cached = self.links_cache.borrow().as_ref().filter(|(k, _)| *k == key).map(|(_, v)| v.clone());
                         let links = cached.unwrap_or_else(|| {
@@ -5827,6 +5983,7 @@ impl eframe::App for LayoutCraftApp {
             self.comments_open = open;
         }
         self.draw_find(&ctx);
+        self.draw_links(&ctx);
         if self.help_shortcuts_open {
             let mut open = true;
             egui::Window::new("Keyboard shortcuts").open(&mut open).collapsible(false).show(&ctx, |ui| {
@@ -5963,6 +6120,7 @@ impl eframe::App for LayoutCraftApp {
             }
             Some(Action::DocProps) => self.doc_props_open = true,
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
+            Some(Action::Hyperlink) => self.open_links(),
             Some(Action::Theme(op, ref value)) => self.apply_theme(&ctx, op, value),
             Some(Action::PageShape(w, h)) => self.set_page_shape(&ctx, w, h),
             Some(Action::Find) => self.open_find(),
@@ -6059,6 +6217,7 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    Hyperlink,
     /// `Engine::page_op` `theme_op` with the theme name or variant number.
     Theme(i32, String),
     /// Set the shown page's width and height (inches).

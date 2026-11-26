@@ -135,6 +135,8 @@ pub enum Native {
     ShapesPane,
     /// The Find window.
     Find,
+    /// The Hyperlink window of the selected shape.
+    Hyperlink,
     /// Wait for a click in the Shapes panel and change the selected shapes into that one.
     ChangeShape,
     /// The Pan (hand) tool: a left-button drag moves the view.
@@ -225,6 +227,7 @@ pub fn native(id: &str) -> Option<Native> {
         "exportBtn" => Native::Export,
         "paneShapes" => Native::ShapesPane,
         "findBtn" => Native::Find,
+        "insertHyperlink" => Native::Hyperlink,
         "changeShapeBtn" => Native::ChangeShape,
         "borderStyle" | "borderTitle" | "borderApply" | "borderRemove" => Native::Borders,
         "showComments" => Native::Comments,
@@ -407,7 +410,7 @@ mod tests {
         web_ids.extend(["save", "undo", "redo"].map(String::from));
         let expected = [
             "undo", "redo", "save", "copy", "cut", "paste", "dup", "del", "grp", "ungrp", "zFront", "zBack", "zFwd", "zBwd", "rotR", "rotL", "flipH", "flipV", "sameW", "sameH", "sameWH", "opUnion", "opCombine", "opFragment", "opIntersect", "opSubtract", "opJoin", "opTrim", "arrL", "arrCx", "arrRt", "arrT",
-            "arrM", "arrB", "arrDistH", "arrDistV", "pageAdd", "pageDup", "pageRename", "pageDel", "pageLeft", "pageRight", "connectTool", "handTool", "snapGrid", "snapShapes", "snapGuides", "showGrid", "gridStep", "fit", "zoom100", "zin", "zout", "newBtn", "file", "docPropsBtn", "helpShortcuts", "helpAbout", "mcpInfo", "insertTextBox", "pageSetup", "showComments", "newComment", "checkDiagram", "compareBtn", "reportBtn", "exportBtn", "paneShapes", "findBtn", "changeShapeBtn", "borderStyle", "borderTitle", "borderApply", "borderRemove",
+            "arrM", "arrB", "arrDistH", "arrDistV", "pageAdd", "pageDup", "pageRename", "pageDel", "pageLeft", "pageRight", "connectTool", "handTool", "snapGrid", "snapShapes", "snapGuides", "showGrid", "gridStep", "fit", "zoom100", "zin", "zout", "newBtn", "file", "docPropsBtn", "helpShortcuts", "helpAbout", "mcpInfo", "insertTextBox", "pageSetup", "showComments", "newComment", "checkDiagram", "compareBtn", "reportBtn", "exportBtn", "paneShapes", "findBtn", "insertHyperlink", "changeShapeBtn", "borderStyle", "borderTitle", "borderApply", "borderRemove",
         ];
         for id in expected {
             assert!(web_ids.contains(id), "{id} is a command id of the web ribbon");
