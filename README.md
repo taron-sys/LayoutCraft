@@ -7,6 +7,10 @@ browser build.
 > Microsoft and Visio are trademarks of Microsoft Corporation. LayoutCraft is not affiliated with or endorsed by Microsoft.
 > "Visio" and ".vsdx" are used only to say which file format LayoutCraft is compatible with.
 
+## Screenshots
+Linux Version ( Build 0.1.0-rc.2)
+<img width="2353" height="1629" alt="image" src="https://github.com/user-attachments/assets/76de3f97-f425-4452-a96b-aa1c822fec30" />
+
 ## Status
 
 Early software (version 0.1.0 in every crate), developed in the open.
