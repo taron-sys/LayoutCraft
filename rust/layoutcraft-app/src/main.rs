@@ -1788,6 +1788,8 @@ struct LayoutCraftApp {
     font_warnings: Vec<FontSubstitution>,
     doc_props_open: bool,
     help_shortcuts_open: bool,
+    /// The Layers window is open.
+    layers_open: bool,
     /// The full-screen view is on.
     full_screen: bool,
     /// The Shape Data window, while it is open.
@@ -1912,6 +1914,7 @@ impl LayoutCraftApp {
             font_warnings: Vec::new(),
             doc_props_open: false,
             help_shortcuts_open: false,
+            layers_open: false,
             full_screen: false,
             data_pane: None,
             link_draft: None,
@@ -3981,6 +3984,7 @@ impl LayoutCraftApp {
             N::DocProps => Action::DocProps,
             N::HelpShortcuts => Action::HelpShortcuts,
             N::Hyperlink => Action::Hyperlink,
+            N::Layers => Action::Layers,
             N::FullScreen => Action::FullScreen,
             N::ShapeData => Action::ShapeData,
             N::Find => Action::Find,
@@ -4730,6 +4734,53 @@ impl LayoutCraftApp {
         self.status = if self.full_screen { "Full screen: Esc or F5 leaves it.".to_string() } else { "Left full screen.".to_string() };
     }
 
+    /// The layers of the shown page: visible / prints / locked, the selected shape's membership, delete and add.
+    fn layer_controls(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
+        let layers = self
+            .engine
+            .document()
+            .and_then(|document| document.pages.get(self.page_index))
+            .map(|page| page.layers.clone())
+            .unwrap_or_default();
+        let selected_layers: Vec<u32> = self
+            .selected
+            .as_deref()
+            .and_then(|id| self.doc_shape(id))
+            .map(|shape| shape.layers.clone())
+            .unwrap_or_default();
+        let has_selection = self.selected.is_some();
+        if layers.is_empty() {
+            ui.label(egui::RichText::new("This page has no layers.").small().weak());
+        }
+        for layer in &layers {
+            ui.horizontal(|ui| {
+                let (mut visible, mut print, mut locked) = (layer.visible, layer.print, layer.locked);
+                let a = ui.checkbox(&mut visible, "V").on_hover_text("Visible");
+                let b = ui.checkbox(&mut print, "P").on_hover_text("Prints");
+                let c = ui.checkbox(&mut locked, "L").on_hover_text("Locked");
+                if a.changed() || b.changed() || c.changed() {
+                    *action = Some(Action::LayerOp(8, layer.index as usize, format!("|{}|{}|{}", visible as u8, print as u8, locked as u8)));
+                }
+                let mut on_layer = selected_layers.contains(&layer.index);
+                let was = on_layer;
+                if ui.add_enabled(has_selection, egui::Checkbox::new(&mut on_layer, "Sel")).on_hover_text("The selected shape is on this layer").changed() && on_layer != was {
+                    *action = Some(Action::LayerShape(layer.index as usize, on_layer));
+                }
+                ui.label(&layer.name);
+                if ui.small_button("x").on_hover_text("Delete the layer (shapes stay)").clicked() {
+                    *action = Some(Action::LayerOp(9, layer.index as usize, String::new()));
+                }
+            });
+        }
+        ui.horizontal(|ui| {
+            ui.add(egui::TextEdit::singleline(&mut self.layer_name).desired_width(90.0).hint_text("Layer name"));
+            if ui.add_enabled(!self.layer_name.trim().is_empty() && self.texture.is_some(), egui::Button::new("+ Layer")).clicked() {
+                *action = Some(Action::LayerOp(7, 0, self.layer_name.trim().to_string()));
+                self.layer_name.clear();
+            }
+        });
+    }
+
     /// Copy the selected shape to the engine's clipboard (`Engine::copy`).
     fn copy_selected(&mut self) {
         let Some(id) = self.selected.clone() else {
@@ -5167,49 +5218,7 @@ impl eframe::App for LayoutCraftApp {
                     }
                     ui.separator();
                     ui.label("Layers");
-                    let layers = self
-                        .engine
-                        .document()
-                        .and_then(|document| document.pages.get(self.page_index))
-                        .map(|page| page.layers.clone())
-                        .unwrap_or_default();
-                    let selected_layers: Vec<u32> = self
-                        .selected
-                        .as_deref()
-                        .and_then(|id| self.doc_shape(id))
-                        .map(|shape| shape.layers.clone())
-                        .unwrap_or_default();
-                    let has_selection = self.selected.is_some();
-                    if layers.is_empty() {
-                        ui.label(egui::RichText::new("This page has no layers.").small().weak());
-                    }
-                    for layer in &layers {
-                        ui.horizontal(|ui| {
-                            let (mut visible, mut print, mut locked) = (layer.visible, layer.print, layer.locked);
-                            let a = ui.checkbox(&mut visible, "V").on_hover_text("Visible");
-                            let b = ui.checkbox(&mut print, "P").on_hover_text("Prints");
-                            let c = ui.checkbox(&mut locked, "L").on_hover_text("Locked");
-                            if a.changed() || b.changed() || c.changed() {
-                                action = Some(Action::LayerOp(8, layer.index as usize, format!("|{}|{}|{}", visible as u8, print as u8, locked as u8)));
-                            }
-                            let mut on_layer = selected_layers.contains(&layer.index);
-                            let was = on_layer;
-                            if ui.add_enabled(has_selection, egui::Checkbox::new(&mut on_layer, "Sel")).on_hover_text("The selected shape is on this layer").changed() && on_layer != was {
-                                action = Some(Action::LayerShape(layer.index as usize, on_layer));
-                            }
-                            ui.label(&layer.name);
-                            if ui.small_button("x").on_hover_text("Delete the layer (shapes stay)").clicked() {
-                                action = Some(Action::LayerOp(9, layer.index as usize, String::new()));
-                            }
-                        });
-                    }
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut self.layer_name).desired_width(90.0).hint_text("Layer name"));
-                        if ui.add_enabled(!self.layer_name.trim().is_empty() && self.texture.is_some(), egui::Button::new("+ Layer")).clicked() {
-                            action = Some(Action::LayerOp(7, 0, self.layer_name.trim().to_string()));
-                            self.layer_name.clear();
-                        }
-                    });
+                    self.layer_controls(ui, &mut action);
                     ui.separator();
                     ui.label(
                         egui::RichText::new(
@@ -5221,6 +5230,15 @@ impl eframe::App for LayoutCraftApp {
                         .weak(),
                     );
                 });
+        }
+
+        if self.layers_open {
+            let mut open = true;
+            egui::Window::new("Layers").open(&mut open).collapsible(true).default_width(300.0).show(&ctx, |ui| {
+                self.layer_controls(ui, &mut action);
+            });
+            // Esc closes it, unless a text field has the keyboard (then Esc only leaves the field)
+            self.layers_open = open && !(!ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
         }
 
         if ctx.input(|input| input.key_pressed(egui::Key::Escape)) && self.armed_master.is_some() {
@@ -6328,6 +6346,7 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::DocProps) => self.doc_props_open = true,
             Some(Action::HelpShortcuts) => self.help_shortcuts_open = true,
             Some(Action::Hyperlink) => self.open_links(),
+            Some(Action::Layers) => self.layers_open = !self.layers_open,
             Some(Action::FullScreen) => self.toggle_full_screen(&ctx),
             Some(Action::ShapeData) => self.data_pane = if self.data_pane.is_some() { None } else { Some(DataPane::default()) },
             Some(Action::Theme(op, ref value)) => self.apply_theme(&ctx, op, value),
@@ -6426,6 +6445,8 @@ impl eframe::App for LayoutCraftApp {
 }
 
 enum Action {
+    /// Show or hide the Layers window.
+    Layers,
     FullScreen,
     /// Show or hide the Shape Data window.
     ShapeData,
