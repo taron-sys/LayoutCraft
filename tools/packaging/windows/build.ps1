@@ -34,11 +34,18 @@ $bin = Get-LcBinDir $Target
 foreach ($exe in 'layoutcraft-app.exe', 'layoutcraft-mcp.exe') {
   if (-not (Test-Path (Join-Path $bin $exe))) { throw "missing $(Join-Path $bin $exe) after the build" }
 }
-# The icon and version information are linked in by the build.rs of both crates when windres (MinGW binutils) is on PATH, for x64 only
-# (rust/resources/win_resource.rs). Say so when they are missing instead of shipping that silently.
-$info = (Get-Item (Join-Path $bin 'layoutcraft-app.exe')).VersionInfo
-if ($info.ProductName -ne 'LayoutCraft') {
-  Write-Warning "layoutcraft-app.exe has no version information or icon (windres was not used for $Target). It works, but Explorer shows the generic icon."
-  if ($env:GITHUB_ACTIONS) { Write-Host "::warning title=No exe icon ($Target)::layoutcraft-app.exe was built without the embedded icon and version information (windres is only used for x64, see docs/36-packaging.md)" }
+# Both programs must carry the same product name and version (rust/resources/win_resource.rs): code signing asks for it, and without
+# the version resource Explorer shows no icon either. An msvc build without them fails here; the maintainers' gnu build only warns.
+$version = Get-LcVersion
+foreach ($exe in 'layoutcraft-app.exe', 'layoutcraft-mcp.exe') {
+  $info = (Get-Item (Join-Path $bin $exe)).VersionInfo
+  if ($info.ProductName -ne 'LayoutCraft' -or $info.ProductVersion -ne $version -or $info.OriginalFilename -ne $exe) {
+    $found = "product '$($info.ProductName)', version '$($info.ProductVersion)', file name '$($info.OriginalFilename)'"
+    $message = "$exe has wrong or no version information for $Target ($found; expected LayoutCraft $version). See the cargo warnings above."
+    if ($Target -like '*-msvc') { throw $message }
+    Write-Warning $message
+  } else {
+    Write-Host "$exe : $($info.ProductName) $($info.ProductVersion)"
+  }
 }
 Write-Host "built $bin"
