@@ -1161,6 +1161,55 @@ mod size_pos_tests {
     }
 }
 
+/// How a text field of a window was left this frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Left {
+    /// Enter, Tab or a click elsewhere: what was typed counts.
+    Apply,
+    /// Esc: what was typed is thrown away.
+    Revert,
+}
+
+fn field_left(ui: &egui::Ui, field: &egui::Response) -> Option<Left> {
+    field.lost_focus().then(|| if ui.input(|input| input.key_pressed(egui::Key::Escape)) { Left::Revert } else { Left::Apply })
+}
+
+#[cfg(test)]
+mod field_left_tests {
+    use super::{field_left, Left};
+    use eframe::egui::{self, Event, Key, Modifiers};
+
+    /// One frame with a single focused-on-demand text field; what `field_left` says in it.
+    fn frame(ctx: &egui::Context, text: &mut String, focus: bool, events: Vec<Event>) -> Option<Left> {
+        let mut left = None;
+        let output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+            let field = ui.text_edit_singleline(text);
+            if focus {
+                field.request_focus();
+            }
+            left = field_left(ui, &field);
+        });
+        // nothing paints here: the texture changes of the frame are not applied, so the output must not be dropped
+        std::mem::forget(output);
+        left
+    }
+
+    fn press(key: Key) -> Vec<Event> {
+        vec![Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::NONE }]
+    }
+
+    #[test]
+    fn escape_reverts_and_enter_applies() {
+        for (key, expected) in [(Key::Escape, Left::Revert), (Key::Enter, Left::Apply)] {
+            let ctx = egui::Context::default();
+            let mut text = "typed".to_string();
+            assert_eq!(frame(&ctx, &mut text, true, Vec::new()), None);
+            assert_eq!(frame(&ctx, &mut text, false, Vec::new()), None);
+            assert_eq!(frame(&ctx, &mut text, false, press(key)), Some(expected));
+        }
+    }
+}
+
 /// The (name, address) pairs of `Engine::hyperlinks_json`.
 fn parse_links(json: &str) -> Vec<(String, String)> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
@@ -4757,6 +4806,7 @@ impl LayoutCraftApp {
         let mut open = true;
         // the row to write, or the name of the row to remove
         let mut write: Option<DataRow> = None;
+        let mut reread = false;
         let mut remove: Option<String> = None;
         egui::Window::new("Shape Fields").open(&mut open).collapsible(true).default_width(360.0).show(ctx, |ui| {
             if shape.is_none() {
@@ -4793,8 +4843,13 @@ impl LayoutCraftApp {
                             if row.value != before {
                                 write = Some(row.clone());
                             }
-                        } else if ui.text_edit_singleline(&mut row.value).labelled_by(label.id).lost_focus() {
-                            write = Some(row.clone());
+                        } else {
+                            let field = ui.text_edit_singleline(&mut row.value).labelled_by(label.id);
+                            match field_left(ui, &field) {
+                                Some(Left::Apply) => write = Some(row.clone()),
+                                Some(Left::Revert) => reread = true,
+                                None => {}
+                            }
                         }
                         if ui.button("Remove").on_hover_text(format!("Remove the field {title}")).clicked() {
                             remove = Some(row.name.clone());
@@ -4832,6 +4887,9 @@ impl LayoutCraftApp {
                 pane.key = None;
                 self.finish_edit(ctx, result, "Changed shape fields", Some(shape));
             }
+        }
+        if reread {
+            pane.key = None;
         }
         if open {
             self.data_pane = Some(pane);
@@ -4924,14 +4982,14 @@ impl LayoutCraftApp {
                         let edit = ui.add(egui::TextEdit::singleline(&mut texts[field]).desired_width(80.0)).labelled_by(label.id);
                         ui.label(if field == 4 { "deg" } else { unit });
                         ui.end_row();
-                        if edit.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                        match field_left(ui, &edit) {
                             // Esc gives the old value back instead of applying what was typed
-                            texts[field] = read[field].clone();
-                        } else if edit.lost_focus() && texts[field] != read[field] {
-                            match texts[field].trim().parse::<f64>() {
+                            Some(Left::Revert) => texts[field] = read[field].clone(),
+                            Some(Left::Apply) if texts[field] != read[field] => match texts[field].trim().parse::<f64>() {
                                 Ok(value) => *action = Some(Action::SizeField(id.to_string(), field, value, per_inch)),
                                 Err(_) => texts[field] = read[field].clone(),
-                            }
+                            },
+                            _ => {}
                         }
                     }
                 });
