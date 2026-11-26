@@ -1705,6 +1705,17 @@ enum EditKey {
     Align(&'static str),
     /// Switch bold, italic or underline (the `Engine::edit` op 10 name).
     Style(&'static str),
+    /// Make the font one point larger or smaller.
+    Size(i8),
+}
+
+/// Font size keys: Ctrl+Shift with the `>` / `<` keys, which the toolkit reports as the period and comma keys.
+const SIZE_KEYS: [(egui::Key, i8); 2] = [(egui::Key::Period, 1), (egui::Key::Comma, -1)];
+
+/// The font size in points one step from the model's size in px (96 per inch; 12 pt when the shape states none).
+fn stepped_font_size(px: Option<f64>, delta: f64) -> f64 {
+    let points = px.map_or(12.0, |px| (px * 72.0 / 96.0 * 10.0).round() / 10.0);
+    (points + delta).max(1.0)
 }
 
 /// Text alignment keys. They are taken before the arrange keys: egui ignores an extra Shift when it matches a shortcut, so
@@ -1718,6 +1729,9 @@ fn consume_edit_key(input: &mut egui::InputState) -> Option<EditKey> {
     if let Some((_, cell)) = ALIGN_KEYS.iter().find(|(key, _)| input.consume_key(CTRL_SHIFT, *key)) {
         return Some(EditKey::Align(cell));
     }
+    if let Some((_, delta)) = SIZE_KEYS.iter().find(|(key, _)| input.consume_key(CTRL_SHIFT, *key)) {
+        return Some(EditKey::Size(*delta));
+    }
     if let Some(command) = consume_arrange_key(input) {
         return Some(EditKey::Arrange(command));
     }
@@ -1726,7 +1740,7 @@ fn consume_edit_key(input: &mut egui::InputState) -> Option<EditKey> {
 
 #[cfg(test)]
 mod edit_key_tests {
-    use super::{consume_edit_key, ArrangeCmd, EditKey};
+    use super::{consume_edit_key, stepped_font_size, ArrangeCmd, EditKey};
     use eframe::egui::{self, Key, Modifiers};
 
     fn press(key: Key, shift: bool) -> Option<EditKey> {
@@ -1734,6 +1748,14 @@ mod edit_key_tests {
         let mut input = egui::InputState::default();
         input.events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers });
         consume_edit_key(&mut input)
+    }
+
+    #[test]
+    fn a_font_size_step_starts_from_the_shapes_size_and_stays_positive() {
+        // 16 px are 12 pt
+        assert!(stepped_font_size(Some(16.0), 1.0) > 12.5 && stepped_font_size(Some(16.0), -1.0) < 11.5);
+        assert_eq!(stepped_font_size(None, 1.0), stepped_font_size(Some(16.0), 1.0));
+        assert!(stepped_font_size(Some(1.0), -1.0) >= 1.0);
     }
 
     #[test]
@@ -1750,6 +1772,8 @@ mod edit_key_tests {
         }
         assert!(press(Key::C, true) == Some(EditKey::Align("1")));
         assert!(press(Key::I, false) == Some(EditKey::Style("italic")));
+        assert!(press(Key::Period, true) == Some(EditKey::Size(1)) && press(Key::Comma, true) == Some(EditKey::Size(-1)));
+        assert!(press(Key::Period, false).is_none());
     }
 }
 
@@ -5038,10 +5062,11 @@ impl LayoutCraftApp {
             }
             "p:fontSize" => {
                 // the model keeps the size in px (96 per inch); the file and the engine speak points
-                let points = primary.as_ref().and_then(|shape| shape.font_size).map(|px| (px * 72.0 / 96.0 * 10.0).round() / 10.0).unwrap_or(12.0);
+                let px = primary.as_ref().and_then(|shape| shape.font_size);
+                let points = px.map_or(12.0, |px| (px * 72.0 / 96.0 * 10.0).round() / 10.0);
                 for (label, delta) in [("A-", -1.0), ("A+", 1.0)] {
                     if ui.add_enabled(enabled, egui::Button::new(label)).on_hover_text(format!("Font size {points} pt")).clicked() {
-                        *action = Some(Action::StyleSelected(serde_json::json!({ "fontPt": (points + delta).max(1.0) }).to_string()));
+                        *action = Some(Action::StyleSelected(serde_json::json!({ "fontPt": stepped_font_size(px, delta) }).to_string()));
                     }
                 }
             }
@@ -6545,6 +6570,10 @@ impl eframe::App for LayoutCraftApp {
             if let Some(command) = ctx.input_mut(consume_edit_key) {
                 action = Some(match command {
                     EditKey::Arrange(command) => Action::Arrange(command),
+                    EditKey::Size(delta) => {
+                        let px = self.selected.as_deref().and_then(|id| self.doc_shape(id)).and_then(|shape| shape.font_size);
+                        Action::StyleSelected(serde_json::json!({ "fontPt": stepped_font_size(px, f64::from(delta)) }).to_string())
+                    }
                     EditKey::Align(cell) => Action::FormatText(serde_json::json!({ "para": { "HorzAlign": cell } })),
                     EditKey::Style(name) => {
                         // switched off only when the first selected shape has it
