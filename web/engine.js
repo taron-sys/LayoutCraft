@@ -47,6 +47,8 @@ export async function loadEngine(source) {
       x.vl_dealloc(ptr, data.length);
       check(status);
     },
+    /** What the user has to know when the open drawing was converted from an old format; '' otherwise. */
+    conversion: () => text(x.vl_conversion()),
     /**
      * Open an external stencil (.vssx / .vstx, or any drawing used as a source of masters) next to the
      * drawing. Returns {index, masters: [{id, name, w, h}]}; the stencil stays open until closeStencil.

@@ -992,7 +992,7 @@ $('stencilFile').onchange = async (event) => {
     const opened = engine.openStencil(bytes);
     addOpenedStencil(file.name, opened, true);
     stencilStore.put(file.name, bytes).catch(() => {});
-    say();
+    say(opened.converted ? `${file.name}: ${opened.converted}` : '');
   } catch (error) { say(error.message); }
 };
 $('closeStencil').onclick = () => {
@@ -2015,7 +2015,7 @@ $('pictureFile').onchange = () => {
   if (file) insertPictureFile(file);
 };
 // drag and drop of picture files onto the page (step 340): the picture's centre goes where it is dropped; other files are left to the browser
-const DRAWING_FILE = /\.(vsdx|vssx|vstx|excalidraw|drawio)$/i;
+const DRAWING_FILE = /\.(vsdx|vssx|vstx|vsd|vss|vst|vdx|vsx|vtx|excalidraw|drawio)$/i;
 $('stage').addEventListener('dragover', (event) => {
   // a picture file, or any other file (its name is not known before the drop): taken, so the browser does not navigate to it; the drop says what it can open
   if ([...(event.dataTransfer?.items || [])].some((item) => item.kind === 'file')) { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }
@@ -2039,7 +2039,7 @@ $('stage').addEventListener('drop', (event) => {
     $('file').dispatchEvent(new Event('change', { bubbles: true }));
     return;
   }
-  say(`${all[0].name}: LayoutCraft opens .vsdx, .vssx, .vstx, .drawio and .excalidraw files and takes PNG, JPEG, GIF and BMP pictures.`);
+  say(`${all[0].name}: LayoutCraft opens .vsdx, .vssx, .vstx, the old .vsd, .vss, .vst, .vdx, .vsx and .vtx, .drawio and .excalidraw files and takes PNG, JPEG, GIF and BMP pictures.`);
 });
 // paste of a picture (a screenshot, an image copied in a browser or an app) when no text field has the focus (step 340)
 document.addEventListener('paste', (event) => {
@@ -2387,7 +2387,11 @@ $('file').onchange = async (event) => {
         const parts = [...Object.entries(res.approximated).map(([k, v]) => `${v} ${k} drawn as rectangle`), ...Object.entries(res.skipped).map(([k, v]) => `${v} ${k} not imported`)];
         note = parts.length ? `Opened ${file.name}; ${parts.join(', ')}.` : '';
       } catch (error) { if (before) engine.import(before); throw error; }
-    } else engine.import(bytes);
+    } else {
+      engine.import(bytes);
+      // an old format was converted: the user has to know what was not carried over
+      note = engine.conversion();
+    }
   } catch (error) {
     say(`Could not open ${file.name}: ${error.message}${engine.pageCount() ? ' The drawing that was open is unchanged.' : ''}`);
     event.target.value = '';
