@@ -3755,6 +3755,46 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         }
     }
 
+    /// What was typed into a shape's field is written to that shape when another shape, or nothing, is clicked; Esc still
+    /// throws it away.
+    #[test]
+    fn a_typed_shape_field_is_kept_when_another_shape_is_clicked() {
+        for (leave, kept) in [("shape", true), ("empty page", true), ("Esc", false)] {
+            let (mut driver, ids) = Driver::new();
+            for id in &ids {
+                let row = super::new_data_row("Owner", &[]).unwrap();
+                super::write_data_row(&mut driver.app.engine, 0, id, &row).unwrap();
+            }
+            driver.app.build_page(&driver.ctx.clone(), false);
+            driver.app.selected = Some(ids[0].clone());
+            driver.app.data_pane = Some(DataPane::default());
+            driver.frames(4);
+            let label = *driver.texts("Owner").first().expect("the field");
+            driver.click(pos2(label.right() + 40.0, label.center().y), Modifiers::NONE);
+            driver.frames(2);
+            let depth = driver.app.engine.undo_depth();
+            driver.write("Typed");
+            match leave {
+                "shape" => {
+                    let other = driver.middle_of(&ids[1]);
+                    driver.click(other, Modifiers::NONE);
+                }
+                "empty page" => {
+                    let below = driver.middle_of(&ids[1]) + vec2(0.0, 150.0);
+                    driver.click(below, Modifiers::NONE);
+                }
+                _ => driver.key(Key::Escape, Modifiers::NONE),
+            }
+            driver.frames(4);
+            let values: Vec<String> = ids.iter().map(|id| driver.app.doc_shape(id).unwrap().data[0].value.clone()).collect();
+            assert_eq!(values, [if kept { "Typed" } else { "" }, ""], "{leave}: {}", driver.app.status);
+            assert_eq!(driver.app.engine.undo_depth(), depth + usize::from(kept), "{leave}");
+            if leave == "shape" {
+                assert_eq!(driver.app.selected, Some(ids[1].clone()), "the click still selects");
+            }
+        }
+    }
+
     #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
@@ -7750,6 +7790,21 @@ impl LayoutCraftApp {
             [one] => Some(one.clone()),
             _ => None,
         };
+        let key = shape.as_ref().map(|shape| (page, shape.clone(), self.engine.undo_depth()));
+        // Another shape (or none) is shown now: a value typed for the one before, which its field had not handed over yet, is
+        // written to it first. After any other edit the rows are only read again.
+        let mut left_behind: Vec<(usize, String, DataRow)> = Vec::new();
+        if let Some((old_page, old_shape, depth)) = pane.key.as_ref().filter(|old| key.as_ref().is_none_or(|new| (old.0, &old.1) != (new.0, &new.1))) {
+            let before = self.engine.document().and_then(|document| document.pages.get(*old_page)).and_then(|page| page.shapes.iter().find(|shape| shape.visio_id.as_ref() == Some(old_shape)));
+            if let Some(before) = before.filter(|_| *depth == self.engine.undo_depth()) {
+                left_behind.extend(pane.rows.iter().filter(|row| before.data.iter().any(|old| old.name == row.name && old.value != row.value)).map(|row| (*old_page, old_shape.clone(), row.clone())));
+            }
+        }
+        for (old_page, old_shape, row) in left_behind {
+            let result = write_data_row(&mut self.engine, old_page, &old_shape, &row);
+            let selected = self.selected.clone();
+            self.finish_edit(ctx, result, "Changed shape fields", selected);
+        }
         let key = shape.as_ref().map(|shape| (page, shape.clone(), self.engine.undo_depth()));
         if pane.key != key {
             // the form for changing a field belongs to the shape it was opened on
