@@ -1063,6 +1063,8 @@ struct DataPane {
     new_choices: String,
     /// The name of the field whose type and prompt are being changed.
     changing: Option<String>,
+    /// Whether that field is to be hidden.
+    new_hidden: bool,
 }
 
 /// The types a new field can be given, with the numbers the file stores (`Prop.Type`).
@@ -3064,6 +3066,15 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         press(&mut driver, "Save field");
         assert_eq!((row(&driver).prompt.as_str(), driver.app.engine.undo_depth()), ("Who looks after it?", depth + 1), "{}", driver.app.status);
         assert!(driver.app.data_pane.as_ref().is_some_and(|pane| pane.changing.is_none() && pane.new_prompt.is_empty()));
+        // hiding the field, and showing it again
+        for hidden in [true, false] {
+            press(&mut driver, "Change");
+            press(&mut driver, "Hidden");
+            press(&mut driver, "Save field");
+            assert_eq!(row(&driver).invisible != 0, hidden, "{}", driver.app.status);
+            assert_eq!(driver.texts("Owner (hidden)").is_empty(), !hidden);
+        }
+        assert_eq!(row(&driver).prompt, "Who looks after it?");
         // the form does not follow to another shape
         press(&mut driver, "Change");
         driver.app.selected = Some(ids[1].clone());
@@ -7118,11 +7129,16 @@ impl LayoutCraftApp {
                 });
             }
             if let Some(row) = changing {
+                ui.checkbox(&mut pane.new_hidden, "Hidden").on_hover_text("A hidden field is marked in the file for programs not to show it; it stays listed here, marked as hidden");
                 let mut done = false;
                 ui.horizontal(|ui| {
                     if ui.button("Save field").clicked() {
                         match changed_data_row(&row, pane.new_type, &pane.new_choices, &pane.new_prompt) {
-                            Ok(changed) => {
+                            Ok(mut changed) => {
+                                // a file may say "hidden" with any number but 0: keep it while the choice stays
+                                if (changed.invisible != 0) != pane.new_hidden {
+                                    changed.invisible = u32::from(pane.new_hidden);
+                                }
                                 write = Some(changed);
                                 done = true;
                             }
@@ -7142,6 +7158,7 @@ impl LayoutCraftApp {
         if let Some(row) = change {
             pane.new_type = row.r#type;
             pane.new_prompt = row.prompt.clone();
+            pane.new_hidden = row.invisible != 0;
             pane.new_choices = if row.r#type == 1 { row.format.clone() } else { String::new() };
             pane.changing = Some(row.name);
         }
@@ -7152,7 +7169,7 @@ impl LayoutCraftApp {
             // leaving a field without a change writes nothing
             let write = write.filter(|row| {
                 let before = self.doc_shape(&shape).and_then(|shape| shape.data.iter().find(|old| old.name == row.name));
-                before.is_none_or(|old| (&old.value, old.r#type, &old.prompt, &old.format) != (&row.value, row.r#type, &row.prompt, &row.format))
+                before.is_none_or(|old| (&old.value, old.r#type, &old.prompt, &old.format, old.invisible) != (&row.value, row.r#type, &row.prompt, &row.format, row.invisible))
             });
             let result = if let Some(name) = remove {
                 Some(self.engine.edit(page, 18, &format!("{shape}\n{name}"), 0.0, 0.0, 0.0, 0.0, 0))
