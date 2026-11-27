@@ -1,4 +1,4 @@
-//! Pictures on a page and on its background page, whose shape IDs run alike. Drawings made here, by our writer.
+//! Pictures and layers on a page and on its background page, whose shape IDs run alike. Drawings made here, by our writer.
 use layoutcraft_engine::Engine;
 
 /// A PNG of one pixel.
@@ -37,5 +37,27 @@ fn a_picture_belongs_to_the_shape_of_its_own_page() {
         assert_eq!(pictures.len(), 1, "front {picture_in_front}: {with:?}");
         let picture = &shown[pictures[0]];
         assert!(picture.w < 200.0, "front {picture_in_front}: the picture keeps its own box, {} wide", picture.w);
+    }
+}
+
+#[test]
+fn a_layer_hides_only_the_shapes_of_its_own_page() {
+    for hidden in [0, 1] {
+        let mut engine = Engine::new();
+        engine.new_blank(8.0, 6.0, false, "Page-1").unwrap();
+        engine.page_op(1, 0, 0, "Back").unwrap();
+        let ids: Vec<String> = [0, 1].map(|page| engine.draw(page, 0, 1.0, 1.0, 3.0, 2.0).unwrap()).to_vec();
+        assert_eq!(ids[0], ids[1], "the case: one ID on both pages");
+        // a hidden layer on one of the two pages, with that page's shape on it
+        engine.page_op(7, hidden, 0, "Off").unwrap();
+        engine.edit(hidden, 16, &ids[hidden], 0.0, 0.0, 0.0, 0.0, 1).unwrap();
+        engine.page_op(8, hidden, 0, "|0").unwrap();
+        let back = engine.package.as_ref().unwrap().pages().unwrap()[1].id.clone().expect("a page ID");
+        engine.page_op(13, 1, 0, "").unwrap();
+        engine.page_op(12, 0, 0, &back).unwrap();
+        let shown = &engine.document().unwrap().pages[0].shapes;
+        // the background's shapes are drawn first
+        let states: Vec<bool> = shown.iter().map(|shape| shape.layer_hidden).collect();
+        assert_eq!(states, [hidden == 1, hidden == 0], "layer on page {hidden}");
     }
 }
