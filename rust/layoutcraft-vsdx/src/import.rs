@@ -215,10 +215,14 @@ pub fn import_document_with(
                                 true,
                             );
                         }
+                        let back_rels = package.relationships(back_part)?;
+                        attach_images(&mut shapes[background_start..], &collect_foreign(&back_resolved), &back_rels, package, &mut media_collector);
                     }
                 }
             }
         }
+        // from here on the page's own shapes: their IDs may be those of shapes on the background page
+        let foreground_start = shapes.len();
         for shape in &mut shapes[background_start..] {
             if shape.label.trim().parse::<u32>().is_ok() {
                 shape.label = (page_index + 1).to_string();
@@ -283,7 +287,7 @@ pub fn import_document_with(
         let page_rels = package.relationships(&page.part)?;
         let foreign = collect_foreign(&drawn);
         attach_images(
-            &mut shapes,
+            &mut shapes[foreground_start..],
             &foreign,
             &page_rels,
             package,
