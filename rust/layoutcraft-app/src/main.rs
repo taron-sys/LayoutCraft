@@ -3726,6 +3726,132 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert!(driver.app.data_pane.as_ref().is_some_and(|pane| pane.rows.is_empty()), "the fields are this drawing's");
     }
 
+    /// A size typed for one shape goes to that shape, also when the field is left by clicking another one.
+    #[test]
+    fn a_typed_font_size_stays_with_the_shape_it_was_typed_for() {
+        for other_size in [None, Some(20.0)] {
+            let (mut driver, ids) = Driver::new();
+            let size = |driver: &Driver, id: &str| driver.app.doc_shape(id).and_then(|shape| shape.font_size).map(|px| (px * 72.0 / 96.0).round());
+            if let Some(points) = other_size {
+                driver.app.engine.edit(0, 10, &format!("{}\n{{\"fontPt\":{points}}}", ids[1]), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+                driver.app.build_page(&driver.ctx.clone(), false);
+            }
+            driver.app.selected = Some(ids[0].clone());
+            driver.frames(3);
+            let before = size(&driver, &ids[1]);
+            let group = *driver.texts("Font \u{25be}").first().expect("the Font group");
+            driver.click(group.center(), Modifiers::NONE);
+            driver.frames(2);
+            let unit = *driver.texts(" pt").first().expect("the size field");
+            driver.click(pos2(unit.left() - 6.0, unit.center().y), Modifiers::NONE);
+            driver.frames(2);
+            driver.write("31");
+            let other = driver.middle_of(&ids[1]);
+            driver.click(other, Modifiers::NONE);
+            driver.frames(4);
+            assert_eq!(size(&driver, &ids[1]), before, "{other_size:?}: the clicked shape keeps its size: {}", driver.app.status);
+            assert_eq!(size(&driver, &ids[0]), Some(31.0), "{other_size:?}: {}", driver.app.status);
+            assert_eq!(driver.app.selected, Some(ids[1].clone()));
+        }
+    }
+
+    /// What was typed into a shape's field is written to that shape when another shape, or nothing, is clicked; Esc still
+    /// throws it away.
+    #[test]
+    fn a_typed_shape_field_is_kept_when_another_shape_is_clicked() {
+        for (leave, kept) in [("shape", true), ("empty page", true), ("Esc", false)] {
+            let (mut driver, ids) = Driver::new();
+            for id in &ids {
+                let row = super::new_data_row("Owner", &[]).unwrap();
+                super::write_data_row(&mut driver.app.engine, 0, id, &row).unwrap();
+            }
+            driver.app.build_page(&driver.ctx.clone(), false);
+            driver.app.selected = Some(ids[0].clone());
+            driver.app.data_pane = Some(DataPane::default());
+            driver.frames(4);
+            let label = *driver.texts("Owner").first().expect("the field");
+            driver.click(pos2(label.right() + 40.0, label.center().y), Modifiers::NONE);
+            driver.frames(2);
+            let depth = driver.app.engine.undo_depth();
+            driver.write("Typed");
+            match leave {
+                "shape" => {
+                    let other = driver.middle_of(&ids[1]);
+                    driver.click(other, Modifiers::NONE);
+                }
+                "empty page" => {
+                    let below = driver.middle_of(&ids[1]) + vec2(0.0, 150.0);
+                    driver.click(below, Modifiers::NONE);
+                }
+                _ => driver.key(Key::Escape, Modifiers::NONE),
+            }
+            driver.frames(4);
+            let values: Vec<String> = ids.iter().map(|id| driver.app.doc_shape(id).unwrap().data[0].value.clone()).collect();
+            assert_eq!(values, [if kept { "Typed" } else { "" }, ""], "{leave}: {}", driver.app.status);
+            assert_eq!(driver.app.engine.undo_depth(), depth + usize::from(kept), "{leave}");
+            if leave == "shape" {
+                assert_eq!(driver.app.selected, Some(ids[1].clone()), "the click still selects");
+            }
+        }
+    }
+
+    /// A selection belongs to the page it was made on: another page can have shapes with the same IDs.
+    #[test]
+    fn showing_another_page_leaves_nothing_selected() {
+        let (mut driver, ids) = Driver::new();
+        // the copy of the page has the same shape IDs
+        driver.app.engine.page_op(5, 0, 0, "").unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        driver.key(Key::A, CTRL);
+        assert_eq!(driver.app.all_selected().len(), ids.len());
+        driver.key(Key::PageDown, CTRL);
+        driver.frames(3);
+        assert_eq!(driver.app.page_index, 1, "{}", driver.app.status);
+        assert!(driver.app.all_selected().is_empty(), "{:?}", driver.app.all_selected());
+        // so a command on the selection touches nothing here
+        let shapes = |driver: &Driver| driver.app.engine.document().unwrap().pages[1].shapes.len();
+        let (count, depth) = (shapes(&driver), driver.app.engine.undo_depth());
+        let ctx = driver.ctx.clone();
+        driver.app.delete_selected(&ctx);
+        assert_eq!((shapes(&driver), driver.app.engine.undo_depth()), (count, depth), "{}", driver.app.status);
+    }
+
+    /// A command that selects something else (here: a shape added by a connect arrow) leaves only that selected.
+    #[test]
+    fn a_newly_made_shape_is_the_whole_selection() {
+        let (mut driver, ids) = Driver::new();
+        driver.key(Key::A, CTRL);
+        assert_eq!(driver.app.all_selected().len(), 2);
+        let image = driver.app.image_rect(driver.app.last_viewport);
+        let frame = driver.app.scene_rect_to_screen(LayoutCraftApp::selection_scene_rect(driver.app.scene_shape(&ids[0]).unwrap()), image);
+        driver.run(vec![Event::PointerMoved(frame.center())]);
+        driver.frames(2);
+        let arrow = pos2(frame.center().x, frame.bottom() + 16.0);
+        driver.run(vec![Event::PointerMoved(arrow)]);
+        driver.frames(2);
+        driver.click(arrow, Modifiers::NONE);
+        let made = driver.app.selected.clone().expect("the new shape");
+        assert!(!ids.contains(&made), "{}", driver.app.status);
+        assert_eq!(driver.app.all_selected(), [made], "{}", driver.app.status);
+        // a command that keeps the first shape keeps the others
+        driver.key(Key::A, CTRL);
+        let chosen = driver.app.all_selected();
+        driver.key(Key::B, CTRL);
+        assert_eq!(driver.app.all_selected(), chosen, "{}", driver.app.status);
+        // so does moving them together by the second one
+        let (second, depth) = (chosen[1].clone(), driver.app.engine.undo_depth());
+        let from = driver.middle_of(&second);
+        driver.drag(from, from + vec2(0.0, -60.0));
+        assert!(driver.app.engine.undo_depth() > depth, "moved: {}", driver.app.status);
+        // the one dragged may become the first; the same shapes stay selected
+        let sorted = |mut ids: Vec<String>| {
+            ids.sort();
+            ids
+        };
+        assert_eq!(sorted(driver.app.all_selected()), sorted(chosen), "{}", driver.app.status);
+    }
+
     #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
@@ -4555,6 +4681,8 @@ struct LayoutCraftApp {
     /// The Size and Position fields of the inspector.
     size_pos: SizePos,
     name_field: NameField,
+    /// The shapes the ribbon's font size field was entered for, while it has the keyboard.
+    font_target: Option<Vec<String>>,
     /// The first Style control of the inspector is to take the keyboard (F3).
     style_focus: bool,
     /// The inspector's first align button is to take the keyboard (F8).
@@ -4734,6 +4862,7 @@ impl LayoutCraftApp {
             ruler_unit: (1.0, "in"),
             size_pos: SizePos::default(),
             name_field: NameField::default(),
+            font_target: None,
             style_focus: false,
             align_focus: false,
             style_pick: None,
@@ -4889,6 +5018,7 @@ impl LayoutCraftApp {
     /// depth can all match the new one's.
     fn forget_drawing_state(&mut self) {
         self.name_field = NameField::default();
+        self.font_target = None;
         if self.data_pane.is_some() {
             self.data_pane = Some(DataPane::default());
         }
@@ -5002,7 +5132,9 @@ impl LayoutCraftApp {
             return;
         }
         if reset_view {
+            // another page or drawing: none of the selection carries over (its shape IDs can be in use there)
             self.selected = None;
+            self.extra_selected.clear();
             self.fit_pending = true;
         } else {
             self.fit_pending = false;
@@ -6881,7 +7013,8 @@ impl LayoutCraftApp {
             "p:fontSize" => {
                 // the model keeps the size in px (96 per inch); the file and the engine speak points
                 let px = primary.as_ref().and_then(|shape| shape.font_size);
-                let points = px.map_or(12.0, |px| (px * 72.0 / 96.0 * 10.0).round() / 10.0);
+                let in_points = |px: Option<f64>| px.map_or(12.0, |px| (px * 72.0 / 96.0 * 10.0).round() / 10.0);
+                let points = in_points(px);
                 let step = |ui: &mut egui::Ui, label: &str, delta: f64, action: &mut Option<Action>| {
                     if ui.add_enabled(enabled, egui::Button::new(label)).on_hover_text(format!("Font size {points} pt")).clicked() {
                         *action = Some(Action::StyleSelected(serde_json::json!({ "fontPt": stepped_font_size(px, delta) }).to_string()));
@@ -6889,17 +7022,27 @@ impl LayoutCraftApp {
                 };
                 step(ui, "A-", -1.0, action);
                 // typed only (no dragging, which would make an edit at every pointer move); Enter applies, Esc does not
-                let mut typed = points;
+                // while the field is being typed in it belongs to the shapes it was entered for: leaving it by clicking another
+                // shape changes the selection before the field hands over what was typed
+                let held = self.font_target.clone().filter(|ids| ids.iter().all(|id| self.doc_shape(id).is_some()));
+                let shown = held.as_ref().and_then(|ids| ids.first()).map_or(points, |id| in_points(self.doc_shape(id).and_then(|shape| shape.font_size)));
+                let mut typed = shown;
                 let field = ui
                     .add_enabled(enabled, egui::DragValue::new(&mut typed).speed(0.0).custom_formatter(|points, _| points.to_string()).suffix(" pt").update_while_editing(false))
                     .on_hover_text("Font size: click and type");
                 ui.ctx().accesskit_node_builder(field.id, |node| node.set_label("Font size in points"));
-                if field.changed() && typed != points {
+                if field.changed() && typed != shown {
                     if FONT_SIZES.contains(&typed) {
-                        *action = Some(Action::StyleSelected(serde_json::json!({ "fontPt": typed }).to_string()));
+                        let target = held.unwrap_or_else(|| self.all_selected());
+                        *action = Some(Action::StyleShapes(target, serde_json::json!({ "fontPt": typed }).to_string()));
                     } else {
                         *action = Some(Action::Say(format!("Type a font size from {} to {} points.", FONT_SIZES.start(), FONT_SIZES.end())));
                     }
+                }
+                if !field.has_focus() {
+                    self.font_target = None;
+                } else if self.font_target.is_none() {
+                    self.font_target = Some(self.all_selected());
                 }
                 step(ui, "A+", 1.0, action);
             }
@@ -6968,6 +7111,17 @@ impl LayoutCraftApp {
     }
 
     /// Apply an `Engine::edit` op 10 style JSON to every selected shape (one undo step).
+    /// Style the shapes `ids`, which need not be the selected ones; the selection stays.
+    fn style_shapes(&mut self, ctx: &egui::Context, ids: &[String], json: &str) {
+        if ids.is_empty() {
+            self.status = "Select a shape first.".to_string();
+            return;
+        }
+        let result = self.engine.edit(self.page_index, 10, &format!("{}\n{json}", ids.join("\n")), 0.0, 0.0, 0.0, 0.0, 0);
+        let selected = self.selected.clone();
+        self.finish_edit(ctx, result, "Changed style", selected);
+    }
+
     fn style_selected(&mut self, ctx: &egui::Context, json: &str) {
         let ids = self.all_selected();
         let Some(primary) = self.selected.clone() else {
@@ -7695,6 +7849,21 @@ impl LayoutCraftApp {
             [one] => Some(one.clone()),
             _ => None,
         };
+        let key = shape.as_ref().map(|shape| (page, shape.clone(), self.engine.undo_depth()));
+        // Another shape (or none) is shown now: a value typed for the one before, which its field had not handed over yet, is
+        // written to it first. After any other edit the rows are only read again.
+        let mut left_behind: Vec<(usize, String, DataRow)> = Vec::new();
+        if let Some((old_page, old_shape, depth)) = pane.key.as_ref().filter(|old| key.as_ref().is_none_or(|new| (old.0, &old.1) != (new.0, &new.1))) {
+            let before = self.engine.document().and_then(|document| document.pages.get(*old_page)).and_then(|page| page.shapes.iter().find(|shape| shape.visio_id.as_ref() == Some(old_shape)));
+            if let Some(before) = before.filter(|_| *depth == self.engine.undo_depth()) {
+                left_behind.extend(pane.rows.iter().filter(|row| before.data.iter().any(|old| old.name == row.name && old.value != row.value)).map(|row| (*old_page, old_shape.clone(), row.clone())));
+            }
+        }
+        for (old_page, old_shape, row) in left_behind {
+            let result = write_data_row(&mut self.engine, old_page, &old_shape, &row);
+            let selected = self.selected.clone();
+            self.finish_edit(ctx, result, "Changed shape fields", selected);
+        }
         let key = shape.as_ref().map(|shape| (page, shape.clone(), self.engine.undo_depth()));
         if pane.key != key {
             // the form for changing a field belongs to the shape it was opened on
@@ -8639,6 +8808,12 @@ impl LayoutCraftApp {
             return;
         }
         self.dirty = self.has_changes();
+        // a command that selects something that was not selected replaces the whole selection; one that names a selected shape
+        // keeps the others
+        match &selected {
+            Some(id) if self.all_selected().contains(id) => self.extra_selected.retain(|other| other != id),
+            _ => self.extra_selected.clear(),
+        }
         self.selected = selected;
         self.drag = None;
         self.preview = None;
@@ -10527,6 +10702,7 @@ impl eframe::App for LayoutCraftApp {
                 }
             }
             Some(Action::StyleSelected(ref json)) => self.style_selected(&ctx, json),
+            Some(Action::StyleShapes(ref ids, ref json)) => self.style_shapes(&ctx, ids, json),
             Some(Action::ReverseEnds) => self.reverse_selected_ends(&ctx),
             Some(Action::FormatText(ref spec)) => self.format_selected_text(&ctx, spec),
             Some(Action::Paste) => self.paste_clipboard(&ctx),
@@ -10679,6 +10855,8 @@ enum Action {
     Duplicate,
     /// An `Engine::edit` op 10 style JSON for every selected shape.
     StyleSelected(String),
+    /// Style these shapes (op 10 JSON).
+    StyleShapes(Vec<String>, String),
     Arrange(ArrangeCmd),
     Page(usize),
     Fit,
