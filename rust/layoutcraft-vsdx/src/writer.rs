@@ -2126,9 +2126,37 @@ pub(crate) fn page_master_relationship(package: &Package, page_index: usize, mas
     };
     let next = existing.keys().filter_map(|id| id.strip_prefix("rId").and_then(|n| n.parse::<u64>().ok())).max().unwrap_or(0) + 1;
     let target = format!("../masters/{}", master.part.rsplit('/').next().unwrap_or(""));
-    let at = rels.rfind("</Relationships>").ok_or_else(|| Error("bad page relationships part".to_string()))?;
-    rels.insert_str(at, &format!("<Relationship Id='rId{next}' Type='{MASTER_REL}' Target='{}'/>", escape_attr(&target)));
+    let rel = format!("<Relationship Id='rId{next}' Type='{MASTER_REL}' Target='{}'/>", escape_attr(&target));
+    if !insert_relationship(&mut rels, &rel) {
+        return Err(Error(format!("bad page relationships part {rels_part}")));
+    }
     Ok(Some((rels_part, rels)))
+}
+
+/// Add `rel` as the last child of a relationships part's root element: before `</Relationships>`, or, when
+/// the part is a single empty element (`<Relationships xmlns='...'/>`, as some writers save a part with no
+/// relationships), by opening that element. `false` when the text has no `Relationships` root element.
+pub(crate) fn insert_relationship(rels: &mut String, rel: &str) -> bool {
+    if let Some(at) = rels.rfind("</Relationships>") {
+        rels.insert_str(at, rel);
+        return true;
+    }
+    let mut from = 0;
+    while let Some(found) = rels[from..].find("<Relationships") {
+        let start = from + found;
+        let after = start + "<Relationships".len();
+        // the root element, not an element whose name only starts with "Relationships"
+        if rels[after..].starts_with(|c: char| c.is_ascii_whitespace() || c == '/' || c == '>') {
+            let Some(close) = rels[after..].find('>').map(|i| after + i) else { return false };
+            if !rels[..close].ends_with('/') {
+                return false;
+            }
+            rels.replace_range(close - 1..=close, &format!(">{rel}</Relationships>"));
+            return true;
+        }
+        from = after;
+    }
+    false
 }
 
 /// Set a cell directly under geometry section `index` of the shape; the section is created (before
@@ -3403,6 +3431,40 @@ mod tests {
 
         assert!(find_shape_range(NESTED, "4").is_some());
         assert!(find_shape_range(NESTED, "2").is_some());
+    }
+
+    #[test]
+    fn a_relationship_goes_into_an_empty_relationships_element() {
+        const REL: &str = "<Relationship Id='rId1' Type='t' Target='../masters/master1.xml'/>";
+        for empty in [
+            "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships' />",
+            "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"/>",
+            "<Relationships/>",
+        ] {
+            let mut rels = empty.to_string();
+            assert!(insert_relationship(&mut rels, REL), "{empty}");
+            assert!(rels.contains(&format!("{REL}</Relationships>")), "{rels}");
+            assert_eq!(rels.matches("<Relationships").count(), 1, "{rels}");
+            assert_eq!(rels.matches("/>").count(), 1, "only the new relationship is self-closing: {rels}");
+        }
+    }
+
+    #[test]
+    fn a_relationship_is_appended_after_the_existing_ones() {
+        let mut rels = "<Relationships xmlns='x'><Relationship Id='rId1' Type='t' Target='a'/></Relationships>".to_string();
+        assert!(insert_relationship(&mut rels, "<Relationship Id='rId2' Type='t' Target='b'/>"));
+        let first = rels.find("Id='rId1'").unwrap();
+        let second = rels.find("Id='rId2'").unwrap();
+        assert!(first < second && second < rels.find("</Relationships>").unwrap(), "{rels}");
+    }
+
+    #[test]
+    fn text_without_a_relationships_root_is_refused() {
+        for bad in ["", "<Types/>", "<RelationshipsX/>", "<Relationships xmlns='x'>"] {
+            let mut rels = bad.to_string();
+            assert!(!insert_relationship(&mut rels, "<Relationship Id='rId1'/>"), "{bad}");
+            assert_eq!(rels, bad);
+        }
     }
 
     #[test]
