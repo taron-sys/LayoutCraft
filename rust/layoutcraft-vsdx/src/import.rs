@@ -471,7 +471,7 @@ fn collect_groups(resolved: &[ResolvedShape], shapes: &[Shape], page_height: f64
     ) {
         for node in nodes {
             let is_group = node.shape_type.as_deref() == Some("Group");
-            let flattened = is_group && (node.master_id.is_none() || is_container_group(node));
+            let flattened = is_group && (node.master_id.is_none() || is_container_group(node) || made_beside_a_guide(node));
             if !flattened {
                 continue;
             }
@@ -977,7 +977,7 @@ fn flatten_node(
     };
     let (self_angle, self_mirrored) = transform_turn_and_mirror(&self_transform);
     let is_group = node.shape_type.as_deref() == Some("Group");
-    let recurse_group = is_group && (node.master_id.is_none() || is_container_group(node));
+    let recurse_group = is_group && (node.master_id.is_none() || is_container_group(node) || made_beside_a_guide(node));
     if recurse_group {
         // A master-backed container (a UML fragment) paints its own outline under its children. A plain page group that owns
         // geometry is drawn too (Visio, probed in step 219 with make-displaymode.mjs), by its `DisplayMode` cell: 0 = its own geometry
@@ -1003,6 +1003,10 @@ fn flatten_node(
             container
         };
         for child in &node.children {
+            // A member written `Del='1'` (with the ID -1) is one the instance took out of its master.
+            if made_beside_a_guide(node) && child.id == "4294967295" {
+                continue;
+            }
             // The body drawn above already holds the master's own sub-shapes; only members that
             // are not part of the master (real container contents) are flattened on top.
             if drew_body && child.master_shape_id.is_some() && !has_foreign(child) {
@@ -1245,6 +1249,12 @@ fn is_container_background(node: &ResolvedShape, container: &ResolvedShape) -> b
     !["dblistitem", "dbattribute", "task"]
         .iter()
         .any(|marker| categories.contains(marker))
+}
+
+/// A group made from a master of several shapes that lists a ruler guide first: it took no master shape (see `shapes.rs`),
+/// so there is no master body to composite and its members are drawn.
+fn made_beside_a_guide(node: &ResolvedShape) -> bool {
+    node.master_explicit && node.master_children.is_empty() && node.children.iter().any(|child| child.shape_type.as_deref() == Some("Guide"))
 }
 
 fn is_container_group(node: &ResolvedShape) -> bool {
