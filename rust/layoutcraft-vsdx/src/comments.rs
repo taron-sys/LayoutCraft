@@ -204,8 +204,9 @@ fn write_back(package: &Package, parsed: &Parsed) -> Result<Vec<u8>> {
         while rels.contains(&format!("Id='rId{n}'")) || rels.contains(&format!("Id=\"rId{n}\"")) {
             n += 1;
         }
-        let at = rels.rfind("</Relationships>").ok_or_else(|| Error("bad visio/_rels/document.xml.rels".to_string()))?;
-        rels.insert_str(at, &format!("<Relationship Id='rId{n}' Type='{REL_TYPE}' Target='comments.xml'/>"));
+        if !crate::writer::insert_relationship(&mut rels, &format!("<Relationship Id='rId{n}' Type='{REL_TYPE}' Target='comments.xml'/>")) {
+            return Err(Error("bad visio/_rels/document.xml.rels".to_string()));
+        }
         extras.insert(DOC_RELS.to_string(), rels.into_bytes());
         let mut types = package.text(TYPES)?.to_string();
         let at = types.rfind("</Types>").ok_or_else(|| Error("bad [Content_Types].xml".to_string()))?;
