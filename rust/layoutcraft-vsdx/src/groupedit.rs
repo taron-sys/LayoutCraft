@@ -800,6 +800,59 @@ pub struct GroupEditor {
     shift: std::cell::RefCell<Option<(Vec<String>, (f64, f64))>>,
 }
 
+/// Whether connection point `row` of `node` leaves the shape in no set direction: the row has no DirX / DirY, and the point is
+/// not on a side of the frame (within 0.01 in) but inside it or off it. `site_of_row` then takes the nearest side, which for a
+/// point off a thin frame is always the same one.
+fn free_direction(node: &ResolvedShape, row: &crate::shapes::SectionRow) -> bool {
+    const ON_SIDE: f64 = 0.01;
+    let cell = |name: &str| row.cells.get(name).and_then(|c| c.value.as_deref()).and_then(|v| v.parse::<f64>().ok());
+    if cell("DirX").unwrap_or(0.0).abs() > 0.5 || cell("DirY").unwrap_or(0.0).abs() > 0.5 {
+        return false;
+    }
+    let (Ok(frame), Some(x), Some(y)) = (frame_of(node), cell("X"), cell("Y")) else { return false };
+    let (w, h) = frame.size;
+    let along = |v: f64, length: f64| v >= -ON_SIDE && v <= length + ON_SIDE;
+    let on_upright = (x.abs() <= ON_SIDE || (w - x).abs() <= ON_SIDE) && along(y, h);
+    let on_level = (y.abs() <= ON_SIDE || (h - y).abs() <= ON_SIDE) && along(x, w);
+    !(on_upright || on_level)
+}
+
+/// One end of a connector for the router: see `GroupEditor::end_sites`.
+struct EndSites {
+    sites: Vec<Site>,
+    rect: Rect,
+    free: bool,
+}
+
+/// The sites and boxes of both ends of a connector, for `route_ends`. A point without a set direction leaves towards the other
+/// shape, through the side of its own shape that faces it (`facing`), and the route keeps out of no box at that end but the point
+/// itself: the point lies inside the frame or off it (the ports of a switch module, above a thin frame), so going round the
+/// frame would only bend the route.
+fn settle_ends(from: EndSites, to: EndSites) -> ((Vec<Site>, Rect), (Vec<Site>, Rect)) {
+    let settle = |end: &EndSites, other: Rect| -> (Vec<Site>, Rect) {
+        match (end.free, end.sites.first()) {
+            (true, Some(site)) => {
+                let (x, y) = site.point;
+                (vec![Site { point: site.point, out: facing(end.rect, other) }], Rect { x0: x, y0: y, x1: x, y1: y })
+            }
+            _ => (end.sites.clone(), end.rect),
+        }
+    };
+    (settle(&from, to.rect), settle(&to, from.rect))
+}
+
+/// The side of box `own` that faces box `other` (page axes, y up): up or down when the boxes lie more one above the other than
+/// side by side (the larger gap between them decides; overlapping boxes have a negative gap), else left or right.
+fn facing(own: Rect, other: Rect) -> (i8, i8) {
+    let across = (other.x0 - own.x1).max(own.x0 - other.x1);
+    let up_down = (other.y0 - own.y1).max(own.y0 - other.y1);
+    if up_down >= across {
+        (0, if other.y0 + other.y1 >= own.y0 + own.y1 { 1 } else { -1 })
+    } else {
+        (if other.x0 + other.x1 >= own.x0 + own.x1 { 1 } else { -1 }, 0)
+    }
+}
+
 /// The ends and the route of a connector between two shapes, each given by the sites it may leave from (one site for a connector
 /// glued to a connection point, several for one glued to the whole shape) and its page box. Shapes in a turned group have their
 /// sites off the sides of the axis-aligned page box, which the side router cannot use: then the two sites that lie closest
@@ -1043,11 +1096,8 @@ impl GroupEditor {
             if !touched(from_id) && !touched(to_id) {
                 continue;
             }
-            let ends = |id: &str, n: Option<usize>| match n {
-                Some(n) => self.site(id, n).map(|(site, rect)| (vec![site], rect)),
-                None => self.sites_of(id),
-            };
-            let (Some((from_sites, a)), Some((to_sites, b))) = (ends(from_id, from_n), ends(to_id, to_n)) else { continue };
+            let (Some(from_end), Some(to_end)) = (self.end_sites(from_id, from_n), self.end_sites(to_id, to_n)) else { continue };
+            let ((from_sites, a), (to_sites, b)) = settle_ends(from_end, to_end);
             let Some((_, _, route, _)) = route_ends(&from_sites, a, &to_sites, b) else { continue };
             let _ = off;
             out.push((node.id.clone(), route));
@@ -1059,12 +1109,30 @@ impl GroupEditor {
     /// Page position, outward direction and page box of connection point `n` (1-based, as in
     /// `Connections.X<n>`) of shape `id`.
     fn site(&self, id: &str, n: usize) -> Option<(Site, Rect)> {
+        let (chain, row) = self.connection_row(id, n)?;
+        self.site_of_row(id, &chain, row)
+    }
+
+    /// One end of a connector glued to shape `id`, at connection point `n` or, with `None`, to the whole shape: the sites it may leave
+    /// from, the shape's page box, and whether the point has no set direction (`free_direction`; `settle_ends` then picks one).
+    fn end_sites(&self, id: &str, n: Option<usize>) -> Option<EndSites> {
+        let Some(n) = n else {
+            let (sites, rect) = self.sites_of(id)?;
+            return Some(EndSites { sites, rect, free: false });
+        };
+        let (chain, row) = self.connection_row(id, n)?;
+        let (site, rect) = self.site_of_row(id, &chain, row)?;
+        Some(EndSites { sites: vec![site], rect, free: free_direction(chain[chain.len() - 1], row) })
+    }
+
+    /// Shape `id` with the groups around it, and the row of its connection point `n` (1-based, as in `Connections.X<n>`).
+    fn connection_row(&self, id: &str, n: usize) -> Option<(Vec<&ResolvedShape>, &crate::shapes::SectionRow)> {
         let chain = self.chain(id)?;
         let node = chain[chain.len() - 1];
         let section = node.sections.iter().find(|s| s.name == "Connection")?;
         let row = section.rows.iter().find(|r| r.index.as_deref().and_then(|i| i.parse::<usize>().ok()) == Some(n - 1))
             .or_else(|| section.rows.get(n - 1))?;
-        self.site_of_row(id, &chain, row)
+        Some((chain, row))
     }
 
     /// The own frame of page-level shape `id` when it can be replaced by another master (`replace::replace_shape`): not a connector, not a member of a group.
@@ -1121,17 +1189,13 @@ impl GroupEditor {
         if from.0 == to.0 {
             return Err(Error("a connector needs two different shapes".to_string()));
         }
-        let ends = |id: &str, n: Option<usize>| -> Result<(Vec<Site>, Rect)> {
-            match n {
-                Some(n) => self
-                    .site(id, n)
-                    .map(|(site, rect)| (vec![site], rect))
-                    .ok_or_else(|| Error(format!("shape {id} has no connection point {n}"))),
-                None => self.sites_of(id).ok_or_else(|| Error(format!("no shape {id}"))),
-            }
+        let ends = |id: &str, n: Option<usize>| -> Result<EndSites> {
+            self.end_sites(id, n).ok_or_else(|| match n {
+                Some(n) => Error(format!("shape {id} has no connection point {n}")),
+                None => Error(format!("no shape {id}")),
+            })
         };
-        let (from_sites, a) = ends(from.0, from.1)?;
-        let (to_sites, b) = ends(to.0, to.1)?;
+        let ((from_sites, a), (to_sites, b)) = settle_ends(ends(from.0, from.1)?, ends(to.0, to.1)?);
         let (begin, end, route, _) = route_ends(&from_sites, a, &to_sites, b).ok_or_else(|| Error("no route between these shapes".to_string()))?;
         Ok(ConnectorPlan { begin: begin.point, end: end.point, route })
     }
@@ -1257,11 +1321,8 @@ impl GroupEditor {
                     .map(|c| (c.to_sheet.as_str(), c.to_cell.strip_prefix("Connections.X").and_then(|n| n.parse::<usize>().ok())))
             };
             let (Some((from_id, from_n)), Some((to_id, to_n))) = (glue("Begin"), glue("End")) else { continue };
-            let ends = |id: &str, n: Option<usize>| match n {
-                Some(n) => self.site(id, n).map(|(site, rect)| (vec![site], rect)),
-                None => self.sites_of(id),
-            };
-            let (Some((from_sites, a)), Some((to_sites, b))) = (ends(from_id, from_n), ends(to_id, to_n)) else { continue };
+            let (Some(from_end), Some(to_end)) = (self.end_sites(from_id, from_n), self.end_sites(to_id, to_n)) else { continue };
+            let ((from_sites, a), (to_sites, b)) = settle_ends(from_end, to_end);
             let Some((begin, end, route, nearest)) = route_ends(&from_sites, a, &to_sites, b) else { continue };
             // The side router had no answer (members of a turned group) and the nearest sites were taken: that is a guess, so it is only
             // made when an end has really left its shape (a member moved). A connector whose ends still sit on connection points of
