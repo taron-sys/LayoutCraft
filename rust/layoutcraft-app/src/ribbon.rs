@@ -54,7 +54,8 @@ impl Ribbon {
     }
 
     /// The web's ribbon as the desktop app groups it: on the Design tab the border commands are one drop-down in the
-    /// Backgrounds group, and View > Show has a switch for the app's own right-hand panel.
+    /// Backgrounds group, View > Show has a switch for the app's own right-hand panel, and commands the app does not have
+    /// are left out (with the groups and drop-downs that held nothing else); a tab left empty says why.
     pub fn for_desktop() -> Self {
         let mut ribbon = Self::load();
         if let Some(design) = ribbon.tabs.iter_mut().find(|tab| tab.name == "Design") {
@@ -77,8 +78,29 @@ impl Ribbon {
         if let Some(show) = show {
             show.items.push(Item::Command { id: "paneInspector".to_string() });
         }
+        for tab in &mut ribbon.tabs {
+            for group in &mut tab.groups {
+                group.items.retain_mut(|item| match item {
+                    Item::Command { id } => is_built(id),
+                    Item::Menu { ids, .. } => {
+                        ids.retain(|id| is_built(id));
+                        !ids.is_empty()
+                    }
+                });
+            }
+            tab.groups.retain(|group| !group.items.is_empty());
+        }
         ribbon
     }
+}
+
+/// Whether the app does something with a web command id: a native command, or a control it draws itself.
+pub fn is_built(id: &str) -> bool {
+    native(id).is_some()
+        || matches!(
+            id,
+            "drawTools" | "gridStep" | "themeGallery" | "variantGallery" | "paletteSel" | "zl" | "designOrientation" | "designSize" | "pageTools" | "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor" | "p:shadow"
+        )
 }
 
 /// The commands that switch something on or off, drawn as check boxes.
@@ -545,6 +567,8 @@ mod tests {
             ids
         };
         let mut expected = commands(Ribbon::load());
+        // what the app does not have is left out
+        expected.retain(|command| is_built(command.split_once(' ').unwrap().1));
         // the desktop's own addition
         expected.insert("View paneInspector".to_string());
         assert_eq!(commands(Ribbon::for_desktop()), expected);
@@ -552,6 +576,33 @@ mod tests {
         assert!(!design.groups.iter().any(|group| group.name == "Borders & Titles"), "it is a menu of Backgrounds now");
         for id in Ribbon::load().tabs.iter().flat_map(|tab| &tab.groups).flat_map(|group| &group.items).filter_map(|item| match item { Item::Command { id } => Some(id), Item::Menu { .. } => None }) {
             assert!(!is_check(id) || native(id).is_some(), "{id} can be switched");
+        }
+    }
+
+    #[test]
+    fn no_command_the_app_lacks_is_shown_and_an_empty_tab_says_why() {
+        let ribbon = Ribbon::for_desktop();
+        let shown: Vec<(&str, &str)> = ribbon
+            .tabs
+            .iter()
+            .flat_map(|tab| {
+                tab.groups.iter().flat_map(move |group| {
+                    assert!(!group.items.is_empty(), "{} {}", tab.name, group.name);
+                    group.items.iter().flat_map(move |item| match item {
+                        Item::Command { id } => vec![(tab.name.as_str(), id.as_str())],
+                        Item::Menu { ids, .. } => ids.iter().map(|id| (tab.name.as_str(), id.as_str())).collect(),
+                    })
+                })
+            })
+            .collect();
+        for gone in ["painter", "insertPicture", "pictureFile", "compareFile", "wheelZoom", "newWindow", "lockShape"] {
+            assert!(!shown.iter().any(|(_, id)| *id == gone), "{gone}");
+        }
+        // a command listed twice on a tab would be a duplicate button
+        let mut once = std::collections::BTreeSet::new();
+        assert!(shown.iter().all(|command| once.insert(command)), "{shown:?}");
+        for tab in &ribbon.tabs {
+            assert!(!tab.groups.is_empty() || tab.note.as_ref().is_some_and(|note| !note.is_empty()), "{}", tab.name);
         }
     }
 

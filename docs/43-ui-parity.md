@@ -105,6 +105,11 @@ nice to have. Effort is an estimate in hours.
 
 ## 3. Ribbon parity
 
+Desktop (2026-11-27): the ribbon leaves out the commands of the web ribbon that the app does not have, instead of showing them
+greyed. Not built there: format painter, Arrange, Edit Points, Fit Curve, lock shape, insert picture, paper colour, print, fixed
+page, page breaks, pan and zoom pane, a second "Compare File", the separate wheel zoom button (it is in the zoom menu), refit,
+tip delay and new window. A row below that says "present" for the desktop only because the button was shown is out of date.
+
 Reading the table:
 
 - **Desktop** and **Browser** status are `present`, `partial` or `missing`. Desktop status comes from `native()` in `ribbon.rs` plus
