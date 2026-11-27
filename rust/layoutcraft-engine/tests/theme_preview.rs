@@ -66,6 +66,9 @@ fn every_theme_has_a_sample_and_the_samples_tell_themes_and_variants_apart() {
     for name in names(&engine) {
         let sample = Engine::theme_sample(&name, 0).unwrap_or_else(|error| panic!("{name}: {error}"));
         assert_eq!((sample.pages.len(), sample.pages[0].shapes.len(), sample.pages[0].connectors.len()), (1, 3, 1), "{name}");
+        // the label is large enough to be read in a small picture: at least a tenth of the drawing's height
+        let label = sample.pages[0].shapes.iter().find(|shape| shape.label == "Aa").expect("the label");
+        assert!(label.font_size.is_some_and(|size| size >= 2.75 * 96.0 / 10.0), "{name}: {:?}", label.font_size);
         first.push(fills(&sample));
     }
     let mut distinct = first.clone();

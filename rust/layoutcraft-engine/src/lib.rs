@@ -1426,6 +1426,8 @@ impl Engine {
         let third = sample.draw(0, 0, 2.15, 0.35, 3.65, 1.0)?;
         sample.add_connector(0, &first, None, &third, None)?;
         sample.edit(0, 8, &format!("{second}\nAa"), 0.0, 0.0, 0.0, 0.0, 0)?;
+        // large letters: the picture is shown small
+        sample.edit(0, 13, &format!("{second}\n{}", serde_json::json!({ "start": 0, "end": 2, "cells": { "Size": "0.5" } })), 0.0, 0.0, 0.0, 0.0, 0)?;
         sample.page_op(30, 0, 0, theme)?;
         sample.page_op(31, 0, 0, &variant.to_string())?;
         sample.document.take().ok_or_else(|| "the sample could not be drawn".to_string())
