@@ -3518,6 +3518,35 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_layer_can_be_renamed() {
+        let (mut driver, _) = Driver::new();
+        driver.app.engine.page_op(7, 0, 0, "Wiring").unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.app.layers_open = true;
+        driver.frames(4);
+        let layer = |driver: &Driver| driver.app.engine.document().unwrap().pages[0].layers[0].clone();
+        let before = layer(&driver);
+        let press = |driver: &mut Driver, label: &str| {
+            // the window lies over the inspector, which lists the layers too: its controls are the leftmost ones
+            let at = driver.texts(label).into_iter().min_by(|a, b| a.left().total_cmp(&b.left())).unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let depth = driver.app.engine.undo_depth();
+        for (typed, renamed) in [("a|b", false), ("Power", true)] {
+            press(&mut driver, "Rename");
+            driver.app.layer_rename.as_mut().expect("the form").1 = typed.to_string();
+            driver.frames(2);
+            press(&mut driver, "Save name");
+            assert_eq!(layer(&driver).name == typed, renamed, "{} {}", layer(&driver).name, driver.app.status);
+        }
+        let after = layer(&driver);
+        assert_eq!((after.visible, after.print, after.locked, after.index), (before.visible, before.print, before.locked, before.index));
+        assert_eq!(driver.app.engine.undo_depth(), depth + 1);
+        assert!(driver.app.layer_rename.is_none() || driver.app.layer_rename.as_ref().is_some_and(|form| form.0 .2 == depth + 1));
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4295,6 +4324,9 @@ struct LayoutCraftApp {
     page_rename: Option<String>,
     /// The name typed for a new layer.
     layer_name: String,
+    /// The layer being renamed: (page, layer number, undo depth when it was chosen) and the name in the field. The depth
+    /// drops the form after any edit, as layer numbers may have moved.
+    layer_rename: Option<((usize, u32, usize), String)>,
     /// Pastes since the last copy (each lands a step further from the original).
     paste_count: u32,
     ribbon: ribbon::Ribbon,
@@ -4480,6 +4512,7 @@ impl LayoutCraftApp {
             style_draft: None,
             page_rename: None,
             layer_name: String::new(),
+            layer_rename: None,
             paste_count: 0,
             ribbon: ribbon::Ribbon::load(),
             ribbon_tab: 1,
@@ -7663,6 +7696,10 @@ impl LayoutCraftApp {
         if layers.is_empty() {
             ui.label(egui::RichText::new("This page has no layers.").small().weak());
         }
+        let (page, depth) = (self.page_index, self.engine.undo_depth());
+        if self.layer_rename.as_ref().is_some_and(|((at, _, then), _)| *at != page || *then != depth) {
+            self.layer_rename = None;
+        }
         for layer in &layers {
             ui.horizontal(|ui| {
                 let (mut visible, mut print, mut locked) = (layer.visible, layer.print, layer.locked);
@@ -7678,10 +7715,38 @@ impl LayoutCraftApp {
                     *action = Some(Action::LayerShape(layer.index as usize, on_layer));
                 }
                 ui.label(&layer.name);
+                if ui.small_button("Rename").on_hover_text(format!("Rename the layer {}", layer.name)).clicked() {
+                    self.layer_rename = Some(((page, layer.index, depth), layer.name.clone()));
+                }
                 if ui.small_button("x").on_hover_text("Delete the layer (shapes stay)").clicked() {
                     *action = Some(Action::LayerOp(9, layer.index as usize, String::new()));
                 }
             });
+            let renaming = self.layer_rename.as_mut().filter(|((_, index, _), _)| *index == layer.index);
+            if let Some((_, name)) = renaming {
+                let (mut save, mut cancel) = (false, false);
+                ui.horizontal(|ui| {
+                    let label = ui.label("New name");
+                    let field = ui.add(egui::TextEdit::singleline(name).desired_width(110.0)).labelled_by(label.id);
+                    save = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                    save |= ui.small_button("Save name").clicked();
+                    cancel = ui.small_button("Cancel").clicked();
+                });
+                if save {
+                    let wanted = name.trim().to_string();
+                    // "|" separates the parts of the engine's request
+                    if wanted.is_empty() || wanted.contains('|') {
+                        *action = Some(Action::Say("A layer name needs at least one character, and cannot contain \"|\".".to_string()));
+                    } else if wanted == layer.name {
+                        cancel = true;
+                    } else {
+                        *action = Some(Action::LayerOp(8, layer.index as usize, format!("{wanted}|||")));
+                    }
+                }
+                if cancel {
+                    self.layer_rename = None;
+                }
+            }
         }
         ui.horizontal(|ui| {
             ui.add(egui::TextEdit::singleline(&mut self.layer_name).desired_width(90.0).hint_text("Layer name"));

@@ -185,7 +185,7 @@ these are row counts, not a count of every Visio button.
 | Arrange: lock | unverified | lockShape | missing | present | | P2 |
 | Arrange: shape operations (Union, Combine, Fragment, Intersect, Subtract, Join, Trim) | S18 for Trim (Developer tab, Shape Design, Operations); the others unverified | opUnion opCombine opFragment opIntersect opSubtract opJoin opTrim | present | present | Visio puts them on Developer (S18); LayoutCraft shows them in Home > Arrange. Engine: `shape_operation`; follow Visio's place | P1 |
 | Editing: Select (Area Select, Lasso Select, Select All, Select by Type) | S19 | - | partial | partial | Rectangle drag and Ctrl+A exist; lasso and by-type missing | P1 |
-| Editing: Layers > Assign to Layer, Layer Properties | S22 | layersBtn | partial | present | Desktop: Layers window and inspector (visible, prints, locked, membership); no Active / Snap / Glue / Colour | P2 |
+| Editing: Layers > Assign to Layer, Layer Properties | S22 | layersBtn | partial | present | Desktop: Layers window and inspector (visible, prints, locked, membership, rename); no Active / Snap / Glue / Colour | P2 |
 | Editing: Change Shape | unverified | changeShapeBtn | present | present | Desktop: the button, then a click in the Shapes panel, or the panel's context menu | P2 |
 | Editing: Find | unverified | findBtn | present | present | Desktop: finds and replaces on the current page | P2 |
 | Editing: Styles | unverified | stylesBtn | partial | present | Desktop: applies a style of the drawing to the selection and deletes one made for the drawing; no defining or changing of styles | P2 |
