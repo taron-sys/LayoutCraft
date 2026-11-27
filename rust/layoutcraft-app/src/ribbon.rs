@@ -52,6 +52,38 @@ impl Ribbon {
         let dump: Dump = serde_json::from_str(WEB_RIBBON).expect("ribbon-web.json is valid");
         Self { tabs: dump.tabs, icons: dump.icons }
     }
+
+    /// The web's ribbon as the desktop app groups it: on the Design tab the border commands are one drop-down in the
+    /// Backgrounds group, and View > Show has a switch for the app's own right-hand panel.
+    pub fn for_desktop() -> Self {
+        let mut ribbon = Self::load();
+        if let Some(design) = ribbon.tabs.iter_mut().find(|tab| tab.name == "Design") {
+            let borders = design.groups.iter().position(|group| group.name == "Borders & Titles");
+            if let Some(at) = borders {
+                if design.groups.iter().any(|group| group.name == "Backgrounds") {
+                    let borders = design.groups.remove(at);
+                    let ids = borders.items.iter().filter_map(|item| match item {
+                        Item::Command { id } => Some(id.clone()),
+                        Item::Menu { .. } => None,
+                    });
+                    let menu = Item::Menu { menu: borders.name.clone(), ids: ids.collect() };
+                    if let Some(backgrounds) = design.groups.iter_mut().find(|group| group.name == "Backgrounds") {
+                        backgrounds.items.insert(0, menu);
+                    }
+                }
+            }
+        }
+        let show = ribbon.tabs.iter_mut().find(|tab| tab.name == "View").and_then(|tab| tab.groups.iter_mut().find(|group| group.name == "Show"));
+        if let Some(show) = show {
+            show.items.push(Item::Command { id: "paneInspector".to_string() });
+        }
+        ribbon
+    }
+}
+
+/// The commands that switch something on or off, drawn as check boxes.
+pub fn is_check(id: &str) -> bool {
+    matches!(id, "paneInspector" | "showRulers" | "showGrid" | "showGuides" | "snapGrid" | "snapShapes" | "snapGuides" | "autoConnectToggle")
 }
 
 /// The SVG text of an icon file (without the `.svg`), drawn in `color` instead of the files' black.
@@ -68,24 +100,49 @@ pub fn is_compact(width: f32) -> bool {
     width < COMPACT_BELOW
 }
 
-/// The number of columns of a group of `items` cells laid out in two rows.
-pub fn grid_columns(items: usize) -> usize {
-    items.div_ceil(2)
+/// From this window width on, Home shows the Font and Paragraph controls in the ribbon instead of behind a drop-down.
+pub const UNFOLD_FROM: f32 = 1500.0;
+/// Below this window width the unfolded Home tab shows its other small commands as icons only, to make room.
+pub const UNFOLDED_COMPACT_BELOW: f32 = 1900.0;
+
+/// The rows of command ids of a menu that is laid out in the ribbon of a window `width` wide; `None` = it stays a drop-down.
+pub fn unfolded(menu: &str, width: f32) -> Option<&'static [&'static [&'static str]]> {
+    if width < UNFOLD_FROM {
+        return None;
+    }
+    match menu {
+        "Font" => Some(&[&["p:fontFamily", "p:fontSize"], &["p:bold", "p:strike"]]),
+        "Paragraph" => Some(&[&["p:alignL"], &["p:indLeft", "p:lineSp"]]),
+        _ => None,
+    }
 }
 
-/// The cell index of (column, row) in a group laid out column after column over two rows.
-pub fn grid_index(column: usize, row: usize) -> usize {
-    column * 2 + row
+/// The height of a group's commands: a large button, or two small ones above each other.
+pub const ITEMS_HEIGHT: f32 = 62.0;
+
+/// The commands shown large (icon over name, the full height of the group): the main command of a group.
+pub fn is_large(id: &str) -> bool {
+    matches!(id, "paste" | "pageSetup" | "pageAdd" | "changeShapeBtn" | "insertHyperlink" | "insertTextBox" | "dataBtn" | "checkDiagram" | "newComment" | "reportBtn" | "fullScreen" | "newBtn" | "exportBtn" | "docPropsBtn")
 }
 
-/// The (row, column) of item `index`: the first item top left, the second under it, the third top of the next column ...
-pub fn grid_cell(index: usize) -> (usize, usize) {
-    (index % 2, index / 2)
+/// The columns of a group, as lists of cell indices: a large cell has a column to itself, small cells go two to a column,
+/// the first on top. The order of the cells is kept.
+pub fn columns(large: &[bool]) -> Vec<Vec<usize>> {
+    let mut columns: Vec<Vec<usize>> = Vec::new();
+    for (index, is_large) in large.iter().enumerate() {
+        match columns.last_mut() {
+            Some(column) if !is_large && column.len() == 1 && !large[column[0]] => column.push(index),
+            _ => columns.push(vec![index]),
+        }
+    }
+    columns
 }
 
 /// What the native app does for a web command id (the ids of `ribbon.js`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Native {
+    /// show or hide the right-hand panel
+    Inspector,
     Undo,
     Redo,
     SaveAs,
@@ -268,6 +325,7 @@ pub fn native(id: &str) -> Option<Native> {
         "borderStyle" | "borderTitle" | "borderApply" | "borderRemove" => Native::Borders,
         "showComments" => Native::Comments,
         "newComment" => Native::Comments,
+        "paneInspector" => Native::Inspector,
         _ => return None,
     })
 }
@@ -289,6 +347,7 @@ pub fn label(id: &str) -> String {
         "reportBtn" => "Reports",
         "exportBtn" => "Export...",
         "paneShapes" => "Shapes",
+        "paneInspector" => "Inspector",
         "stylesBtn" => "Styles",
         "copyImgBtn" => "Copy as Picture",
         "paneSheet" => "Shape Formulas",
@@ -378,13 +437,13 @@ pub fn label(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn a_group_fills_two_rows_column_after_column() {
-        assert_eq!((0..5).map(grid_cell).collect::<Vec<_>>(), [(0, 0), (1, 0), (0, 1), (1, 1), (0, 2)]);
-        assert_eq!([0, 1, 2, 3, 4, 7].map(grid_columns), [0, 1, 1, 2, 2, 4]);
-        for index in 0..9 {
-            let (row, column) = grid_cell(index);
-            assert_eq!(grid_index(column, row), index);
-        }
+    fn small_commands_stack_in_pairs_and_a_large_one_has_its_column() {
+        assert_eq!(columns(&[false; 5]), [vec![0, 1], vec![2, 3], vec![4]]);
+        assert_eq!(columns(&[true, false, false, false]), [vec![0], vec![1, 2], vec![3]]);
+        // a half-filled column stays half-filled when a large command follows, and nothing joins the large one
+        assert_eq!(columns(&[false, true, false]), [vec![0], vec![1], vec![2]]);
+        assert_eq!(columns(&[true, true]), [vec![0], vec![1]]);
+        assert!(columns(&[]).is_empty());
     }
 
     #[test]
@@ -467,6 +526,33 @@ mod tests {
             }
         }
         assert!(native("painter").is_none() && native("fitCurveBtn").is_none());
+    }
+
+    #[test]
+    fn the_desktop_grouping_keeps_every_command_of_the_web() {
+        let commands = |ribbon: Ribbon| {
+            let mut ids = std::collections::BTreeSet::new();
+            for tab in ribbon.tabs {
+                for item in tab.groups.into_iter().flat_map(|group| group.items) {
+                    match item {
+                        Item::Command { id } => {
+                            ids.insert(format!("{} {id}", tab.name));
+                        }
+                        Item::Menu { ids: inside, .. } => ids.extend(inside.into_iter().map(|id| format!("{} {id}", tab.name))),
+                    }
+                }
+            }
+            ids
+        };
+        let mut expected = commands(Ribbon::load());
+        // the desktop's own addition
+        expected.insert("View paneInspector".to_string());
+        assert_eq!(commands(Ribbon::for_desktop()), expected);
+        let design = Ribbon::for_desktop().tabs.into_iter().find(|tab| tab.name == "Design").unwrap();
+        assert!(!design.groups.iter().any(|group| group.name == "Borders & Titles"), "it is a menu of Backgrounds now");
+        for id in Ribbon::load().tabs.iter().flat_map(|tab| &tab.groups).flat_map(|group| &group.items).filter_map(|item| match item { Item::Command { id } => Some(id), Item::Menu { .. } => None }) {
+            assert!(!is_check(id) || native(id).is_some(), "{id} can be switched");
+        }
     }
 
     #[test]

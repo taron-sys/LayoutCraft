@@ -15,6 +15,7 @@ use layoutcraft_vsdx::{
 mod appearance;
 mod connectors;
 mod connpoints;
+mod gallery;
 mod styles;
 mod help;
 mod mcpinfo;
@@ -980,6 +981,87 @@ fn theme_swatches(ui: &mut egui::Ui, colours: &serde_json::Value) {
         let outline = egui::Stroke::new(1.0, ui.visuals().weak_text_color());
         ui.painter().rect(rect, 0.0, egui::Color32::from_rgb(r, g, b), outline, egui::StrokeKind::Inside);
     }
+}
+
+/// Give a control that shows a letter or a drawing the name assistive technology reads.
+fn name_control(ui: &egui::Ui, response: &egui::Response, name: &str) {
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(name));
+}
+
+/// A small button that draws four lines of text as the alignment `mode` (left, center, right, justify) sets them.
+fn align_button(ui: &mut egui::Ui, mode: &str, name: &str, enabled: bool, selected: bool) -> egui::Response {
+    ui.add_enabled_ui(enabled, |ui| {
+        let size = egui::vec2(26.0, ui.spacing().interact_size.y.min(26.0));
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, name));
+        let visuals = ui.style().interact_selectable(&response, selected);
+        ui.painter().rect(rect, visuals.corner_radius, visuals.weak_bg_fill, visuals.bg_stroke, egui::StrokeKind::Inside);
+        let (left, right) = (rect.center().x - 8.0, rect.center().x + 8.0);
+        for (row, short) in [false, true, false, true].into_iter().enumerate() {
+            let width = if short && mode != "justify" { 10.0 } else { 16.0 };
+            let from = match mode {
+                "center" => rect.center().x - width / 2.0,
+                "right" => right - width,
+                _ => left,
+            };
+            let y = rect.center().y - 6.0 + 4.0 * row as f32;
+            ui.painter().line_segment([egui::pos2(from, y), egui::pos2(from + width, y)], egui::Stroke::new(1.4, visuals.text_color()));
+        }
+        response
+    })
+    .inner
+}
+
+/// What the top row says: the drawing's file name (or that it is new), whether it has unsaved changes, and the product.
+fn window_title(path: Option<&Path>, open: bool, changed: bool) -> String {
+    if !open {
+        return "LayoutCraft".to_string();
+    }
+    let name = path.and_then(|path| path.file_name()).map_or_else(|| "New drawing".to_string(), |name| name.to_string_lossy().into_owned());
+    format!("{name}{} - LayoutCraft", if changed { " (unsaved changes)" } else { "" })
+}
+
+/// A ribbon tab: its name, with a line under the chosen one (not a filled box).
+fn ribbon_tab(ui: &mut egui::Ui, name: &str, chosen: bool) -> egui::Response {
+    let text = egui::RichText::new(name);
+    let text = if chosen { text.strong() } else { text };
+    let response = ui.add(egui::Button::new(text).frame(false).min_size(egui::vec2(36.0, 24.0)));
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_selected(chosen));
+    let line = if chosen {
+        egui::Stroke::new(3.0, ui.visuals().selection.stroke.color)
+    } else if response.hovered() || response.has_focus() {
+        egui::Stroke::new(1.0, ui.visuals().text_color())
+    } else {
+        return response;
+    };
+    let y = response.rect.bottom() - 1.5;
+    ui.painter().line_segment([egui::pos2(response.rect.left() + 4.0, y), egui::pos2(response.rect.right() - 4.0, y)], line);
+    response
+}
+
+/// A ribbon command with its icon over its name, as high as a group.
+fn large_button(ui: &mut egui::Ui, icon: &egui::TextureHandle, label: &str, enabled: bool, selected: bool) -> egui::Response {
+    ui.add_enabled_ui(enabled, |ui| {
+        // names of more than one word may take two lines
+        let mut job = egui::text::LayoutJob::simple(label.to_string(), egui::TextStyle::Button.resolve(ui.style()), egui::Color32::PLACEHOLDER, 74.0);
+        job.halign = egui::Align::Center;
+        let galley = ui.painter().layout_job(job);
+        let width = (galley.size().x + 12.0).max(46.0);
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(width, ribbon::ITEMS_HEIGHT), egui::Sense::click());
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, label));
+        let visuals = ui.style().interact_selectable(&response, selected);
+        if selected || response.hovered() || response.has_focus() {
+            ui.painter().rect(rect, visuals.corner_radius, visuals.weak_bg_fill, visuals.bg_stroke, egui::StrokeKind::Inside);
+        }
+        let image = egui::Rect::from_center_size(egui::pos2(rect.center().x, rect.top() + 17.0), egui::vec2(28.0, 28.0));
+        let tint = if enabled { egui::Color32::WHITE } else { egui::Color32::from_white_alpha(110) };
+        ui.painter().image(icon.id(), image, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), tint);
+        // centred lines are laid out around x = 0
+        let at = egui::pos2(rect.center().x, rect.top() + 33.0);
+        ui.painter().galley(at, galley, visuals.text_color());
+        response
+    })
+    .inner
 }
 
 /// The `Engine::page_op` number that applies a theme (or, with `variant`, a colour variant) to every page or to one page.
@@ -2325,6 +2407,8 @@ mod app_frame_tests {
         frame: eframe::Frame,
         time: f64,
         modifiers: Modifiers,
+        /// The width of the window.
+        width: f32,
         /// What the last frame drew.
         drawn: Vec<egui::epaint::ClippedShape>,
     }
@@ -2343,7 +2427,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
             }
             app.baseline = app.engine.document().cloned();
             app.build_page(&ctx, true);
-            let mut driver = Driver { ctx, app, frame: eframe::Frame::_new_kittest(), time: 0.0, modifiers: Modifiers::NONE, drawn: Vec::new() };
+            let mut driver = Driver { ctx, app, frame: eframe::Frame::_new_kittest(), time: 0.0, modifiers: Modifiers::NONE, width: 1400.0, drawn: Vec::new() };
             driver.frames(3);
             (driver, ids)
         }
@@ -2352,7 +2436,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
             self.time += 0.1;
             events.insert(0, Event::ModifiersChanged(self.modifiers));
             let mut raw = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0))),
+                screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(self.width, 900.0))),
                 time: Some(self.time),
                 events,
                 ..Default::default()
@@ -2370,7 +2454,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
             self.drawn
                 .iter()
                 .filter_map(|clipped| match &clipped.shape {
-                    egui::Shape::Text(shown) if shown.galley.text() == wanted => Some(egui::Rect::from_min_size(shown.pos, shown.galley.size())),
+                    egui::Shape::Text(shown) if shown.galley.text() == wanted => Some(shown.galley.rect.translate(shown.pos.to_vec2())),
                     _ => None,
                 })
                 .collect()
@@ -2596,6 +2680,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     #[test]
     fn a_size_field_applies_on_enter_and_escape_only_leaves_it() {
         let (mut driver, ids) = Driver::new();
+        driver.app.inspector_open = true;
         driver.app.selected = Some(ids[0].clone());
         driver.frames(3);
         // what a click on the status bar's size does: the Width field takes the keyboard
@@ -3260,6 +3345,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     #[test]
     fn a_shape_can_be_named_in_the_inspector() {
         let (mut driver, ids) = Driver::new();
+        driver.app.inspector_open = true;
         let name = |driver: &Driver, id: &str| serde_json::from_str::<serde_json::Value>(&driver.app.engine.shape_names_json(0).unwrap()).unwrap()[id].as_str().unwrap_or("").to_string();
         let enter = |driver: &mut Driver, id: &str, typed: &str, end: Key| {
             driver.app.selected = Some(id.to_string());
@@ -3407,6 +3493,249 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_design_tab_shows_themes_and_variants_as_pictures_that_apply() {
+        let (mut driver, _) = Driver::new();
+        let tab = driver.texts("Design")[0];
+        driver.click(tab.center(), Modifiers::NONE);
+        driver.frames(40);
+        // where the picture of a theme's variant was drawn, if it is on screen
+        let tile = |driver: &Driver, theme: &str, variant: u32| {
+            let id = driver.app.theme_pictures.get(&(theme.to_string(), variant))?.as_ref()?.id();
+            driver.drawn.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id == id => Some(clipped.shape.visual_bounding_rect()),
+                egui::Shape::Rect(shape) if shape.brush.as_ref().is_some_and(|brush| brush.fill_texture_id == id) => Some(shape.rect),
+                _ => None,
+            })
+        };
+        let info: serde_json::Value = serde_json::from_str(&driver.app.engine.themes_json().unwrap()).unwrap();
+        let names: Vec<String> = info["themes"].as_array().unwrap().iter().map(|theme| theme["name"].as_str().unwrap().to_string()).collect();
+        let current = |driver: &Driver| super::current_theme(&serde_json::from_str(&driver.app.engine.themes_json().unwrap()).unwrap(), 0);
+        let second = tile(&driver, &names[1], 0).expect("a picture of the second theme");
+        let last = names.last().unwrap();
+        // the public build has few themes: they all fit, a build with more of them shows the first ones
+        let all_fit = super::gallery::themes_in_view(1400.0) >= names.len();
+        assert_eq!(tile(&driver, last, 0).is_some(), all_fit, "{names:?}");
+        driver.click(second.center(), Modifiers::NONE);
+        driver.frames(40);
+        assert_eq!(current(&driver).0.as_deref(), Some(names[1].as_str()), "{}", driver.app.status);
+        let third = tile(&driver, &names[1], 2).expect("a picture of its third variant");
+        driver.click(third.center(), Modifiers::NONE);
+        driver.frames(5);
+        assert_eq!(current(&driver), (Some(names[1].clone()), 2), "{}", driver.app.status);
+        for _ in 0..4 {
+            let next = driver.texts("\u{203a}")[0];
+            driver.click(next.center(), Modifiers::NONE);
+            driver.frames(20);
+        }
+        assert!(tile(&driver, last, 0).is_some(), "the arrow reaches the last theme");
+    }
+
+    #[test]
+    fn resting_on_a_theme_picture_shows_it_on_the_page_until_the_pointer_leaves() {
+        let (mut driver, _) = Driver::new();
+        let tab = driver.texts("Design")[0];
+        driver.click(tab.center(), Modifiers::NONE);
+        driver.frames(40);
+        let drawn = |driver: &Driver, id: egui::TextureId| {
+            driver.drawn.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id == id => Some(clipped.shape.visual_bounding_rect()),
+                egui::Shape::Rect(shape) if shape.brush.as_ref().is_some_and(|brush| brush.fill_texture_id == id) => Some(shape.rect),
+                _ => None,
+            })
+        };
+        let info: serde_json::Value = serde_json::from_str(&driver.app.engine.themes_json().unwrap()).unwrap();
+        let name = info["themes"][1]["name"].as_str().unwrap().to_string();
+        let picture = driver.app.theme_pictures[&(name.clone(), 0)].as_ref().unwrap().id();
+        let at = drawn(&driver, picture).expect("the picture").center();
+        let before = (driver.app.engine.export().unwrap().to_vec(), driver.app.engine.undo_depth());
+        let page = driver.app.texture.as_ref().unwrap().id();
+        assert!(drawn(&driver, page).is_some() && driver.app.theme_preview.is_none());
+        driver.run(vec![Event::PointerMoved(at)]);
+        driver.frames(6);
+        let preview = driver.app.theme_preview.as_ref().expect("a preview").texture.id();
+        assert!(drawn(&driver, preview).is_some() && drawn(&driver, page).is_none(), "the preview takes the page's place");
+        assert_eq!((driver.app.engine.export().unwrap().to_vec(), driver.app.engine.undo_depth()), before, "nothing changed");
+        driver.run(vec![Event::PointerMoved(pos2(700.0, 600.0))]);
+        driver.frames(3);
+        assert!(driver.app.theme_preview.is_none() && drawn(&driver, page).is_some());
+        // the keyboard: focus on a picture previews it too
+        let mut reached = false;
+        for _ in 0..60 {
+            driver.key(Key::Tab, Modifiers::NONE);
+            driver.frames(4);
+            reached |= driver.app.theme_preview.is_some();
+            if reached {
+                break;
+            }
+        }
+        assert!(reached, "Tab reaches a theme picture");
+        assert_eq!(driver.app.engine.undo_depth(), before.1);
+        // the page changes under a picture that still has the focus: it is drawn again for the new page
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(6);
+        assert!(driver.app.theme_preview.is_some());
+        // choosing it is one step, and the preview gives way to the real page
+        driver.run(vec![Event::PointerMoved(at)]);
+        driver.frames(6);
+        driver.click(at, Modifiers::NONE);
+        driver.frames(6);
+        assert_eq!(driver.app.engine.undo_depth(), before.1 + 1, "{}", driver.app.status);
+        assert!(driver.app.theme_preview.is_none());
+    }
+
+    #[test]
+    fn the_main_command_of_a_group_is_large_and_the_group_names_stand_on_one_line() {
+        let (mut driver, _) = Driver::new();
+        let names = ["Clipboard", "Tools", "Editing"];
+        let tops: Vec<f32> = names.iter().map(|name| driver.texts(name).last().unwrap_or_else(|| panic!("{name}")).top()).collect();
+        assert!(tops.iter().all(|top| (top - tops[0]).abs() < 1.0), "{tops:?}");
+        // Paste is large: its name stands lower than the name of the small command beside it, and clicking its icon works
+        let paste = driver.texts("Paste")[0];
+        let copy = driver.texts("Copy").first().copied();
+        assert!(copy.is_none_or(|copy| paste.top() > copy.top() + 10.0), "{paste:?} {copy:?}");
+        driver.app.status.clear();
+        driver.click(pos2(paste.center().x, paste.top() - 14.0), Modifiers::NONE);
+        driver.frames(3);
+        assert!(!driver.app.status.is_empty(), "a click on the picture reaches the command");
+    }
+
+    #[test]
+    fn a_wide_window_shows_the_font_and_paragraph_controls_in_the_ribbon() {
+        let (mut driver, ids) = Driver::new();
+        assert!(!driver.texts("Font \u{25be}").is_empty() && driver.texts("AA").is_empty(), "a narrow window folds them");
+        driver.app.selected = Some(ids[0].clone());
+        driver.width = 1920.0;
+        driver.frames(4);
+        assert!(driver.texts("Font \u{25be}").is_empty() && driver.texts("Paragraph \u{25be}").is_empty());
+        let size = driver.app.engine.undo_depth();
+        let capitals = driver.texts("AA")[0];
+        driver.click(capitals.center(), Modifiers::NONE);
+        driver.frames(3);
+        assert_eq!(driver.app.engine.undo_depth(), size + 1, "{}", driver.app.status);
+        // the alignment buttons are drawn, not written: four of one size above the Indent menu, centring the second
+        let indent = driver.texts("Indent \u{25be}")[0];
+        let mut buttons: Vec<egui::Rect> = driver
+            .drawn
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(shape) if (shape.rect.width() - 26.0).abs() < 0.5 && shape.rect.bottom() < indent.top() && shape.rect.top() > 40.0 && shape.rect.left() > indent.left() - 20.0 && shape.rect.left() < indent.left() + 150.0 => Some(shape.rect),
+                _ => None,
+            })
+            .collect();
+        buttons.sort_by(|a, b| a.left().total_cmp(&b.left()));
+        assert_eq!(buttons.len(), 4, "{buttons:?}");
+        driver.click(buttons[1].center(), Modifiers::NONE);
+        driver.frames(3);
+        let shape = driver.app.doc_shape(&ids[0]).expect("the shape");
+        assert_eq!((driver.app.engine.undo_depth(), shape.align.as_deref()), (size + 2, Some("center")), "{}", driver.app.status);
+    }
+
+    #[test]
+    fn the_chosen_tab_is_underlined_and_the_top_row_names_the_drawing() {
+        let (mut driver, ids) = Driver::new();
+        let underlined = |driver: &Driver, tab: &str| {
+            let name = driver.texts(tab)[0];
+            driver.drawn.iter().any(|clipped| match &clipped.shape {
+                egui::Shape::LineSegment { points, stroke } => {
+                    stroke.width > 2.0 && points[0].y >= name.bottom() - 1.0 && points[0].y < name.bottom() + 12.0 && points[0].x <= name.center().x && points[1].x >= name.center().x
+                }
+                _ => false,
+            })
+        };
+        assert!(underlined(&driver, "Home") && !underlined(&driver, "Design"));
+        let tab = driver.texts("Design")[0];
+        driver.click(tab.center(), Modifiers::NONE);
+        driver.frames(3);
+        assert!(underlined(&driver, "Design") && !underlined(&driver, "Home"));
+        let title = |driver: &Driver| {
+            let all: Vec<(String, egui::Rect)> = driver.drawn.iter().filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(shown) if shown.galley.text().ends_with("LayoutCraft") => Some((shown.galley.text().to_string(), shown.galley.rect.translate(shown.pos.to_vec2()))),
+                _ => None,
+            }).collect();
+            assert_eq!(all.len(), 1, "{all:?}");
+            all[0].clone()
+        };
+        let (saved, at) = title(&driver);
+        assert!(at.bottom() <= tab.top() && (at.center().x - driver.width / 2.0).abs() < 2.0, "{at:?}");
+        assert!(!saved.contains("unsaved"), "{saved}");
+        driver.app.selected = Some(ids[0].clone());
+        driver.key(Key::Delete, Modifiers::NONE);
+        driver.frames(3);
+        assert!(title(&driver).0.contains("unsaved"), "{}", title(&driver).0);
+    }
+
+    #[test]
+    fn view_switches_are_check_boxes_and_the_page_commands_are_in_a_menu() {
+        let (mut driver, _) = Driver::new();
+        let open = |driver: &mut Driver, name: &str| {
+            let at = driver.texts(name)[0];
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        open(&mut driver, "View");
+        let grid = driver.app.show_grid;
+        let label = driver.texts("Show Grid")[0];
+        // a box stands left of the name
+        let boxed = driver.drawn.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Rect(shape) => shape.rect.right() <= label.left() && shape.rect.right() > label.left() - 20.0 && (shape.rect.width() - shape.rect.height()).abs() < 1.0 && shape.rect.width() > 8.0 && shape.rect.y_range().contains(label.center().y),
+            _ => false,
+        });
+        assert!(boxed, "{label:?}");
+        driver.click(label.center(), Modifiers::NONE);
+        driver.frames(2);
+        assert_ne!(driver.app.show_grid, grid);
+        open(&mut driver, "Insert");
+        assert!(driver.texts("Duplicate Page").is_empty());
+        open(&mut driver, "Pages \u{25be}");
+        let pages = driver.app.engine.document().unwrap().pages.len();
+        open(&mut driver, "Duplicate Page");
+        assert_eq!(driver.app.engine.document().unwrap().pages.len(), pages + 1, "{}", driver.app.status);
+    }
+
+    #[test]
+    fn the_inspector_is_closed_until_something_asks_for_it() {
+        let (mut driver, ids) = Driver::new();
+        let shown = |driver: &Driver| !driver.texts("Document").is_empty();
+        assert!(!shown(&driver));
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        // the status bar knows the size without it, and a click there goes to the fields
+        let size = driver.drawn.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text().starts_with("Width ") => Some(text.galley.rect.translate(text.pos.to_vec2())),
+            _ => None,
+        });
+        assert!(!shown(&driver));
+        driver.click(size.expect("the size in the status bar").center(), Modifiers::NONE);
+        driver.frames(3);
+        assert!(shown(&driver), "{}", driver.app.status);
+        let close = |driver: &mut Driver| {
+            let at = driver.texts("Close")[0];
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        driver.app.inspector_open = true;
+        driver.frames(2);
+        close(&mut driver);
+        assert!(!shown(&driver));
+        for (key, selected) in [(Key::F3, 0), (Key::F8, 1)] {
+            driver.app.extra_selected = ids[1..1 + selected].to_vec();
+            driver.frames(2);
+            driver.key(key, Modifiers::NONE);
+            driver.frames(3);
+            assert!(shown(&driver), "{key:?}: {}", driver.app.status);
+            close(&mut driver);
+        }
+        // View > Show > Inspector
+        let tab = driver.texts("View")[0];
+        driver.click(tab.center(), Modifiers::NONE);
+        driver.frames(3);
+        let switch = driver.texts("Inspector")[0];
+        driver.click(switch.center(), Modifiers::NONE);
+        driver.frames(3);
+        assert!(shown(&driver), "{}", driver.app.status);
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -3439,8 +3768,10 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         driver.app.selected = Some(ids[0].clone());
         driver.frames(3);
         let fill = |driver: &Driver| driver.app.style_draft.as_ref().map(|draft| draft.has_fill).expect("the style settings");
-        let before = fill(&driver);
+        assert!(!driver.app.inspector_open);
         driver.key(Key::F3, Modifiers::NONE);
+        driver.frames(2);
+        let before = fill(&driver);
         // the Fill box has the keyboard: Space ticks or clears it
         driver.key(Key::Space, Modifiers::NONE);
         assert_ne!(fill(&driver), before, "{}", driver.app.status);
@@ -3695,6 +4026,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     #[test]
     fn panels_forget_the_drawing_that_was_open_before() {
         let (mut driver, ids) = Driver::new();
+        driver.app.inspector_open = true;
         driver.app.engine.page_op(40, 0, 0, &format!("{}|Router", ids[0])).unwrap();
         let mut row = super::new_data_row("Owner", &[]).unwrap();
         row.value = "Network team".to_string();
@@ -3875,6 +4207,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     fn one_click_on_a_page_tab_writes_the_field_left_and_changes_page() {
         for field in ["name", "width"] {
             let (mut driver, ids) = Driver::new();
+            driver.app.inspector_open = true;
             driver.app.engine.page_op(5, 0, 0, "").unwrap();
             driver.app.build_page(&driver.ctx.clone(), false);
             driver.app.selected = Some(ids[0].clone());
@@ -4695,6 +5028,10 @@ struct LayoutCraftApp {
     ribbon_collapsed: bool,
     ribbon_peek: bool,
     ribbon_compact: bool,
+    /// The command being drawn is the large one of its group.
+    ribbon_large: bool,
+    /// The Font and Paragraph controls are being drawn in the ribbon itself, where they are short.
+    ribbon_unfolded: bool,
     /// Installed font families for the picker (listed on first use) and the picker's search text.
     font_list: Option<Vec<String>>,
     font_filter: String,
@@ -4744,6 +5081,8 @@ struct LayoutCraftApp {
     style_pick: Option<styles::StylePick>,
     /// The Layers window is open.
     layers_open: bool,
+    /// The right-hand panel (document, selection, style, arrange, layers): closed until asked for.
+    inspector_open: bool,
     /// The full-screen view is on.
     full_screen: bool,
     /// The Shape Data window, while it is open.
@@ -4753,6 +5092,14 @@ struct LayoutCraftApp {
     /// The Themes menus: apply to every page instead of the shown one; and the gallery, until the page is rebuilt.
     theme_all_pages: bool,
     theme_cache: Option<serde_json::Value>,
+    /// The Design tab's pictures by theme name and variant (`None` = it could not be drawn), and the first theme in the row.
+    theme_pictures: BTreeMap<(String, u32), Option<egui::TextureHandle>>,
+    theme_first: usize,
+    /// The theme operation and value whose picture the pointer (or keyboard focus) is on in this frame, since when it has
+    /// been, and the page drawn as that choice would leave it.
+    theme_hover: Option<(i32, String)>,
+    theme_resting: Option<((i32, String), f64)>,
+    theme_preview: Option<gallery::Preview>,
     /// "Change Shape" is waiting for a click on a shape of the Shapes panel.
     change_shape: bool,
     /// The Find window, while it is open.
@@ -4880,11 +5227,13 @@ impl LayoutCraftApp {
             layer_rename: None,
             layer_colour: None,
             paste_count: 0,
-            ribbon: ribbon::Ribbon::load(),
+            ribbon: ribbon::Ribbon::for_desktop(),
             ribbon_tab: 1,
             ribbon_collapsed: false,
             ribbon_peek: false,
             ribbon_compact: false,
+            ribbon_large: false,
+            ribbon_unfolded: false,
             font_list: None,
             font_filter: String::new(),
             font_warnings: Vec::new(),
@@ -4920,11 +5269,17 @@ impl LayoutCraftApp {
             align_focus: false,
             style_pick: None,
             layers_open: false,
+            inspector_open: false,
             full_screen: false,
             data_pane: None,
             link_draft: None,
             theme_all_pages: false,
             theme_cache: None,
+            theme_pictures: BTreeMap::new(),
+            theme_first: 0,
+            theme_hover: None,
+            theme_resting: None,
+            theme_preview: None,
             change_shape: false,
             find: None,
             struck_cache: None,
@@ -5115,6 +5470,35 @@ impl LayoutCraftApp {
         self.build_page(ctx, true);
     }
 
+    /// The scene of the shown page of `document` (the open drawing, or a preview of it), spanning at least the whole page.
+    fn page_scene(&self, document: &Document) -> Result<Scene, String> {
+        let package = self.engine.package.as_ref().ok_or("no drawing is open")?;
+        let mut media: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        for (id, record) in &document.media {
+            // media_bytes converts what the renderer cannot draw itself (BMP to PNG, EMF / WMF to SVG): the raw part bytes of a stencil picture are an EMF
+            if let Some(bytes) = layoutcraft_vsdx::media_bytes(package, record) {
+                media.insert(id.clone(), bytes);
+            }
+        }
+        let mut scene = scene_from_document_with_media(document, self.page_index, &media).map_err(|error| error.to_string())?;
+        // An empty template page has no content bounds; show the actual page
+        // rectangle instead of a 1x1 white square.
+        // Likewise a page with shapes shows the WHOLE page (a shape that sticks out of it widens the view), not the bounding box of its
+        // shapes: creating the first shape must not shrink the canvas to that shape.
+        {
+            // the sheet's PageWidth / PageHeight are in drawing units; the scene's shapes are already scaled to paper (page.scale, e.g. 1:50)
+            let paper = document.pages.get(self.page_index).map_or(1.0, |page| page.scale).max(1e-6);
+            let (page_w, page_h) = ((self.page_width_in * paper * DPI).max(1.0), (self.page_height_in * paper * DPI).max(1.0));
+            let (min_x, min_y) = if scene.items.is_empty() { (0.0, 0.0) } else { (scene.min_x.min(0.0), scene.min_y.min(0.0)) };
+            let (max_x, max_y) = if scene.items.is_empty() { (page_w, page_h) } else { ((scene.min_x + scene.width).max(page_w), (scene.min_y + scene.height).max(page_h)) };
+            scene.min_x = min_x;
+            scene.min_y = min_y;
+            scene.width = max_x - min_x;
+            scene.height = max_y - min_y;
+        }
+        Ok(scene)
+    }
+
     fn build_page(&mut self, ctx: &egui::Context, reset_view: bool) {
         let _timer = Timer::new("build_page (whole)", 0.0);
         self.sites_cache.clear();
@@ -5130,49 +5514,26 @@ impl LayoutCraftApp {
         }
         self.size_pos.key = None;
         self.theme_cache = None;
+        (self.theme_preview, self.theme_resting) = (None, None);
         *self.routes_cache.borrow_mut() = None;
         let (Some(package), Some(document)) = (self.engine.package.as_ref(), self.engine.document.as_ref())
         else {
             return;
         };
-        let mut page_width_in = 8.5;
         if let Ok(pages) = package.pages() {
             if let Some(page) = pages.get(self.page_index) {
                 self.page_height_in = page.height.unwrap_or(11.0);
-                page_width_in = page.width.unwrap_or(8.5);
-                self.page_width_in = page_width_in;
-            }
-        }
-        let mut media: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-        for (id, record) in &document.media {
-            // media_bytes converts what the renderer cannot draw itself (BMP to PNG, EMF / WMF to SVG): the raw part bytes of a stencil picture are an EMF
-            if let Some(bytes) = layoutcraft_vsdx::media_bytes(package, record) {
-                media.insert(id.clone(), bytes);
+                self.page_width_in = page.width.unwrap_or(8.5);
             }
         }
         let scene_timer = Timer::new("  scene_from_document", 0.0);
-        let mut scene = match scene_from_document_with_media(document, self.page_index, &media) {
+        let scene = match self.page_scene(document) {
             Ok(scene) => scene,
             Err(error) => {
                 self.status = format!("Could not build page scene: {error}");
                 return;
             }
         };
-        // An empty template page has no content bounds; show the actual page
-        // rectangle instead of a 1x1 white square.
-        // Likewise a page with shapes shows the WHOLE page (a shape that sticks out of it widens the view), not the bounding box of its
-        // shapes: creating the first shape must not shrink the canvas to that shape.
-        {
-            // the sheet's PageWidth / PageHeight are in drawing units; the scene's shapes are already scaled to paper (page.scale, e.g. 1:50)
-            let paper = document.pages.get(self.page_index).map_or(1.0, |page| page.scale).max(1e-6);
-            let (page_w, page_h) = ((page_width_in * paper * DPI).max(1.0), (self.page_height_in * paper * DPI).max(1.0));
-            let (min_x, min_y) = if scene.items.is_empty() { (0.0, 0.0) } else { (scene.min_x.min(0.0), scene.min_y.min(0.0)) };
-            let (max_x, max_y) = if scene.items.is_empty() { (page_w, page_h) } else { ((scene.min_x + scene.width).max(page_w), (scene.min_y + scene.height).max(page_h)) };
-            scene.min_x = min_x;
-            scene.min_y = min_y;
-            scene.width = max_x - min_x;
-            scene.height = max_y - min_y;
-        }
         drop(scene_timer);
         let keep_view = !reset_view;
         self.font_warnings = scene_font_substitutions(&scene);
@@ -6659,22 +7020,31 @@ impl LayoutCraftApp {
     fn draw_ribbon(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
         let ctx = ui.ctx().clone();
         // like the web: below 1750 px the buttons that have an icon and a text show only the icon
-        self.ribbon_compact = ribbon::is_compact(ctx.content_rect().width());
+        let width = ctx.content_rect().width();
+        let home = self.ribbon.tabs.get(self.ribbon_tab).is_some_and(|tab| tab.name == "Home");
+        self.ribbon_compact = ribbon::is_compact(width) || (home && width < ribbon::UNFOLDED_COMPACT_BELOW);
         // Ctrl+F1 collapses / expands the ribbon (web/keyboard.js)
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F1)) {
             self.ribbon_collapsed = !self.ribbon_collapsed;
             self.ribbon_peek = false;
         }
-        // the quick access toolbar of the web ribbon: save, undo, redo
-        ui.horizontal(|ui| {
+        // the top row: save, undo and redo (the quick access toolbar of the web ribbon), and in its middle the drawing's name
+        let row = ui.horizontal(|ui| {
+            let compact = std::mem::replace(&mut self.ribbon_compact, true);
             for id in ["save", "undo", "redo"] {
                 self.ribbon_button(ui, &ctx, id, action);
             }
+            self.ribbon_compact = compact;
         });
+        let buttons = row.response.rect;
+        let name = window_title(self.loaded_path.as_deref(), self.engine.export().is_some(), self.dirty);
+        let space = egui::Rect::from_center_size(egui::pos2(ui.max_rect().center().x, buttons.center().y), egui::vec2((width - 2.0 * (buttons.width() + 24.0)).max(80.0), buttons.height()));
+        ui.put(space, egui::Label::new(name).truncate());
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 12.0;
             for index in 0..self.ribbon.tabs.len() {
                 let name = self.ribbon.tabs[index].name.clone();
-                if ui.selectable_label(self.ribbon_tab == index, name).clicked() {
+                if ribbon_tab(ui, &name, self.ribbon_tab == index).clicked() {
                     if self.ribbon_collapsed && self.ribbon_peek && self.ribbon_tab == index {
                         self.ribbon_peek = false;
                     } else {
@@ -6737,11 +7107,35 @@ impl LayoutCraftApp {
                     }
                 }
                 let group_ui = ui.vertical(|ui| {
+                    // a menu with room to stand open in the ribbon: its own rows instead of the drop-down
+                    let rows = match cells.as_slice() {
+                        [Cell::Menu(label, _)] => ribbon::unfolded(label, ctx.content_rect().width()),
+                        _ => None,
+                    };
+                    let large: Vec<bool> = cells.iter().map(|cell| matches!(cell, Cell::Command(id) if ribbon::is_large(id))).collect();
                     let items = ui.horizontal_top(|ui| {
-                        for column in 0..ribbon::grid_columns(cells.len()) {
+                        // every group is as high as its tallest, so the names under them stand on one line
+                        ui.set_min_height(ribbon::ITEMS_HEIGHT);
+                        ui.spacing_mut().interact_size.y = (ribbon::ITEMS_HEIGHT - ui.spacing().item_spacing.y) / 2.0;
+                        if let Some(rows) = rows {
                             ui.vertical(|ui| {
-                                for row in 0..2 {
-                                    let Some(cell) = cells.get(ribbon::grid_index(column, row)) else { continue };
+                                self.ribbon_unfolded = true;
+                                for row in rows {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 3.0;
+                                        for id in row.iter() {
+                                            self.ribbon_button(ui, ctx, id, action);
+                                        }
+                                    });
+                                }
+                                self.ribbon_unfolded = false;
+                            });
+                            return;
+                        }
+                        for column in ribbon::columns(&large) {
+                            ui.vertical(|ui| {
+                                for index in column {
+                                    let cell = &cells[index];
                                     match cell {
                                         Cell::Select => {
                                             let selecting = self.tool == Tool::Select;
@@ -6749,7 +7143,25 @@ impl LayoutCraftApp {
                                                 self.tool = Tool::Select;
                                             }
                                         }
-                                        Cell::Command(id) => ui.horizontal(|ui| self.ribbon_button(ui, ctx, id, action)).inner,
+                                        Cell::Command(id) => {
+                                            ui.horizontal(|ui| {
+                                                self.ribbon_large = large[index];
+                                                self.ribbon_button(ui, ctx, id, action);
+                                                self.ribbon_large = false;
+                                            });
+                                        }
+                                        // the two galleries stand in the ribbon as pictures, with the list of names after them
+                                        Cell::Menu(_, ids) if matches!(ids.as_slice(), [id] if id == "themeGallery" || id == "variantGallery") => {
+                                            ui.horizontal(|ui| {
+                                                let variants = ids[0] == "variantGallery";
+                                                if variants {
+                                                    self.variant_strip(ui, ctx, action);
+                                                } else {
+                                                    self.theme_strip(ui, ctx, action);
+                                                }
+                                                self.ribbon_themes(ui, variants, action);
+                                            });
+                                        }
                                         Cell::Menu(label, ids) => {
                                             // the Font popup stays open while A- / A+ and B / I / U are clicked again and again; the others close after a click
                                             let behavior = if label == "Font" { egui::PopupCloseBehavior::CloseOnClickOutside } else { egui::PopupCloseBehavior::CloseOnClick };
@@ -6881,9 +7293,19 @@ impl LayoutCraftApp {
             return;
         }
         if id == "pageTools" {
-            for page_id in ["pageAdd", "pageDup", "pageRename", "pageDel", "pageLeft", "pageRight"] {
-                self.ribbon_button(ui, ctx, page_id, action);
-            }
+            // the new page large, the other page commands in a drop-down beside it
+            self.ribbon_large = true;
+            self.ribbon_button(ui, ctx, "pageAdd", action);
+            self.ribbon_large = false;
+            ui.menu_button("Pages \u{25be}", |ui| {
+                let compact = std::mem::replace(&mut self.ribbon_compact, false);
+                for page_id in ["pageDup", "pageRename", "pageDel", "pageLeft", "pageRight"] {
+                    ui.horizontal(|ui| self.ribbon_button(ui, ctx, page_id, action));
+                }
+                self.ribbon_compact = compact;
+            })
+            .response
+            .on_hover_text("Duplicate, rename, delete and move the page");
             return;
         }
         if matches!(id, "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor" | "p:shadow") {
@@ -6909,9 +7331,17 @@ impl LayoutCraftApp {
             || (native == Some(ribbon::Native::ShowGrid) && self.show_grid)
             || (native == Some(ribbon::Native::ShowRulers) && self.show_rulers)
             || (native == Some(ribbon::Native::ShowGuides) && self.show_guides)
-            || (native == Some(ribbon::Native::ConnectArrows) && self.connect_arrows);
+            || (native == Some(ribbon::Native::ConnectArrows) && self.connect_arrows)
+            || (native == Some(ribbon::Native::Inspector) && self.inspector_open);
         let compact = self.ribbon_compact;
+        let large = std::mem::take(&mut self.ribbon_large);
         let response = match icon.and_then(|name| self.icon_texture(ctx, &name)) {
+            // what is switched on or off shows a box, so that its state does not rest on a colour
+            _ if ribbon::is_check(id) => {
+                let mut on = selected;
+                ui.add_enabled(enabled, egui::Checkbox::new(&mut on, label.clone()))
+            }
+            Some(texture) if large => large_button(ui, &texture, &label, enabled, selected),
             Some(texture) => {
                 let image = egui::Image::new(egui::load::SizedTexture::new(texture.id(), egui::vec2(18.0, 18.0)));
                 let button = if compact { egui::Button::image(image) } else { egui::Button::image_and_text(image, label.clone()) };
@@ -6947,6 +7377,7 @@ impl LayoutCraftApp {
                     ribbon::Native::SnapGuides => self.snap_guides = !self.snap_guides,
                     ribbon::Native::ShowGrid => self.show_grid = !self.show_grid,
                     ribbon::Native::ConnectArrows => self.connect_arrows = !self.connect_arrows,
+                    ribbon::Native::Inspector => self.inspector_open = !self.inspector_open,
                     ribbon::Native::ShowRulers => self.show_rulers = !self.show_rulers,
                     ribbon::Native::ShowGuides => {
                         self.show_guides = !self.show_guides;
@@ -6961,6 +7392,7 @@ impl LayoutCraftApp {
     /// The Font and Shape Styles controls of the Home tab for the selected shapes: B / I / U toggles, A- / A+ (one point), and fill / line colour
     /// swatch menus; every click is one `Engine::edit` op 10 (see `style_selected`).
     fn ribbon_format_controls(&mut self, ui: &mut egui::Ui, id: &str, action: &mut Option<Action>) {
+        let short = self.ribbon_unfolded;
         let primary = self.selected.as_deref().and_then(|selected| self.doc_shape(selected)).cloned();
         let enabled = primary.is_some() && self.texture.is_some();
         match id {
@@ -6972,7 +7404,9 @@ impl LayoutCraftApp {
                         "italic" => egui::RichText::new(label).italics(),
                         _ => egui::RichText::new(label).underline(),
                     };
-                    if ui.add_enabled(enabled, egui::Button::new(text).selected(on)).on_hover_text(key).clicked() {
+                    let button = ui.add_enabled(enabled, egui::Button::new(text).selected(on).min_size(egui::vec2(24.0, 0.0)));
+                    name_control(ui, &button, ["Bold", "Italic", "Underline"][usize::from(key == "italic") + 2 * usize::from(key == "underline")]);
+                    if button.on_hover_text(key).clicked() {
                         *action = Some(Action::StyleSelected(serde_json::json!({ key: !on }).to_string()));
                     }
                 }
@@ -6980,22 +7414,38 @@ impl LayoutCraftApp {
             "p:strike" => {
                 let [struck, capitals] = self.selection_text_flags();
                 let on = enabled && struck;
-                if ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("Strike").strikethrough()).selected(on)).on_hover_text("Strikethrough of the whole text").clicked() {
+                let button = ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(if short { "S" } else { "Strike" }).strikethrough()).selected(on).min_size(egui::vec2(24.0, 0.0)));
+                name_control(ui, &button, "Strikethrough");
+                if button.on_hover_text("Strikethrough of the whole text").clicked() {
                     *action = Some(Action::FormatText(serde_json::json!({ "cells": { "Strikethru": if on { "0" } else { "1" } } })));
                 }
                 let on = enabled && capitals;
-                if ui.add_enabled(enabled, egui::Button::new("Caps").selected(on)).on_hover_text("All capitals for the whole text").clicked() {
+                let button = ui.add_enabled(enabled, egui::Button::new(if short { "AA" } else { "Caps" }).selected(on));
+                name_control(ui, &button, "All capitals");
+                if button.on_hover_text("All capitals for the whole text").clicked() {
                     *action = Some(Action::FormatText(serde_json::json!({ "cells": { "Case": if on { "0" } else { "1" } } })));
                 }
-                if ui.add_enabled(enabled, egui::Button::new("Text colour...")).on_hover_text("Colour of the text of the selected shapes").clicked() {
+                // in the ribbon: a letter over a bar of the colour the text has now
+                let colour = primary.as_ref().and_then(|shape| shape.text_color.as_deref()).and_then(typed_colour);
+                let button = ui.add_enabled(enabled, egui::Button::new(if short { "A" } else { "Text colour..." }).min_size(egui::vec2(24.0, 0.0)));
+                name_control(ui, &button, "Text colour");
+                if let (true, Some([r, g, b])) = (short, colour) {
+                    let bar = egui::Rect::from_min_max(button.rect.left_bottom() + egui::vec2(4.0, -5.0), button.rect.right_bottom() + egui::vec2(-4.0, -2.0));
+                    ui.painter().rect(bar, 0.0, egui::Color32::from_rgb(r, g, b), egui::Stroke::new(1.0, ui.visuals().weak_text_color()), egui::StrokeKind::Outside);
+                }
+                if button.on_hover_text("Colour of the text of the selected shapes").clicked() {
                     *action = Some(Action::ColourDialog("textColor"));
-                    ui.close();
+                    if !short {
+                        ui.close();
+                    }
                 }
             }
             "p:alignL" => {
                 let current = primary.as_ref().and_then(|shape| shape.align.clone());
                 for (label, model, cell, tip) in [("Left", "left", "0", "Align text left"), ("Centre", "center", "1", "Centre text"), ("Right", "right", "2", "Align text right"), ("Justify", "justify", "3", "Justify text")] {
-                    if ui.add_enabled(enabled, egui::Button::new(label).selected(current.as_deref() == Some(model))).on_hover_text(tip).clicked() {
+                    let chosen = current.as_deref() == Some(model);
+                    let button = if short { align_button(ui, model, tip, enabled, chosen) } else { ui.add_enabled(enabled, egui::Button::new(label).selected(chosen)) };
+                    if button.on_hover_text(tip).clicked() {
                         *action = Some(Action::FormatText(serde_json::json!({ "para": { "HorzAlign": cell } })));
                     }
                 }
@@ -7016,7 +7466,7 @@ impl LayoutCraftApp {
             }
             "p:lineSp" => {
                 ui.add_enabled_ui(enabled, |ui| {
-                    ui.menu_button("Line spacing \u{25be}", |ui| {
+                    ui.menu_button(if short { "Spacing \u{25be}" } else { "Line spacing \u{25be}" }, |ui| {
                         for multiple in LINE_SPACINGS {
                             if ui.button(format!("{multiple}")).clicked() {
                                 *action = Some(Action::FormatText(line_spacing_spec(multiple)));
@@ -7036,7 +7486,11 @@ impl LayoutCraftApp {
             }
             "p:fontFamily" => {
                 let (name, replaced) = self.selected_font().unwrap_or_default();
-                let label = if name.is_empty() { "Font family".to_string() } else { name.clone() };
+                let mut label = if name.is_empty() { "Font family".to_string() } else { name.clone() };
+                // in the ribbon a long name is cut, so that the group keeps its width
+                if short && label.chars().count() > 14 {
+                    label = format!("{}\u{2026}", label.chars().take(13).collect::<String>());
+                }
                 let mut title = egui::RichText::new(format!("{label} \u{25be}"));
                 if replaced.is_some() {
                     title = title.color(appearance::chrome(ui.visuals().dark_mode).error);
@@ -7257,7 +7711,7 @@ impl LayoutCraftApp {
             // the tool is taken where the button is drawn
             N::ConnectionPoint => Action::Fit,
             // the snap switches and the grid step are state, handled where the button is drawn
-            N::SnapGrid | N::SnapShapes | N::SnapGuides | N::GridStep | N::ShowGrid | N::ShowRulers | N::ShowGuides | N::ConnectArrows => Action::Fit,
+            N::SnapGrid | N::SnapShapes | N::SnapGuides | N::GridStep | N::ShowGrid | N::ShowRulers | N::ShowGuides | N::ConnectArrows | N::Inspector => Action::Fit,
             N::ReverseEnds => Action::ReverseEnds,
         }
     }
@@ -8275,13 +8729,33 @@ impl LayoutCraftApp {
     fn go_to_style_settings(&mut self) {
         // only when the inspector is there to show them, so that no later selection takes the keyboard
         if !self.full_screen && self.selected.as_deref().and_then(|id| self.doc_shape(id)).is_some_and(|shape| shape.group.is_none()) {
+            self.inspector_open = true;
             self.style_focus = true;
         } else {
             self.status = "Select one shape to edit its style in the inspector.".to_string();
         }
     }
 
-    fn size_pos_controls(&mut self, ui: &mut egui::Ui, id: &str, action: &mut Option<Action>) {
+    /// Open the inspector with the keyboard in a Size and Position field, or say why there is none.
+    fn go_to_size_fields(&mut self, field: usize) {
+        let Some(selected) = self.selected.clone() else {
+            self.status = "Select a shape to see its size and position.".to_string();
+            return;
+        };
+        self.read_size_fields(&selected);
+        match &self.size_pos.fields {
+            Some(Err(reason)) => self.status = reason.to_string(),
+            _ if self.full_screen => self.status = "Leave Full Screen to edit size and position.".to_string(),
+            _ => {
+                self.inspector_open = true;
+                self.size_pos.focus = Some(field);
+            }
+        }
+    }
+
+    /// Read the size and position of shape `id` of the shown page, unless that was done since the page last changed. The
+    /// status bar shows them whether or not the inspector is open.
+    fn read_size_fields(&mut self, id: &str) {
         let key = (self.page_index, id.to_string());
         if self.size_pos.key.as_ref() != Some(&key) {
             let metric = self.engine.page_size_json(self.page_index).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).is_some_and(|size| size["metric"].as_bool() == Some(true));
@@ -8298,6 +8772,10 @@ impl LayoutCraftApp {
             });
             self.size_pos.key = Some(key);
         }
+    }
+
+    fn size_pos_controls(&mut self, ui: &mut egui::Ui, id: &str, action: &mut Option<Action>) {
+        self.read_size_fields(id);
         ui.add_space(4.0);
         ui.label("Size and Position");
         let unit = self.size_pos.unit;
@@ -9025,6 +9503,7 @@ impl eframe::App for LayoutCraftApp {
                 Some(ViewKey::Tool(tool)) => self.take_tool(tool),
                 Some(ViewKey::AlignButtons) => {
                     if !self.full_screen && self.selected.is_some() && !self.extra_selected.is_empty() {
+                        self.inspector_open = true;
                         self.align_focus = true;
                     } else {
                         self.status = "Select two or more shapes to align them.".to_string();
@@ -9083,11 +9562,13 @@ impl eframe::App for LayoutCraftApp {
         }
 
         // the full-screen view shows the drawing and the status bar only
+        self.theme_hover = None;
         if !self.full_screen {
             egui::Panel::top("ribbon").show(ui, |ui| {
                 self.draw_ribbon(ui, &mut action);
             });
         }
+        self.settle_theme_preview(&ctx);
 
         if self.pending_open.is_some() {
             egui::Panel::top("pending").show(ui, |ui| {
@@ -9118,7 +9599,14 @@ impl eframe::App for LayoutCraftApp {
                 if let Some(geometry) = status_geometry(&self.size_pos, self.page_index, self.selected.as_deref()).filter(|_| !self.full_screen) {
                     ui.separator();
                     if ui.button(geometry).on_hover_text("Edit in Size and Position").clicked() {
-                        self.size_pos.focus = Some(2);
+                        self.go_to_size_fields(2);
+                    }
+                }
+                if !self.font_warnings.is_empty() && !self.inspector_open {
+                    ui.separator();
+                    let text = egui::RichText::new("\u{26a0} Fonts replaced").color(appearance::chrome(ui.visuals().dark_mode).error);
+                    if ui.button(text).on_hover_text("A font of this drawing is not installed here; show which").clicked() {
+                        self.inspector_open = true;
                     }
                 }
                 ui.separator();
@@ -9152,12 +9640,23 @@ impl eframe::App for LayoutCraftApp {
             });
         }
 
-        if !self.full_screen {
+        if let Some(selected) = self.selected.clone() {
+            self.read_size_fields(&selected);
+        }
+
+        if self.inspector_open && !self.full_screen {
             egui::Panel::right("inspector")
                 .default_size(250.0)
                 .resizable(true)
                 .show(ui, |ui| {
-                    ui.heading("Document");
+                    ui.horizontal(|ui| {
+                        ui.heading("Document");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("Close").on_hover_text("Close this panel (View > Show > Inspector)").clicked() {
+                                self.inspector_open = false;
+                            }
+                        });
+                    });
                     if let Some(document) = &self.engine.document {
                         ui.label(format!("Pages: {}", document.pages.len()));
                         ui.label(format!("Media: {}", document.media.len()));
@@ -9493,7 +9992,9 @@ impl eframe::App for LayoutCraftApp {
                 let painter = ui.painter_at(viewport);
                 let colours = appearance::chrome(ui.visuals().dark_mode);
                 painter.rect_filled(viewport, 0.0, colours.canvas);
-                let Some(texture_id) = self.texture.as_ref().map(|texture| texture.id()) else {
+                // a theme that is only being looked at takes the page picture's place
+                let shown = self.theme_preview.as_ref().map(|preview| &preview.texture).or(self.texture.as_ref());
+                let Some(texture_id) = shown.map(|texture| texture.id()) else {
                     painter.text(
                         viewport.center(),
                         egui::Align2::CENTER_CENTER,
@@ -9524,7 +10025,7 @@ impl eframe::App for LayoutCraftApp {
                     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                     egui::Color32::WHITE,
                 );
-                if let Some(detail) = &self.detail {
+                if let Some(detail) = self.detail.as_ref().filter(|_| self.theme_preview.is_none()) {
                     let view = self.view_scale();
                     let r = detail.region;
                     let rect = egui::Rect::from_min_size(
@@ -10714,12 +11215,7 @@ impl eframe::App for LayoutCraftApp {
                 }
             }
             Some(Action::ShapeFormulas) => self.sheet_pane = if self.sheet_pane.is_some() { None } else { Some(SheetPane::default()) },
-            // the fields are those the inspector drew for the selection; without them there is nothing to go to
-            Some(Action::SizePosition) => match (&self.selected, &self.size_pos.fields) {
-                (Some(_), Some(Ok(_))) => self.size_pos.focus = Some(0),
-                (Some(_), Some(Err(reason))) => self.status = reason.to_string(),
-                _ => self.status = "Select a shape to see its size and position.".to_string(),
-            },
+            Some(Action::SizePosition) => self.go_to_size_fields(0),
             Some(Action::DeleteGuide) => self.delete_selected_guide(&ctx),
             Some(Action::SizeField(ref id, field, value, per_inch)) => self.set_size_field(&ctx, id, field, value, per_inch),
             Some(Action::FullScreen) => self.toggle_full_screen(&ctx),
