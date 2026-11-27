@@ -3574,6 +3574,38 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_new_style_can_be_described_saved_and_applied() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.app.style_pick = Some(Default::default());
+        driver.frames(3);
+        let press = |driver: &mut Driver, label: &str| {
+            let at = driver.texts(label).into_iter().min_by(|a, b| a.top().total_cmp(&b.top())).unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            // long enough for a section to unfold
+            driver.frames(12);
+        };
+        press(&mut driver, "New style");
+        let styles = |driver: &Driver| driver.app.engine.styles_list_json().unwrap().matches("\"id\"").count();
+        let (count, depth) = (styles(&driver), driver.app.engine.undo_depth());
+        {
+            let new = &mut driver.app.style_pick.as_mut().unwrap().new;
+            (new.name, new.fill, new.weight) = ("Warning".to_string(), "yellow".to_string(), "3".to_string());
+        }
+        driver.frames(2);
+        press(&mut driver, "Save style");
+        assert_eq!((styles(&driver), driver.app.engine.undo_depth()), (count, depth), "{}", driver.app.status);
+        assert!(driver.app.status.contains("fill colour"), "{}", driver.app.status);
+        driver.app.style_pick.as_mut().unwrap().new.fill = "#e8c000".to_string();
+        driver.frames(2);
+        press(&mut driver, "Save style");
+        assert_eq!((styles(&driver), driver.app.engine.undo_depth()), (count + 1, depth + 1), "{}", driver.app.status);
+        press(&mut driver, "Apply style to selection");
+        let fill = driver.app.doc_shape(&ids[0]).and_then(|shape| shape.fill.clone()).map(|fill| fill.to_lowercase());
+        assert_eq!(fill.as_deref(), Some("#e8c000"), "the new style was chosen: {}", driver.app.status);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
