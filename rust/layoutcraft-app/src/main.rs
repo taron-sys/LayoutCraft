@@ -3726,6 +3726,35 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert!(driver.app.data_pane.as_ref().is_some_and(|pane| pane.rows.is_empty()), "the fields are this drawing's");
     }
 
+    /// A size typed for one shape goes to that shape, also when the field is left by clicking another one.
+    #[test]
+    fn a_typed_font_size_stays_with_the_shape_it_was_typed_for() {
+        for other_size in [None, Some(20.0)] {
+            let (mut driver, ids) = Driver::new();
+            let size = |driver: &Driver, id: &str| driver.app.doc_shape(id).and_then(|shape| shape.font_size).map(|px| (px * 72.0 / 96.0).round());
+            if let Some(points) = other_size {
+                driver.app.engine.edit(0, 10, &format!("{}\n{{\"fontPt\":{points}}}", ids[1]), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+                driver.app.build_page(&driver.ctx.clone(), false);
+            }
+            driver.app.selected = Some(ids[0].clone());
+            driver.frames(3);
+            let before = size(&driver, &ids[1]);
+            let group = *driver.texts("Font \u{25be}").first().expect("the Font group");
+            driver.click(group.center(), Modifiers::NONE);
+            driver.frames(2);
+            let unit = *driver.texts(" pt").first().expect("the size field");
+            driver.click(pos2(unit.left() - 6.0, unit.center().y), Modifiers::NONE);
+            driver.frames(2);
+            driver.write("31");
+            let other = driver.middle_of(&ids[1]);
+            driver.click(other, Modifiers::NONE);
+            driver.frames(4);
+            assert_eq!(size(&driver, &ids[1]), before, "{other_size:?}: the clicked shape keeps its size: {}", driver.app.status);
+            assert_eq!(size(&driver, &ids[0]), Some(31.0), "{other_size:?}: {}", driver.app.status);
+            assert_eq!(driver.app.selected, Some(ids[1].clone()));
+        }
+    }
+
     #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
@@ -4555,6 +4584,8 @@ struct LayoutCraftApp {
     /// The Size and Position fields of the inspector.
     size_pos: SizePos,
     name_field: NameField,
+    /// The shapes the ribbon's font size field was entered for, while it has the keyboard.
+    font_target: Option<Vec<String>>,
     /// The first Style control of the inspector is to take the keyboard (F3).
     style_focus: bool,
     /// The inspector's first align button is to take the keyboard (F8).
@@ -4734,6 +4765,7 @@ impl LayoutCraftApp {
             ruler_unit: (1.0, "in"),
             size_pos: SizePos::default(),
             name_field: NameField::default(),
+            font_target: None,
             style_focus: false,
             align_focus: false,
             style_pick: None,
@@ -4889,6 +4921,7 @@ impl LayoutCraftApp {
     /// depth can all match the new one's.
     fn forget_drawing_state(&mut self) {
         self.name_field = NameField::default();
+        self.font_target = None;
         if self.data_pane.is_some() {
             self.data_pane = Some(DataPane::default());
         }
@@ -6881,7 +6914,8 @@ impl LayoutCraftApp {
             "p:fontSize" => {
                 // the model keeps the size in px (96 per inch); the file and the engine speak points
                 let px = primary.as_ref().and_then(|shape| shape.font_size);
-                let points = px.map_or(12.0, |px| (px * 72.0 / 96.0 * 10.0).round() / 10.0);
+                let in_points = |px: Option<f64>| px.map_or(12.0, |px| (px * 72.0 / 96.0 * 10.0).round() / 10.0);
+                let points = in_points(px);
                 let step = |ui: &mut egui::Ui, label: &str, delta: f64, action: &mut Option<Action>| {
                     if ui.add_enabled(enabled, egui::Button::new(label)).on_hover_text(format!("Font size {points} pt")).clicked() {
                         *action = Some(Action::StyleSelected(serde_json::json!({ "fontPt": stepped_font_size(px, delta) }).to_string()));
@@ -6889,17 +6923,27 @@ impl LayoutCraftApp {
                 };
                 step(ui, "A-", -1.0, action);
                 // typed only (no dragging, which would make an edit at every pointer move); Enter applies, Esc does not
-                let mut typed = points;
+                // while the field is being typed in it belongs to the shapes it was entered for: leaving it by clicking another
+                // shape changes the selection before the field hands over what was typed
+                let held = self.font_target.clone().filter(|ids| ids.iter().all(|id| self.doc_shape(id).is_some()));
+                let shown = held.as_ref().and_then(|ids| ids.first()).map_or(points, |id| in_points(self.doc_shape(id).and_then(|shape| shape.font_size)));
+                let mut typed = shown;
                 let field = ui
                     .add_enabled(enabled, egui::DragValue::new(&mut typed).speed(0.0).custom_formatter(|points, _| points.to_string()).suffix(" pt").update_while_editing(false))
                     .on_hover_text("Font size: click and type");
                 ui.ctx().accesskit_node_builder(field.id, |node| node.set_label("Font size in points"));
-                if field.changed() && typed != points {
+                if field.changed() && typed != shown {
                     if FONT_SIZES.contains(&typed) {
-                        *action = Some(Action::StyleSelected(serde_json::json!({ "fontPt": typed }).to_string()));
+                        let target = held.unwrap_or_else(|| self.all_selected());
+                        *action = Some(Action::StyleShapes(target, serde_json::json!({ "fontPt": typed }).to_string()));
                     } else {
                         *action = Some(Action::Say(format!("Type a font size from {} to {} points.", FONT_SIZES.start(), FONT_SIZES.end())));
                     }
+                }
+                if !field.has_focus() {
+                    self.font_target = None;
+                } else if self.font_target.is_none() {
+                    self.font_target = Some(self.all_selected());
                 }
                 step(ui, "A+", 1.0, action);
             }
@@ -6968,6 +7012,17 @@ impl LayoutCraftApp {
     }
 
     /// Apply an `Engine::edit` op 10 style JSON to every selected shape (one undo step).
+    /// Style the shapes `ids`, which need not be the selected ones; the selection stays.
+    fn style_shapes(&mut self, ctx: &egui::Context, ids: &[String], json: &str) {
+        if ids.is_empty() {
+            self.status = "Select a shape first.".to_string();
+            return;
+        }
+        let result = self.engine.edit(self.page_index, 10, &format!("{}\n{json}", ids.join("\n")), 0.0, 0.0, 0.0, 0.0, 0);
+        let selected = self.selected.clone();
+        self.finish_edit(ctx, result, "Changed style", selected);
+    }
+
     fn style_selected(&mut self, ctx: &egui::Context, json: &str) {
         let ids = self.all_selected();
         let Some(primary) = self.selected.clone() else {
@@ -10527,6 +10582,7 @@ impl eframe::App for LayoutCraftApp {
                 }
             }
             Some(Action::StyleSelected(ref json)) => self.style_selected(&ctx, json),
+            Some(Action::StyleShapes(ref ids, ref json)) => self.style_shapes(&ctx, ids, json),
             Some(Action::ReverseEnds) => self.reverse_selected_ends(&ctx),
             Some(Action::FormatText(ref spec)) => self.format_selected_text(&ctx, spec),
             Some(Action::Paste) => self.paste_clipboard(&ctx),
@@ -10679,6 +10735,8 @@ enum Action {
     Duplicate,
     /// An `Engine::edit` op 10 style JSON for every selected shape.
     StyleSelected(String),
+    /// Style these shapes (op 10 JSON).
+    StyleShapes(Vec<String>, String),
     Arrange(ArrangeCmd),
     Page(usize),
     Fit,
