@@ -15,6 +15,7 @@ use layoutcraft_vsdx::{
 mod appearance;
 mod connectors;
 mod connpoints;
+mod gallery;
 mod styles;
 mod help;
 mod mcpinfo;
@@ -3407,6 +3408,44 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_design_tab_shows_themes_and_variants_as_pictures_that_apply() {
+        let (mut driver, _) = Driver::new();
+        let tab = driver.texts("Design")[0];
+        driver.click(tab.center(), Modifiers::NONE);
+        driver.frames(40);
+        // where the picture of a theme's variant was drawn, if it is on screen
+        let tile = |driver: &Driver, theme: &str, variant: u32| {
+            let id = driver.app.theme_pictures.get(&(theme.to_string(), variant))?.as_ref()?.id();
+            driver.drawn.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id == id => Some(clipped.shape.visual_bounding_rect()),
+                egui::Shape::Rect(shape) if shape.brush.as_ref().is_some_and(|brush| brush.fill_texture_id == id) => Some(shape.rect),
+                _ => None,
+            })
+        };
+        let info: serde_json::Value = serde_json::from_str(&driver.app.engine.themes_json().unwrap()).unwrap();
+        let names: Vec<String> = info["themes"].as_array().unwrap().iter().map(|theme| theme["name"].as_str().unwrap().to_string()).collect();
+        let current = |driver: &Driver| super::current_theme(&serde_json::from_str(&driver.app.engine.themes_json().unwrap()).unwrap(), 0);
+        let second = tile(&driver, &names[1], 0).expect("a picture of the second theme");
+        let last = names.last().unwrap();
+        // the public build has few themes: they all fit, a build with more of them shows the first ones
+        let all_fit = super::gallery::themes_in_view(1400.0) >= names.len();
+        assert_eq!(tile(&driver, last, 0).is_some(), all_fit, "{names:?}");
+        driver.click(second.center(), Modifiers::NONE);
+        driver.frames(40);
+        assert_eq!(current(&driver).0.as_deref(), Some(names[1].as_str()), "{}", driver.app.status);
+        let third = tile(&driver, &names[1], 2).expect("a picture of its third variant");
+        driver.click(third.center(), Modifiers::NONE);
+        driver.frames(5);
+        assert_eq!(current(&driver), (Some(names[1].clone()), 2), "{}", driver.app.status);
+        for _ in 0..4 {
+            let next = driver.texts("\u{203a}")[0];
+            driver.click(next.center(), Modifiers::NONE);
+            driver.frames(20);
+        }
+        assert!(tile(&driver, last, 0).is_some(), "the arrow reaches the last theme");
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4753,6 +4792,9 @@ struct LayoutCraftApp {
     /// The Themes menus: apply to every page instead of the shown one; and the gallery, until the page is rebuilt.
     theme_all_pages: bool,
     theme_cache: Option<serde_json::Value>,
+    /// The Design tab's pictures by theme name and variant (`None` = it could not be drawn), and the first theme in the row.
+    theme_pictures: BTreeMap<(String, u32), Option<egui::TextureHandle>>,
+    theme_first: usize,
     /// "Change Shape" is waiting for a click on a shape of the Shapes panel.
     change_shape: bool,
     /// The Find window, while it is open.
@@ -4925,6 +4967,8 @@ impl LayoutCraftApp {
             link_draft: None,
             theme_all_pages: false,
             theme_cache: None,
+            theme_pictures: BTreeMap::new(),
+            theme_first: 0,
             change_shape: false,
             find: None,
             struck_cache: None,
@@ -6750,6 +6794,18 @@ impl LayoutCraftApp {
                                             }
                                         }
                                         Cell::Command(id) => ui.horizontal(|ui| self.ribbon_button(ui, ctx, id, action)).inner,
+                                        // the two galleries stand in the ribbon as pictures, with the list of names after them
+                                        Cell::Menu(_, ids) if matches!(ids.as_slice(), [id] if id == "themeGallery" || id == "variantGallery") => {
+                                            ui.horizontal(|ui| {
+                                                let variants = ids[0] == "variantGallery";
+                                                if variants {
+                                                    self.variant_strip(ui, ctx, action);
+                                                } else {
+                                                    self.theme_strip(ui, ctx, action);
+                                                }
+                                                self.ribbon_themes(ui, variants, action);
+                                            });
+                                        }
                                         Cell::Menu(label, ids) => {
                                             // the Font popup stays open while A- / A+ and B / I / U are clicked again and again; the others close after a click
                                             let behavior = if label == "Font" { egui::PopupCloseBehavior::CloseOnClickOutside } else { egui::PopupCloseBehavior::CloseOnClick };
