@@ -154,7 +154,7 @@ these are row counts, not a count of every Visio button.
 | Font: family | S1 (Font group named) | p:fontFamily | present | present | Desktop: font list with search | P1 |
 | Font: size and Increase/Decrease size (Ctrl+Shift+> and <) | S1 | p:fontSize | present | present | Desktop: smaller / larger buttons, a typed size, and Ctrl+Shift+> / < (US key positions) | P1 |
 | Font: Bold / Italic / Underline | S1 | p:bold | present | present | Desktop: buttons and Ctrl+B / I / U | P1 |
-| Font: strikethrough, caps, sub/superscript, font colour | S1 for caps and sub/superscript; others unverified | p:strike | partial | partial | Desktop: strikethrough of the whole text | P2 |
+| Font: strikethrough, caps, sub/superscript, font colour | S1 for caps and sub/superscript; others unverified | p:strike | partial | partial | Desktop: strikethrough and all capitals of the whole text; no sub / superscript, small caps or font colour | P2 |
 | Paragraph: align left / centre / right / justify | S1 | p:alignL | present | present | Desktop: the whole text of the selected shapes | P1 |
 | Paragraph: vertical align top / middle / bottom | S1 | p:alignL (menu) | missing | partial | | P2 |
 | Paragraph: indent, line spacing | unverified | p:indLeft, p:lineSp | present | present | Desktop: fixed choices of left indent and line spacing, whole text | P3 |

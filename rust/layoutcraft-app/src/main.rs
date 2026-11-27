@@ -592,6 +592,11 @@ fn format_whole_text(engine: &mut Engine, page: usize, ids: &[String], spec: &se
 
 /// Whether the whole text of every one of the shapes that has text is struck through.
 fn all_struck(engine: &Engine, page: usize, ids: &[String]) -> bool {
+    all_set(engine, page, ids, "Strikethru")
+}
+
+/// Whether the character cell `cell` is 1 over the whole text of every one of the shapes that has text.
+fn all_set(engine: &Engine, page: usize, ids: &[String], cell: &str) -> bool {
     let targets = text_targets(engine, page, ids);
     !targets.is_empty()
         && targets.iter().all(|(owner, length)| {
@@ -599,7 +604,7 @@ fn all_struck(engine: &Engine, page: usize, ids: &[String]) -> bool {
                 .text_state_json(page, owner, 0, *length)
                 .ok()
                 .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-                .is_some_and(|state| state["char"]["Strikethru"].as_str() == Some("1"))
+                .is_some_and(|state| state["char"][cell].as_str() == Some("1"))
         })
 }
 
@@ -3380,6 +3385,31 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_font_group_sets_and_removes_all_capitals() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        let drawn = |driver: &Driver| layoutcraft_render::to_svg(&layoutcraft_render::scene_from_document(driver.app.engine.document().unwrap(), 0).unwrap());
+        assert!(!drawn(&driver).contains("LABEL"));
+        let press = |driver: &mut Driver, label: &str| {
+            if driver.texts(label).is_empty() {
+                let group = *driver.texts("Font \u{25be}").first().expect("the Font group");
+                driver.click(group.center(), Modifiers::NONE);
+                driver.frames(2);
+            }
+            let at = *driver.texts(label).first().unwrap_or_else(|| panic!("no {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let depth = driver.app.engine.undo_depth();
+        press(&mut driver, "Caps");
+        assert!(drawn(&driver).contains("LABEL"), "{}", driver.app.status);
+        assert_eq!((driver.app.engine.undo_depth(), driver.app.selection_text_flags()), (depth + 1, [false, true]));
+        press(&mut driver, "Caps");
+        assert!(!drawn(&driver).contains("LABEL") && drawn(&driver).contains("label"), "{}", driver.app.status);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4221,7 +4251,7 @@ struct LayoutCraftApp {
     /// The Find window, while it is open.
     find: Option<Find>,
     /// (selected ids, whether all their text is struck through) for the Strike button.
-    struck_cache: Option<(String, bool)>,
+    struck_cache: Option<(String, [bool; 2])>,
     page_setup_open: bool,
     check_open: bool,
     shapes_open: bool,
@@ -6401,9 +6431,14 @@ impl LayoutCraftApp {
                 }
             }
             "p:strike" => {
-                let on = enabled && self.selection_struck();
+                let [struck, capitals] = self.selection_text_flags();
+                let on = enabled && struck;
                 if ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("Strike").strikethrough()).selected(on)).on_hover_text("Strikethrough of the whole text").clicked() {
                     *action = Some(Action::FormatText(serde_json::json!({ "cells": { "Strikethru": if on { "0" } else { "1" } } })));
+                }
+                let on = enabled && capitals;
+                if ui.add_enabled(enabled, egui::Button::new("Caps").selected(on)).on_hover_text("All capitals for the whole text").clicked() {
+                    *action = Some(Action::FormatText(serde_json::json!({ "cells": { "Case": if on { "0" } else { "1" } } })));
                 }
             }
             "p:alignL" => {
@@ -6545,16 +6580,17 @@ impl LayoutCraftApp {
         }
     }
 
-    /// `all_struck` of the selection, remembered until the page is rebuilt or the selection changes (it reads the file's XML).
-    fn selection_struck(&mut self) -> bool {
+    /// Whether the whole text of the selection is struck through, and whether it is in all capitals; remembered until the
+    /// page is rebuilt or the selection changes (it reads the file's XML).
+    fn selection_text_flags(&mut self) -> [bool; 2] {
         let ids = self.all_selected();
         let key = ids.join("\n");
         match &self.struck_cache {
-            Some((known, struck)) if *known == key => *struck,
+            Some((known, flags)) if *known == key => *flags,
             _ => {
-                let struck = all_struck(&self.engine, self.page_index, &ids);
-                self.struck_cache = Some((key, struck));
-                struck
+                let flags = [all_struck(&self.engine, self.page_index, &ids), all_set(&self.engine, self.page_index, &ids, "Case")];
+                self.struck_cache = Some((key, flags));
+                flags
             }
         }
     }
