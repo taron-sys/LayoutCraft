@@ -674,9 +674,7 @@ fn add_picture(
         escape_attr(&rel_id),
         escape_attr(media_part.rsplit('/').next().unwrap_or("picture.png"))
     );
-    if let Some(end) = rels.rfind("</Relationships>") {
-        rels.insert_str(end, &rel);
-    } else {
+    if !insert_relationship(&mut rels, &rel) {
         return Err(Error(format!(
             "invalid page relationships part {rels_part}"
         )));

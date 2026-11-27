@@ -567,15 +567,17 @@ pub fn import_master(target: &Package, stencil: &Package, master_id: &str) -> Re
     // masters.xml.rels: the relationship to the new part (and the document's relationship to masters.xml).
     let masters_rels_part = "visio/masters/_rels/masters.xml.rels";
     let mut masters_rels = if target.contains(masters_rels_part) { target.text(masters_rels_part)?.to_string() } else { FRESH_RELS.to_string() };
-    let at = masters_rels.rfind("</Relationships>").ok_or_else(|| Error("bad masters.xml.rels".to_string()))?;
-    masters_rels.insert_str(at, &format!("<Relationship Id='{new_rel_id}' Type='{REL_MASTER}' Target='master{new_part_no}.xml'/>"));
+    if !crate::writer::insert_relationship(&mut masters_rels, &format!("<Relationship Id='{new_rel_id}' Type='{REL_MASTER}' Target='master{new_part_no}.xml'/>")) {
+        return Err(Error("bad masters.xml.rels".to_string()));
+    }
     extras.insert(masters_rels_part.to_string(), masters_rels.into_bytes());
     if !have_masters {
         let mut doc_rels = target.text(DOC_RELS)?.to_string();
         let doc_numbers = target.relationships("visio/document.xml")?;
         let doc_rel_no = largest_number(doc_numbers.keys().cloned(), "rId", "") + 1;
-        let at = doc_rels.rfind("</Relationships>").ok_or_else(|| Error("bad document.xml.rels".to_string()))?;
-        doc_rels.insert_str(at, &format!("<Relationship Id='rId{doc_rel_no}' Type='{REL_MASTERS}' Target='masters/masters.xml'/>"));
+        if !crate::writer::insert_relationship(&mut doc_rels, &format!("<Relationship Id='rId{doc_rel_no}' Type='{REL_MASTERS}' Target='masters/masters.xml'/>")) {
+            return Err(Error("bad document.xml.rels".to_string()));
+        }
         extras.insert(DOC_RELS.to_string(), doc_rels.into_bytes());
     }
     Ok((write_package(target, extras)?, new_id))
