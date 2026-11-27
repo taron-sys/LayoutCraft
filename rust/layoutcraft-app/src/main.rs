@@ -3606,6 +3606,32 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_shapes_menu_leads_to_its_style_settings_and_fields() {
+        let (mut driver, ids) = Driver::new();
+        let choose = |driver: &mut Driver, entry: &str| {
+            let at = driver.middle_of(&ids[0]);
+            let right = |pressed| Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE };
+            driver.run(vec![Event::PointerMoved(at)]);
+            driver.run(vec![right(true)]);
+            driver.run(vec![right(false)]);
+            driver.frames(3);
+            let item = driver.texts(entry).into_iter().find(|text| driver.app.last_viewport.contains(text.center())).unwrap_or_else(|| panic!("no {entry:?} in the menu"));
+            driver.click(item.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        choose(&mut driver, "Style settings");
+        assert_eq!(driver.app.selected, Some(ids[0].clone()));
+        let fill = |driver: &Driver| driver.app.style_draft.as_ref().map(|draft| draft.has_fill).expect("the style settings");
+        let before = fill(&driver);
+        driver.key(Key::Space, Modifiers::NONE);
+        assert_ne!(fill(&driver), before, "the Fill box has the keyboard: {}", driver.app.status);
+        for _ in 0..2 {
+            choose(&mut driver, "Shape Fields");
+            assert!(driver.app.data_pane.is_some(), "opening it twice leaves it open");
+        }
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -7896,6 +7922,16 @@ impl LayoutCraftApp {
         self.finish_edit(ctx, result, &done, selected);
     }
 
+    /// Give the keyboard to the inspector's first Style setting, or say what to select.
+    fn go_to_style_settings(&mut self) {
+        // only when the inspector is there to show them, so that no later selection takes the keyboard
+        if !self.full_screen && self.selected.as_deref().and_then(|id| self.doc_shape(id)).is_some_and(|shape| shape.group.is_none()) {
+            self.style_focus = true;
+        } else {
+            self.status = "Select one shape to edit its style in the inspector.".to_string();
+        }
+    }
+
     fn size_pos_controls(&mut self, ui: &mut egui::Ui, id: &str, action: &mut Option<Action>) {
         let key = (self.page_index, id.to_string());
         if self.size_pos.key.as_ref() != Some(&key) {
@@ -8636,14 +8672,7 @@ impl eframe::App for LayoutCraftApp {
                         self.status = "Select two or more shapes to align them.".to_string();
                     }
                 }
-                Some(ViewKey::StyleSettings) => {
-                    // only when the inspector is there to show them, so that no later selection takes the keyboard
-                    if !self.full_screen && self.selected.as_deref().and_then(|id| self.doc_shape(id)).is_some_and(|shape| shape.group.is_none()) {
-                        self.style_focus = true;
-                    } else {
-                        self.status = "Select one shape to edit its style in the inspector.".to_string();
-                    }
-                }
+                Some(ViewKey::StyleSettings) => self.go_to_style_settings(),
                 Some(ViewKey::FitPage) => action = Some(Action::Fit),
                 Some(ViewKey::NextPage) => action = Some(Action::Page(self.page_index + 1)),
                 Some(ViewKey::PreviousPage) => action = Some(Action::Page(self.page_index.saturating_sub(1))),
@@ -9298,6 +9327,15 @@ impl eframe::App for LayoutCraftApp {
                             pick(ui, "Flip vertical", true, Action::Arrange(ArrangeCmd::Flip(true)));
                             ui.separator();
                             pick(ui, "Edit text", true, Action::EditText);
+                            ui.separator();
+                            pick(ui, "Style settings", true, Action::StyleSettings);
+                            // opens the window; it stays as it is when it is open already
+                            if ui.button("Shape Fields").clicked() {
+                                if self.data_pane.is_none() {
+                                    action = Some(Action::ShapeData);
+                                }
+                                ui.close();
+                            }
                         } else {
                             let mut pick = |ui: &mut egui::Ui, label: &str, enabled: bool, command: Action| {
                                 if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
@@ -10400,6 +10438,7 @@ impl eframe::App for LayoutCraftApp {
             Some(Action::ShapeName(ref id, ref wanted)) => self.set_shape_name(&ctx, id, wanted),
             Some(Action::Styles) => self.style_pick = if self.style_pick.is_some() { None } else { Some(styles::StylePick::default()) },
             Some(Action::PageToBackground) => self.run_page_op(&ctx, 13, self.page_index, 0, "", "Made a background page (Page setup makes it ordinary again)"),
+            Some(Action::StyleSettings) => self.go_to_style_settings(),
             Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
                 self.zoom = zoom_for_percent(f64::from(percent), self.raster_scale);
@@ -10443,6 +10482,8 @@ enum Action {
     /// Show the page at this percentage of actual size.
     ZoomTo(u32),
     ZoomDialog,
+    /// Go to the inspector's Style settings.
+    StyleSettings,
     /// Make the shown page a background page: it leaves the tabs.
     PageToBackground,
     /// Show or hide the Styles window.
