@@ -3795,6 +3795,28 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         }
     }
 
+    /// A selection belongs to the page it was made on: another page can have shapes with the same IDs.
+    #[test]
+    fn showing_another_page_leaves_nothing_selected() {
+        let (mut driver, ids) = Driver::new();
+        // the copy of the page has the same shape IDs
+        driver.app.engine.page_op(5, 0, 0, "").unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        driver.key(Key::A, CTRL);
+        assert_eq!(driver.app.all_selected().len(), ids.len());
+        driver.key(Key::PageDown, CTRL);
+        driver.frames(3);
+        assert_eq!(driver.app.page_index, 1, "{}", driver.app.status);
+        assert!(driver.app.all_selected().is_empty(), "{:?}", driver.app.all_selected());
+        // so a command on the selection touches nothing here
+        let shapes = |driver: &Driver| driver.app.engine.document().unwrap().pages[1].shapes.len();
+        let (count, depth) = (shapes(&driver), driver.app.engine.undo_depth());
+        let ctx = driver.ctx.clone();
+        driver.app.delete_selected(&ctx);
+        assert_eq!((shapes(&driver), driver.app.engine.undo_depth()), (count, depth), "{}", driver.app.status);
+    }
+
     #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
@@ -5075,7 +5097,9 @@ impl LayoutCraftApp {
             return;
         }
         if reset_view {
+            // another page or drawing: none of the selection carries over (its shape IDs can be in use there)
             self.selected = None;
+            self.extra_selected.clear();
             self.fit_pending = true;
         } else {
             self.fit_pending = false;
