@@ -14,6 +14,9 @@
 - Each crate with fixture tests (`layoutcraft-vsdx`, `-render`, `-engine`, `-model`, `-mcp`) has a `build.rs` that sets `cfg(private_fixtures)` when `../../test/corpus` exists. Integration test files that read fixtures start with `#![cfg(private_fixtures)]`, embedded tests that read fixtures carry `#[cfg(private_fixtures)]`.
 - A public clone has no `test/`: `cargo test --workspace` runs only the tests that need no fixture and is green. With the private corpus in place everything runs as before (the gate, conformance, the oracles).
 - Run the public check with `test/` and `examples/` moved away.
+- `layoutcraft-engine/tests/incremental_import.rs` walks `test/` and `examples/` with their subfolders. A normal run edits 45 of
+  the drawings, taken in turn from each source (`test/corpus`, the rest of `test/`, the top of `examples/`, each folder of
+  `examples/`); `LAYOUTCRAFT_SWEEP_ALL=1` edits every drawing up to 3 MB, for the full gate.
 
 ## How to supply the private corpus
 Keep `test/` and `examples/` in a PRIVATE place (a private repository cloned next to or into `LayoutCraft/`, or a private git submodule). The folder names must stay `LayoutCraft/test` and `LayoutCraft/examples`. Never add them to the public repository; never publish a build artefact that embeds them (`web/` and the wasm do not).

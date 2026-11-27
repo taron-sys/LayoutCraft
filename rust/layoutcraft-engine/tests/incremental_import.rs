@@ -11,19 +11,66 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-fn drawings() -> Vec<PathBuf> {
-    let mut found = Vec::new();
-    for dir in ["test/corpus", "examples", "test"] {
-        let Ok(entries) = std::fs::read_dir(root().join(dir)) else { continue };
+/// How many drawings a normal run edits (about 25 s); `LAYOUTCRAFT_SWEEP_ALL=1` edits every drawing found (minutes: the full gate).
+const SAMPLE: usize = 45;
+/// Larger drawings are left out: each edit re-imports the page twice.
+const MAX_BYTES: u64 = 3_000_000;
+
+/// Every `.vsdx` of at most `MAX_BYTES` under `test/corpus`, `examples` and `test`, subfolders included, grouped by where it comes
+/// from: `test/corpus`, the rest of `test`, the files at the top of `examples`, and each folder of `examples` on its own. Each group
+/// is sorted.
+fn drawing_groups() -> Vec<Vec<PathBuf>> {
+    fn walk(dir: &std::path::Path, found: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().is_some_and(|e| e == "vsdx") && !found.contains(&path) {
+            if path.is_dir() {
+                walk(&path, found);
+            } else if path.extension().is_some_and(|e| e == "vsdx") && entry.metadata().is_ok_and(|m| m.len() <= MAX_BYTES) {
                 found.push(path);
             }
         }
     }
-    found.sort();
-    found
+    let mut groups: std::collections::BTreeMap<String, Vec<PathBuf>> = std::collections::BTreeMap::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for dir in ["test/corpus", "examples", "test"] {
+        let base = root().join(dir);
+        let mut found = Vec::new();
+        walk(&base, &mut found);
+        for path in found {
+            if !seen.insert(path.clone()) {
+                continue;
+            }
+            let inside = path.strip_prefix(&base).ok().and_then(|rest| rest.parent()).and_then(|parent| parent.components().next());
+            let group = match (dir, inside) {
+                ("examples", Some(folder)) => format!("examples/{}", folder.as_os_str().to_string_lossy()),
+                _ => dir.to_string(),
+            };
+            groups.entry(group).or_default().push(path);
+        }
+    }
+    groups.into_values().map(|mut group| { group.sort(); group }).collect()
+}
+
+/// The drawings to edit: every one with `LAYOUTCRAFT_SWEEP_ALL=1`, else `SAMPLE` of them taken in turn from each group, so every
+/// source of drawings is in a normal run (the same ones on every run).
+fn drawings() -> Vec<PathBuf> {
+    let groups = drawing_groups();
+    let all = std::env::var_os("LAYOUTCRAFT_SWEEP_ALL").is_some_and(|v| v == "1");
+    let limit = if all { usize::MAX } else { SAMPLE };
+    let mut chosen = Vec::new();
+    for round in 0.. {
+        let before = chosen.len();
+        for group in &groups {
+            if chosen.len() < limit {
+                chosen.extend(group.get(round).cloned());
+            }
+        }
+        if chosen.len() == before || chosen.len() >= limit {
+            break;
+        }
+    }
+    chosen
 }
 
 /// The path of the first difference of two JSON values (for the failure message).
@@ -89,11 +136,8 @@ fn movable(engine: &Engine) -> Vec<String> {
 fn incremental_import_equals_a_fresh_import_after_edits() {
     let mut checked_edits = 0;
     let mut files = 0;
-    for path in drawings().into_iter().take(45) {
+    for path in drawings() {
         let Ok(bytes) = std::fs::read(&path) else { continue };
-        if bytes.len() > 3_000_000 {
-            continue;
-        }
         let mut engine = Engine::new();
         if engine.open(bytes).is_err() || engine.document().is_none_or(|d| d.pages.is_empty()) {
             continue;
