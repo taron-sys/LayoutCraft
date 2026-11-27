@@ -87,7 +87,7 @@ nice to have. Effort is an estimate in hours.
 | Ribbon tabs | Home, Insert, Design, Data, Process, Review, View, Developer (hidden until enabled), Help; the page tab order in S4 lists Home through View; Draw tab unverified (S4, S14, S27). | `ribbon-web.json`: File, Home, Insert, Draw, Design, Data, Process, Review, View, Help. Draw and Process carry a "not built" note. No Developer tab. | Developer tab missing; Draw and Process are stubs; tab can be collapsed (Ctrl+F1 on desktop). | P1 | 6-10 |
 | Contextual tabs | A tab appears for a selected container (Container Format; S20) and for some templates (a Plan tab with the office-layout template; S5). Picture, connector and other contextual tabs: unverified. | None. Options for the selection live in the right-hand inspector (desktop) or panel (browser). | Contextual-tab mechanism absent in both hosts. | P2 | 16-24 |
 | Ribbon layout | Groups with a launcher (dialog box) at the group corner (S10, S21 mention group launchers); ribbon can collapse and be customised through File > Options > Customize Ribbon (S16). | Groups lay out in two rows (`grid_cell`), compact mode below 1750 px, collapse with Ctrl+F1, tab drag not supported; no launchers; no customise. | Launchers; customise ribbon. | P2 | 10-20 |
-| File / Backstage | File opens a full-page view; New shows a template gallery with categories and search (S5); Options holds Customize Ribbon and Advanced (S16, S11). | Browser: `web/backstage.js` (New, Open, Export, Info). Desktop: File tab shows New, Open, Export, document properties as ribbon buttons, not a full page. | No full-page Backstage on desktop; no template gallery; no Options page. | P1 | 14-24 |
+| File / Backstage | File opens a full-page view; New shows a template gallery with categories and search (S5); Options holds Customize Ribbon and Advanced (S16, S11). | Browser: `web/backstage.js` (New, Open, Export, Info). Desktop: File opens a full page with the file commands at the side, a blank drawing, a path to open and the recent drawings. | No template gallery; no Options page. | P1 | 14-24 |
 | Shapes window | Stencils stacked, one open at a time, title bars; More Shapes menu; Search at the top; minimise to a thin column; any stencil can be opened in any diagram (S2). Quick Shapes area at the top of each stencil plus a generated Quick Shapes stencil (S3). | Desktop left panel: heading, "Open stencil", "Basic shapes", search box, minimise to a narrow column, stencil headers with one stencil open at a time (a search shows all matches), 70 x 84 px thumbnails; click-then-click or drag onto page; context menu Place / Replace; remembers opened stencils. Browser: `web/shell.js` palette with favourites. | More Shapes category menu, Quick Shapes area and stencil, drag shape out of the Quick area to edit it, Shapes window dock/float. | P0 | 16-28 |
 | Drawing canvas | Page with horizontal and vertical rulers (S26), optional grid (S21) fixed or variable, guides dragged from rulers (S26 snippet), page breaks (unverified), workspace beyond the page. | Desktop: page raster with grid lines (`show_grid`), snapping to grid / shapes / guides read from the page; rulers (no drawing scale), guides dragged from them. Browser: rulers, guides (`shell.js` ruler guides), grid, page breaks. | Drawing scale on the desktop rulers; keyboard creation and moving of guides; page-break view. | P0 | 12-20 |
 | Page tabs | Tabs at the lower edge of the drawing: Page-1 and background pages such as VBackground-1 (S5); right-click a page tab for page properties (S1 snippet context, S27). | Browser: `#pageBar` with context menu (`contextmenu.js`). Desktop: a tab strip under the drawing with a right-click menu, drag to reorder and an add button; page buttons also in the status bar. | Background pages in the desktop strip; page properties from the menu; keyboard reordering other than the ribbon commands. | P0 | 8-14 |
@@ -104,6 +104,11 @@ nice to have. Effort is an estimate in hours.
 | Mini toolbars | AutoConnect mini toolbar of up to four Quick Shapes over the arrow (S3, S5, S6). Selection mini toolbar for text: unverified. | Browser: AutoConnect-style arrows (`autoConnectToggle`). Desktop: connect arrows without a picker. | The picker at the arrows; selection mini toolbar. | P0 | 12-20 |
 
 ## 3. Ribbon parity
+
+Desktop (2026-11-27): the ribbon leaves out the commands of the web ribbon that the app does not have, instead of showing them
+greyed. Not built there: format painter, Arrange, Edit Points, Fit Curve, lock shape, insert picture, paper colour, print, fixed
+page, page breaks, pan and zoom pane, a second "Compare File", the separate wheel zoom button (it is in the zoom menu), refit,
+tip delay and new window. A row below that says "present" for the desktop only because the button was shown is out of date.
 
 Reading the table:
 
@@ -132,7 +137,7 @@ these are row counts, not a count of every Visio button.
 | Print | S1 (Ctrl+P is a web shortcut) | print | missing | present | Browser prints through the page | P1 |
 | Info / document properties | unverified | docPropsBtn | present | present | | P2 |
 | Options (Customize Ribbon, Advanced) | S16, S11 | - | missing | missing | | P2 |
-| Close / recent files | unverified | - | partial | missing | Desktop: a Recent menu beside Open; no Close | P2 |
+| Close / recent files | unverified | - | partial | missing | Desktop: recent drawings on the File page; no Close | P2 |
 
 ### 3.2 Quick Access Toolbar
 
