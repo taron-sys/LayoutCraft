@@ -3304,6 +3304,22 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert_eq!(fill(&driver).as_deref(), Some("#c00000"), "{}", driver.app.status);
         assert_eq!(driver.app.engine.undo_depth(), depth + 1);
         assert_eq!(driver.app.doc_shape(&ids[1]).and_then(|shape| shape.fill.clone()), other, "only the selection");
+        // the drawing's own style can be deleted, a built-in one cannot
+        let names = |driver: &Driver| {
+            let list: serde_json::Value = serde_json::from_str(&driver.app.engine.styles_list_json().unwrap()).unwrap();
+            list.as_array().unwrap().iter().filter_map(|style| style["name"].as_str().map(str::to_string)).collect::<Vec<_>>()
+        };
+        let built_in = names(&driver).into_iter().find(|name| name != "Alarm").expect("a built-in style");
+        let count = names(&driver).len();
+        press(&mut driver, "Alarm");
+        press(&mut driver, &built_in);
+        let depth = driver.app.engine.undo_depth();
+        press(&mut driver, "Delete style");
+        assert_eq!((names(&driver).len(), driver.app.engine.undo_depth()), (count, depth), "{built_in}: {}", driver.app.status);
+        press(&mut driver, &built_in);
+        press(&mut driver, "Alarm");
+        press(&mut driver, "Delete style");
+        assert!(!names(&driver).contains(&"Alarm".to_string()) && names(&driver).len() == count - 1, "{}", driver.app.status);
         driver.key(Key::Escape, Modifiers::NONE);
         assert!(driver.app.style_pick.is_none());
     }

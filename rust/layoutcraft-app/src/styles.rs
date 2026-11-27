@@ -1,5 +1,5 @@
-//! The Styles window: give the selection one of the drawing's styles. The styles and the change are the engine's; this file
-//! asks and draws.
+//! The Styles window: give the selection one of the drawing's styles, or delete a style made for the drawing. The styles and
+//! the changes are the engine's; this file asks and draws.
 use super::LayoutCraftApp;
 use eframe::egui;
 
@@ -19,10 +19,10 @@ impl Default for StylePick {
 }
 
 impl LayoutCraftApp {
-    /// The drawing's styles as (ID, name).
-    fn style_list(&self) -> Vec<(String, String)> {
+    /// The drawing's styles as (ID, name, made for this drawing: only those can be deleted).
+    fn style_list(&self) -> Vec<(String, String, bool)> {
         let list = self.engine.styles_list_json().ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).and_then(|value| value.as_array().cloned()).unwrap_or_default();
-        list.iter().filter_map(|style| Some((style["id"].as_str()?.to_string(), style["name"].as_str()?.to_string()))).collect()
+        list.iter().filter_map(|style| Some((style["id"].as_str()?.to_string(), style["name"].as_str()?.to_string(), style["custom"].as_bool() == Some(true)))).collect()
     }
 
     pub(super) fn draw_styles_window(&mut self, ctx: &egui::Context) {
@@ -36,7 +36,7 @@ impl LayoutCraftApp {
         if pick.style.as_ref().is_some_and(|chosen| styles.iter().all(|style| &style.0 != chosen)) {
             pick.style = None;
         }
-        let (mut open, mut apply) = (true, false);
+        let (mut open, mut apply, mut delete) = (true, false, false);
         egui::Window::new("Styles").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
             if styles.is_empty() {
                 ui.label("This drawing has no styles.");
@@ -48,7 +48,7 @@ impl LayoutCraftApp {
                 .selected_text(shown)
                 .width(180.0)
                 .show_ui(ui, |ui| {
-                    for (id, name) in &styles {
+                    for (id, name, _) in &styles {
                         ui.selectable_value(&mut pick.style, Some(id.clone()), name);
                     }
                 })
@@ -61,10 +61,23 @@ impl LayoutCraftApp {
             if selected.is_empty() {
                 ui.label("Select shapes to give them a style.");
             }
+            ui.separator();
+            let own = styles.iter().any(|style| style.2 && Some(&style.0) == pick.style.as_ref());
+            delete = ui
+                .add_enabled(own, egui::Button::new("Delete style"))
+                .on_hover_text("Shapes that use it fall back to no style; Undo brings it back")
+                .on_disabled_hover_text("Choose a style made for this drawing; the built-in ones stay")
+                .clicked();
         });
         let request = pick.style.clone().filter(|_| apply).map(|style| format!("{style}|{}|{}", pick.scope, selected.join(",")));
+        let doomed = pick.style.clone().filter(|_| delete);
         if !open || (!self.focus_at_frame_start && ctx.input(|input| input.key_pressed(egui::Key::Escape))) {
             self.style_pick = None;
+        }
+        if let Some(style) = doomed {
+            let result = self.engine.page_op(38, self.page_index, 0, &style).map(|_| ());
+            let primary = self.selected.clone();
+            self.finish_edit(ctx, result, "Deleted the style", primary);
         }
         if let Some(request) = request {
             let result = self.engine.page_op(36, self.page_index, 0, &request).map(|_| ());
