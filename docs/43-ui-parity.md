@@ -350,7 +350,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Send to back | Ctrl+Shift+B | Ctrl+Shift+B | Ctrl+Shift+B | same |
 | Rotate left / right | Ctrl+L / Ctrl+R | Ctrl+L / Ctrl+R | `[` / `]` | same on desktop |
 | Flip horizontal / vertical | Ctrl+H / Ctrl+J | Ctrl+H / Ctrl+J | `H` / `V` | same on desktop |
-| Align Shapes dialog | F8 | none | none | none |
+| Align Shapes dialog | F8 | F8 goes to the inspector's align buttons (no dialog) | none | partial |
 | Pointer tool | Ctrl+1 | Ctrl+1 | Esc | same on desktop |
 | Text tool | Ctrl+2 | Ctrl+2 (draws a text box) | none | same on desktop |
 | Connector tool | Ctrl+3 | Ctrl+3 | none | same on desktop |
@@ -386,7 +386,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Find | Ctrl+F (web `findBtn`) | Ctrl+F | Ctrl+F | same on desktop |
 | Hyperlink | Ctrl+K (unverified in S1) | Ctrl+K | Ctrl+K | same on desktop |
 
-Count of the 41 rows above: same 26, diff 1, partial 4, none 10. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 26, diff 1, partial 5, none 9. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 

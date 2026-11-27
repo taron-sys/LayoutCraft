@@ -367,6 +367,8 @@ mod arrange_key_tests {
 enum ViewKey {
     /// Go to the inspector's Style settings.
     StyleSettings,
+    /// Go to the inspector's align buttons.
+    AlignButtons,
     Tool(Tool),
     FitPage,
     NextPage,
@@ -400,6 +402,7 @@ const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
     (egui::Modifiers::CTRL, egui::Key::K, ViewKey::Hyperlink),
     (egui::Modifiers::NONE, egui::Key::F3, ViewKey::StyleSettings),
     (egui::Modifiers::NONE, egui::Key::F5, ViewKey::FullScreen),
+    (egui::Modifiers::NONE, egui::Key::F8, ViewKey::AlignButtons),
     (egui::Modifiers::ALT, egui::Key::F9, ViewKey::SnapDialog),
     // Ctrl+F1 (collapse the ribbon) is taken before these keys are read
     (egui::Modifiers::NONE, egui::Key::F1, ViewKey::Help),
@@ -3445,6 +3448,23 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn f8_goes_to_the_align_buttons_when_two_shapes_are_selected() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(2);
+        driver.key(Key::F8, Modifiers::NONE);
+        assert!(!driver.app.align_focus && driver.app.status.contains("two or more"), "{}", driver.app.status);
+        driver.app.extra_selected = vec![ids[1].clone()];
+        driver.frames(3);
+        assert!((driver.at(&ids[0]).0 - driver.at(&ids[1]).0).abs() > 1.0);
+        driver.key(Key::F8, Modifiers::NONE);
+        // the first button, align left edges, has the keyboard
+        driver.key(Key::Space, Modifiers::NONE);
+        driver.frames(2);
+        assert!((driver.at(&ids[0]).0 - driver.at(&ids[1]).0).abs() < 0.01, "{:?} {:?} {}", driver.at(&ids[0]), driver.at(&ids[1]), driver.app.status);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4270,6 +4290,8 @@ struct LayoutCraftApp {
     name_field: NameField,
     /// The first Style control of the inspector is to take the keyboard (F3).
     style_focus: bool,
+    /// The inspector's first align button is to take the keyboard (F8).
+    align_focus: bool,
     /// The Styles window, while it is open.
     style_pick: Option<styles::StylePick>,
     /// The Layers window is open.
@@ -4442,6 +4464,7 @@ impl LayoutCraftApp {
             size_pos: SizePos::default(),
             name_field: NameField::default(),
             style_focus: false,
+            align_focus: false,
             style_pick: None,
             layers_open: false,
             full_screen: false,
@@ -8369,6 +8392,13 @@ impl eframe::App for LayoutCraftApp {
             }
             match ctx.input_mut(consume_view_key) {
                 Some(ViewKey::Tool(tool)) => self.take_tool(tool),
+                Some(ViewKey::AlignButtons) => {
+                    if !self.full_screen && self.selected.is_some() && !self.extra_selected.is_empty() {
+                        self.align_focus = true;
+                    } else {
+                        self.status = "Select two or more shapes to align them.".to_string();
+                    }
+                }
                 Some(ViewKey::StyleSettings) => {
                     // only when the inspector is there to show them, so that no later selection takes the keyboard
                     if !self.full_screen && self.selected.as_deref().and_then(|id| self.doc_shape(id)).is_some_and(|shape| shape.group.is_none()) {
@@ -8630,8 +8660,14 @@ impl eframe::App for LayoutCraftApp {
                         });
                         ui.horizontal_wrapped(|ui| {
                             ui.label("Align");
-                            for (label, mode) in [("L", 0), ("C", 1), ("R", 2), ("T", 3), ("M", 4), ("B", 5)] {
-                                if ui.small_button(label).clicked() {
+                            for (label, mode, name) in [("L", 0, "Align left edges"), ("C", 1, "Align centres, left to right"), ("R", 2, "Align right edges"), ("T", 3, "Align top edges"), ("M", 4, "Align middles, top to bottom"), ("B", 5, "Align bottom edges")] {
+                                let button = ui.small_button(label).on_hover_text(name);
+                                ui.ctx().accesskit_node_builder(button.id, |node| node.set_label(name));
+                                if mode == 0 && std::mem::take(&mut self.align_focus) {
+                                    button.request_focus();
+                                    button.scroll_to_me(None);
+                                }
+                                if button.clicked() {
                                     action = Some(Action::Arrange(ArrangeCmd::Align(mode)));
                                 }
                             }
