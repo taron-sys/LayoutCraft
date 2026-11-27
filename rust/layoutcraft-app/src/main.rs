@@ -3465,6 +3465,28 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_font_group_colours_the_text() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        for label in ["Font \u{25be}", "Text colour..."] {
+            let at = *driver.texts(label).first().unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        }
+        assert!(driver.app.colour_draft.as_ref().is_some_and(|draft| draft.key == "textColor"));
+        assert!(!driver.texts("Text colour").is_empty(), "the window says what it sets");
+        let look = |driver: &Driver| driver.app.doc_shape(&ids[0]).map(|shape| (shape.text_color.clone().map(|c| c.to_lowercase()), shape.fill.clone(), shape.stroke.clone())).unwrap();
+        let before = look(&driver);
+        driver.write("#a01080");
+        driver.key(Key::Enter, Modifiers::NONE);
+        let after = look(&driver);
+        assert_eq!(after.0.as_deref(), Some("#a01080"), "{}", driver.app.status);
+        assert_eq!((after.1, after.2), (before.1, before.2), "fill and line stay");
+        assert!(driver.app.colour_draft.is_none());
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4106,8 +4128,8 @@ fn typed_colour(text: &str) -> Option<[u8; 3]> {
     (digits.len() == 6 && digits.bytes().all(|byte| byte.is_ascii_hexdigit())).then(|| parse_hex(&format!("#{digits}"))).flatten()
 }
 
-/// The window for a colour that is not among the ribbon's swatches: which style it sets ("fill" or "line"), the code typed or
-/// picked, why it was refused, and whether the field still has to take the keyboard.
+/// The window for a colour that is not among the ribbon's swatches: which style it sets ("fill", "line" or "textColor"), the
+/// code typed or picked, why it was refused, and whether the field still has to take the keyboard.
 struct ColourDraft {
     key: &'static str,
     text: String,
@@ -6501,6 +6523,10 @@ impl LayoutCraftApp {
                 if ui.add_enabled(enabled, egui::Button::new("Caps").selected(on)).on_hover_text("All capitals for the whole text").clicked() {
                     *action = Some(Action::FormatText(serde_json::json!({ "cells": { "Case": if on { "0" } else { "1" } } })));
                 }
+                if ui.add_enabled(enabled, egui::Button::new("Text colour...")).on_hover_text("Colour of the text of the selected shapes").clicked() {
+                    *action = Some(Action::ColourDialog("textColor"));
+                    ui.close();
+                }
             }
             "p:alignL" => {
                 let current = primary.as_ref().and_then(|shape| shape.align.clone());
@@ -7998,12 +8024,20 @@ impl LayoutCraftApp {
     fn draw_colour_window(&mut self, ctx: &egui::Context, action: &mut Option<Action>) {
         // what the picker shows before anything is typed
         let current = self.selected.as_deref().and_then(|id| self.doc_shape(id).map(|shape| StyleDraft::from_shape(id, shape)));
+        let lettering = self.selected.as_deref().and_then(|id| self.doc_shape(id)).and_then(|shape| shape.text_color.as_deref()).and_then(parse_hex);
         let Some(draft) = self.colour_draft.as_mut() else {
             return;
         };
-        let current = current.map_or([0, 0, 0], |style| if draft.key == "fill" { style.fill } else { style.line });
+        let current = match draft.key {
+            "textColor" => lettering.unwrap_or([0, 0, 0]),
+            key => current.map_or([0, 0, 0], |style| if key == "fill" { style.fill } else { style.line }),
+        };
         let (mut open, mut apply, mut cancel) = (true, false, false);
-        let title = if draft.key == "fill" { "Fill colour" } else { "Line colour" };
+        let title = match draft.key {
+            "fill" => "Fill colour",
+            "textColor" => "Text colour",
+            _ => "Line colour",
+        };
         egui::Window::new(title).open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
             let label = ui.label("Colour code (#rrggbb)");
             let field = ui.add(egui::TextEdit::singleline(&mut draft.text).hint_text(hex(current)).desired_width(100.0)).labelled_by(label.id);
