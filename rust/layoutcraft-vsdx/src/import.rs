@@ -2530,7 +2530,10 @@ fn convert_shape(
         && node.master_children.is_empty()
         && !node.sections.iter().any(|section| section.name == "Geometry");
     let hidden_geometry = parts.is_empty() && (has_geometry || textual_master_child);
-    let (fill, stroke, stroke_width, dash) = if hidden_geometry {
+    // Neither does a shape or group with no Geometry section at all, whatever its fill and line cells say: only its text and
+    // its member shapes show (measured in Visio, docs/04). A picture is the exception: it is its own content.
+    let no_outline = !has_geometry && node.foreign.is_none();
+    let (fill, stroke, stroke_width, dash) = if hidden_geometry || (no_outline && parts.is_empty()) {
         ("none".to_string(), "none".to_string(), 0.0, None)
     } else if let Some(front) = parts.last() {
         (

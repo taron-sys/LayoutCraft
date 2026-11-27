@@ -117,6 +117,11 @@ moving a shape in or out does not change membership yet.
 
 ## Geometry
 
+A shape or group with **no Geometry section** (none of its own and none from a master) paints no fill and no line, whatever
+its cells say; its text and its member shapes still draw, and a picture is its own content. Measured 2026-11-27 in Visio
+16.0 through automation: rectangles whose section was deleted, and a group, drawn for the purpose, exported to PNG with no
+pixel of their fill colours.
+
 `partsOf` builds the drawable representation:
 
 - A shape with its own geometry is drawn from its evaluated rows.
