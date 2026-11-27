@@ -16,7 +16,9 @@
 - Run the public check with `test/` and `examples/` moved away.
 - `layoutcraft-engine/tests/incremental_import.rs` walks `test/` and `examples/` with their subfolders. A normal run edits 45 of
   the drawings, taken in turn from each source (`test/corpus`, the rest of `test/`, the top of `examples/`, each folder of
-  `examples/`); `LAYOUTCRAFT_SWEEP_ALL=1` edits every drawing up to 3 MB, for the full gate.
+  `examples/`); `LAYOUTCRAFT_SWEEP_ALL=1` edits every drawing up to 3 MB (about 14 minutes), for the full gate. A failure names every drawing
+  that differs, by its path. First full run (2026-11-27): 11 of 1,389 drawings differ, all in the last digits of a picture's
+  `displayWidth` after a move.
 
 ## How to supply the private corpus
 Keep `test/` and `examples/` in a PRIVATE place (a private repository cloned next to or into `LayoutCraft/`, or a private git submodule). The folder names must stay `LayoutCraft/test` and `LayoutCraft/examples`. Never add them to the public repository; never publish a build artefact that embeds them (`web/` and the wasm do not).

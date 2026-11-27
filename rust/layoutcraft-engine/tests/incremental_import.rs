@@ -11,7 +11,8 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
 }
 
-/// How many drawings a normal run edits (about 25 s); `LAYOUTCRAFT_SWEEP_ALL=1` edits every drawing found (minutes: the full gate).
+/// How many drawings a normal run edits (about 25 s); `LAYOUTCRAFT_SWEEP_ALL=1` edits every drawing found (about 14 min for the
+/// 1,389 drawings on the maintainer's machine: the full gate).
 const SAMPLE: usize = 45;
 /// Larger drawings are left out: each edit re-imports the page twice.
 const MAX_BYTES: u64 = 3_000_000;
@@ -101,11 +102,10 @@ fn first_diff(a: &serde_json::Value, b: &serde_json::Value, path: std::string::S
     }
 }
 
-fn same(engine: &Engine, what: &str) {
+/// `None` when the engine's document is what a fresh import of its file gives, else where they first differ.
+fn same(engine: &Engine, what: &str) -> Option<String> {
     let (a, b) = (current(engine), fresh(engine));
-    if let Some(path) = first_diff(&a, &b, String::new()) {
-        panic!("{what}: the incremental import differs from a fresh one at {path}");
-    }
+    first_diff(&a, &b, String::new()).map(|path| format!("{what}: the incremental import differs from a fresh one at {path}"))
 }
 
 fn fresh(engine: &Engine) -> serde_json::Value {
@@ -136,7 +136,9 @@ fn movable(engine: &Engine) -> Vec<String> {
 fn incremental_import_equals_a_fresh_import_after_edits() {
     let mut checked_edits = 0;
     let mut files = 0;
-    for path in drawings() {
+    // the first difference of each drawing (its later edits would only repeat it); all of them are reported at the end
+    let mut failures: Vec<String> = Vec::new();
+    'drawings: for path in drawings() {
         let Ok(bytes) = std::fs::read(&path) else { continue };
         let mut engine = Engine::new();
         if engine.open(bytes).is_err() || engine.document().is_none_or(|d| d.pages.is_empty()) {
@@ -147,7 +149,8 @@ fn incremental_import_equals_a_fresh_import_after_edits() {
         if ids.is_empty() {
             continue;
         }
-        let name = path.file_name().unwrap().to_string_lossy().to_string();
+        // the path below the checkout: many drawings share a file name (Drawing1.vsdx)
+        let name = path.strip_prefix(root()).unwrap_or(&path).to_string_lossy().to_string();
         // three edits in a row: the second and third use the cache the previous import left
         let steps: Vec<(i32, &str, f64)> = vec![(2, &ids[0], 0.3), (2, &ids[ids.len() / 2], -0.2), (7, &ids[ids.len() - 1], 0.6)];
         for (op, id, amount) in steps {
@@ -158,7 +161,10 @@ fn incremental_import_equals_a_fresh_import_after_edits() {
             if result.is_err() {
                 continue; // an edit the engine refuses for this shape (locked, no frame): nothing to compare
             }
-            same(&engine, &format!("{name}: after op {op} on shape {id}"));
+            if let Some(failure) = same(&engine, &format!("{name}: after op {op} on shape {id}")) {
+                failures.push(failure);
+                continue 'drawings;
+            }
             checked_edits += 1;
         }
         // a delete changes the shape count: the stacking counter shifts, the cache must not be taken over wrongly
@@ -166,15 +172,22 @@ fn incremental_import_equals_a_fresh_import_after_edits() {
         let no_pictures = engine.document().is_some_and(|d| d.media.is_empty());
         let victim = ids[0].clone();
         if no_pictures && engine.edit(0, 6, &victim, 0.0, 0.0, 0.0, 0.0, 0).is_ok() {
-            same(&engine, &format!("{name}: after deleting {victim}"));
+            if let Some(failure) = same(&engine, &format!("{name}: after deleting {victim}")) {
+                failures.push(failure);
+                continue 'drawings;
+            }
             checked_edits += 1;
         }
         // undo restores the earlier document; the next edit must still be right
         if no_pictures && engine.undo().unwrap_or(false) {
-            same(&engine, &format!("{name}: after undo"));
+            if let Some(failure) = same(&engine, &format!("{name}: after undo")) {
+                failures.push(failure);
+                continue 'drawings;
+            }
             checked_edits += 1;
         }
     }
+    assert!(failures.is_empty(), "{} of {files} drawings differ:\n{}", failures.len(), failures.join("\n"));
     assert!(files >= 10, "too few drawings found ({files})");
     assert!(checked_edits >= 30, "too few edits compared ({checked_edits})");
     eprintln!("incremental import: {files} drawings, {checked_edits} edits compared");
