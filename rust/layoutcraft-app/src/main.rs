@@ -1059,6 +1059,8 @@ struct DataPane {
     new_type: u32,
     new_prompt: String,
     new_choices: String,
+    /// The name of the field whose type and prompt are being changed.
+    changing: Option<String>,
 }
 
 /// The types a new field can be given, with the numbers the file stores (`Prop.Type`).
@@ -1109,9 +1111,29 @@ fn new_data_row(label: &str, rows: &[DataRow]) -> Option<DataRow> {
     serde_json::from_value(serde_json::json!({ "name": name, "label": label })).ok()
 }
 
+/// An existing row with another prompt and, when `kind` differs or it is a list, another type or choices. The value is kept
+/// where the new type can hold it: yes or no becomes "1" or "0", and a list keeps a value that is one of its choices.
+fn changed_data_row(row: &DataRow, kind: u32, choices: &str, prompt: &str) -> Result<DataRow, String> {
+    let mut changed = if kind == 1 { typed_data_row(row.clone(), kind, choices, prompt)? } else { row.clone() };
+    changed.prompt = prompt.trim().to_string();
+    if kind == 1 {
+        if changed.format.split(';').any(|item| item == row.value) {
+            changed.value = row.value.clone();
+        }
+    } else if kind != row.r#type {
+        changed.r#type = kind;
+        changed.format.clear();
+        if kind == 3 {
+            let yes = row.value == "1" || row.value.eq_ignore_ascii_case("true") || row.value.eq_ignore_ascii_case("yes");
+            changed.value = if yes { "1" } else { "0" }.to_string();
+        }
+    }
+    Ok(changed)
+}
+
 #[cfg(test)]
 mod data_row_tests {
-    use super::{new_data_row, write_data_row};
+    use super::{changed_data_row, new_data_row, write_data_row};
     use layoutcraft_engine::Engine;
     use layoutcraft_model::DataRow;
 
@@ -1127,6 +1149,31 @@ mod data_row_tests {
         assert_ne!(new_data_row("Serial no.", std::slice::from_ref(&first)).unwrap().name, first.name);
         assert!(new_data_row("1st", &[]).unwrap().name.starts_with(|c: char| c.is_ascii_alphabetic()));
         assert!(new_data_row("  ", &[]).is_none());
+    }
+
+    #[test]
+    fn changing_a_type_keeps_what_the_new_type_can_hold_also_in_the_file() {
+        let mut engine = Engine::default();
+        engine.new_blank(11.0, 8.5, false, "Page-1").unwrap();
+        let id = engine.draw(0, 0, 1.0, 1.0, 3.0, 3.0).unwrap();
+        let mut row = new_data_row("Colour", &[]).unwrap();
+        row.value = "Green".to_string();
+        row.invisible = 1;
+        write_data_row(&mut engine, 0, &id, &row).unwrap();
+        let change = |engine: &mut Engine, kind: u32, choices: &str| {
+            let now = rows(engine, &id).remove(0);
+            write_data_row(engine, 0, &id, &changed_data_row(&now, kind, choices, " Which? ").unwrap()).unwrap();
+            rows(engine, &id).remove(0)
+        };
+        let list = change(&mut engine, 1, "Red;Green");
+        assert_eq!((list.r#type, list.format.as_str(), list.value.as_str(), list.prompt.as_str(), list.invisible != 0), (1, "Red;Green", "Green", "Which?", true));
+        // a value that is no longer a choice gives way to the first one
+        assert_eq!(change(&mut engine, 1, "Blue;Black").value, "Blue");
+        // as text again the list of choices is gone from the file
+        let plain = change(&mut engine, 0, "");
+        assert_eq!((plain.r#type, plain.format.as_str(), plain.value.as_str()), (0, "", "Blue"));
+        assert_eq!(change(&mut engine, 3, "").value, "0");
+        assert!(changed_data_row(&plain, 1, ";", "").is_err());
     }
 
     #[test]
@@ -2970,6 +3017,37 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         driver.app.snap_reach_px = 20.0;
         let strong = driver.app.snapped_move(moved, delta).0;
         assert!((moved.right() + strong.x - other.left()).abs() < 0.01, "{strong:?} {delta:?}");
+    }
+
+    #[test]
+    fn a_fields_prompt_and_type_can_be_changed_in_the_window() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.app.data_pane = Some(DataPane { new_label: "Owner".to_string(), ..DataPane::default() });
+        driver.frames(4);
+        let press = |driver: &mut Driver, label: &str| {
+            let button = *driver.texts(label).first().unwrap_or_else(|| panic!("no {label:?} button"));
+            driver.click(button.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        press(&mut driver, "Add");
+        let row = |driver: &Driver| driver.app.doc_shape(&ids[0]).and_then(|shape| shape.data.first().cloned()).expect("the field");
+        let depth = driver.app.engine.undo_depth();
+        press(&mut driver, "Change");
+        // saving without a change writes nothing
+        press(&mut driver, "Save field");
+        assert_eq!(driver.app.engine.undo_depth(), depth);
+        press(&mut driver, "Change");
+        driver.app.data_pane.as_mut().unwrap().new_prompt = "Who looks after it?".to_string();
+        driver.frames(2);
+        press(&mut driver, "Save field");
+        assert_eq!((row(&driver).prompt.as_str(), driver.app.engine.undo_depth()), ("Who looks after it?", depth + 1), "{}", driver.app.status);
+        assert!(driver.app.data_pane.as_ref().is_some_and(|pane| pane.changing.is_none() && pane.new_prompt.is_empty()));
+        // the form does not follow to another shape
+        press(&mut driver, "Change");
+        driver.app.selected = Some(ids[1].clone());
+        driver.frames(3);
+        assert!(driver.app.data_pane.as_ref().is_some_and(|pane| pane.changing.is_none() && pane.new_prompt.is_empty()));
     }
 
     #[test]
@@ -6847,6 +6925,13 @@ impl LayoutCraftApp {
         };
         let key = shape.as_ref().map(|shape| (page, shape.clone(), self.engine.undo_depth()));
         if pane.key != key {
+            // the form for changing a field belongs to the shape it was opened on
+            let shown = |key: &Option<(usize, String, usize)>| key.as_ref().map(|(page, shape, _)| (*page, shape.clone()));
+            if shown(&pane.key) != shown(&key) && pane.changing.take().is_some() {
+                pane.new_type = 0;
+                pane.new_prompt.clear();
+                pane.new_choices.clear();
+            }
             pane.rows = shape.as_deref().and_then(|id| self.doc_shape(id)).map(|shape| shape.data.clone()).unwrap_or_default();
             pane.key = key;
         }
@@ -6856,6 +6941,8 @@ impl LayoutCraftApp {
         let mut reread = false;
         let mut remove: Option<String> = None;
         let mut refused: Option<String> = None;
+        // the row whose type and prompt are to be changed
+        let mut change: Option<DataRow> = None;
         egui::Window::new("Shape Fields").open(&mut open).collapsible(true).default_width(360.0).show(ctx, |ui| {
             if shape.is_none() {
                 ui.label("Select one shape to see its fields.");
@@ -6865,7 +6952,7 @@ impl LayoutCraftApp {
                 ui.label("This shape has no fields.");
             }
             egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                egui::Grid::new("shape-data").num_columns(3).show(ui, |ui| {
+                egui::Grid::new("shape-data").num_columns(4).show(ui, |ui| {
                     for row in &mut pane.rows {
                         let title = if row.label.is_empty() { row.name.clone() } else { row.label.clone() };
                         let shown = if row.invisible != 0 { format!("{title} (hidden)") } else { title.clone() };
@@ -6899,6 +6986,9 @@ impl LayoutCraftApp {
                                 None => {}
                             }
                         }
+                        if ui.button("Change").on_hover_text(format!("Change the type and prompt of the field {title}")).clicked() {
+                            change = Some(row.clone());
+                        }
                         if ui.button("Remove").on_hover_text(format!("Remove the field {title}")).clicked() {
                             remove = Some(row.name.clone());
                         }
@@ -6907,35 +6997,45 @@ impl LayoutCraftApp {
                 });
             });
             ui.separator();
-            ui.horizontal(|ui| {
-                let label = ui.label("New field");
-                let edit = ui.text_edit_singleline(&mut pane.new_label).labelled_by(label.id);
-                let entered = edit.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
-                if ui.button("Add").clicked() || entered {
-                    match new_data_row(&pane.new_label, &pane.rows).map(|row| typed_data_row(row, pane.new_type, &pane.new_choices, &pane.new_prompt)) {
-                        Some(Ok(row)) => {
-                            write = Some(row);
-                            pane.new_label.clear();
-                            pane.new_prompt.clear();
-                            pane.new_choices.clear();
+            let changing = pane.changing.as_ref().and_then(|name| pane.rows.iter().find(|row| &row.name == name).cloned());
+            if let Some(row) = &changing {
+                ui.label(format!("Change the field {}", if row.label.is_empty() { &row.name } else { &row.label }));
+            } else {
+                ui.horizontal(|ui| {
+                    let label = ui.label("New field");
+                    let edit = ui.text_edit_singleline(&mut pane.new_label).labelled_by(label.id);
+                    let entered = edit.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                    if ui.button("Add").clicked() || entered {
+                        match new_data_row(&pane.new_label, &pane.rows).map(|row| typed_data_row(row, pane.new_type, &pane.new_choices, &pane.new_prompt)) {
+                            Some(Ok(row)) => {
+                                write = Some(row);
+                                pane.new_label.clear();
+                                pane.new_prompt.clear();
+                                pane.new_choices.clear();
+                            }
+                            Some(Err(why)) => refused = Some(why),
+                            None => {}
                         }
-                        Some(Err(why)) => refused = Some(why),
-                        None => {}
                     }
-                }
-            });
+                });
+            }
             ui.horizontal(|ui| {
-                let label = ui.label("Type");
-                let shown = NEW_FIELD_TYPES.iter().find(|kind| kind.0 == pane.new_type).map_or("", |kind| kind.1);
-                egui::ComboBox::from_id_salt("data-new-type")
-                    .selected_text(shown)
-                    .show_ui(ui, |ui| {
-                        for (kind, name) in NEW_FIELD_TYPES {
-                            ui.selectable_value(&mut pane.new_type, kind, name);
-                        }
-                    })
-                    .response
-                    .labelled_by(label.id);
+                // a field of a type that is not offered here (a number, a date) keeps it
+                if changing.as_ref().is_some_and(|row| NEW_FIELD_TYPES.iter().all(|kind| kind.0 != row.r#type)) {
+                    ui.label("Its type is kept.");
+                } else {
+                    let label = ui.label("Type");
+                    let shown = NEW_FIELD_TYPES.iter().find(|kind| kind.0 == pane.new_type).map_or("", |kind| kind.1);
+                    egui::ComboBox::from_id_salt("data-new-type")
+                        .selected_text(shown)
+                        .show_ui(ui, |ui| {
+                            for (kind, name) in NEW_FIELD_TYPES {
+                                ui.selectable_value(&mut pane.new_type, kind, name);
+                            }
+                        })
+                        .response
+                        .labelled_by(label.id);
+                }
                 let label = ui.label("Prompt");
                 ui.add(egui::TextEdit::singleline(&mut pane.new_prompt).desired_width(140.0)).labelled_by(label.id).on_hover_text("Shown when the pointer rests on the field's name");
             });
@@ -6945,7 +7045,34 @@ impl LayoutCraftApp {
                     ui.text_edit_singleline(&mut pane.new_choices).labelled_by(label.id);
                 });
             }
+            if let Some(row) = changing {
+                let mut done = false;
+                ui.horizontal(|ui| {
+                    if ui.button("Save field").clicked() {
+                        match changed_data_row(&row, pane.new_type, &pane.new_choices, &pane.new_prompt) {
+                            Ok(changed) => {
+                                write = Some(changed);
+                                done = true;
+                            }
+                            Err(why) => refused = Some(why),
+                        }
+                    }
+                    done |= ui.button("Cancel").clicked();
+                });
+                if done {
+                    pane.changing = None;
+                    pane.new_type = 0;
+                    pane.new_prompt.clear();
+                    pane.new_choices.clear();
+                }
+            }
         });
+        if let Some(row) = change {
+            pane.new_type = row.r#type;
+            pane.new_prompt = row.prompt.clone();
+            pane.new_choices = if row.r#type == 1 { row.format.clone() } else { String::new() };
+            pane.changing = Some(row.name);
+        }
         if let Some(why) = refused {
             self.status = why;
         }
@@ -6953,7 +7080,7 @@ impl LayoutCraftApp {
             // leaving a field without a change writes nothing
             let write = write.filter(|row| {
                 let before = self.doc_shape(&shape).and_then(|shape| shape.data.iter().find(|old| old.name == row.name));
-                before.is_none_or(|old| old.value != row.value)
+                before.is_none_or(|old| (&old.value, old.r#type, &old.prompt, &old.format) != (&row.value, row.r#type, &row.prompt, &row.format))
             });
             let result = if let Some(name) = remove {
                 Some(self.engine.edit(page, 18, &format!("{shape}\n{name}"), 0.0, 0.0, 0.0, 0.0, 0))
