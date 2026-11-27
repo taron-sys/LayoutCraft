@@ -3663,6 +3663,34 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn view_switches_are_check_boxes_and_the_page_commands_are_in_a_menu() {
+        let (mut driver, _) = Driver::new();
+        let open = |driver: &mut Driver, name: &str| {
+            let at = driver.texts(name)[0];
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        open(&mut driver, "View");
+        let grid = driver.app.show_grid;
+        let label = driver.texts("Show Grid")[0];
+        // a box stands left of the name
+        let boxed = driver.drawn.iter().any(|clipped| match &clipped.shape {
+            egui::Shape::Rect(shape) => shape.rect.right() <= label.left() && shape.rect.right() > label.left() - 20.0 && (shape.rect.width() - shape.rect.height()).abs() < 1.0 && shape.rect.width() > 8.0 && shape.rect.y_range().contains(label.center().y),
+            _ => false,
+        });
+        assert!(boxed, "{label:?}");
+        driver.click(label.center(), Modifiers::NONE);
+        driver.frames(2);
+        assert_ne!(driver.app.show_grid, grid);
+        open(&mut driver, "Insert");
+        assert!(driver.texts("Duplicate Page").is_empty());
+        open(&mut driver, "Pages \u{25be}");
+        let pages = driver.app.engine.document().unwrap().pages.len();
+        open(&mut driver, "Duplicate Page");
+        assert_eq!(driver.app.engine.document().unwrap().pages.len(), pages + 1, "{}", driver.app.status);
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -5148,7 +5176,7 @@ impl LayoutCraftApp {
             layer_rename: None,
             layer_colour: None,
             paste_count: 0,
-            ribbon: ribbon::Ribbon::load(),
+            ribbon: ribbon::Ribbon::for_desktop(),
             ribbon_tab: 1,
             ribbon_collapsed: false,
             ribbon_peek: false,
@@ -7213,17 +7241,19 @@ impl LayoutCraftApp {
             return;
         }
         if id == "pageTools" {
-            // the new page large, the other page commands two to a column beside it
+            // the new page large, the other page commands in a drop-down beside it
             self.ribbon_large = true;
             self.ribbon_button(ui, ctx, "pageAdd", action);
             self.ribbon_large = false;
-            for pair in [["pageDup", "pageRename"], ["pageDel", "pageLeft"], ["pageRight", ""]] {
-                ui.vertical(|ui| {
-                    for page_id in pair.into_iter().filter(|page_id| !page_id.is_empty()) {
-                        ui.horizontal(|ui| self.ribbon_button(ui, ctx, page_id, action));
-                    }
-                });
-            }
+            ui.menu_button("Pages \u{25be}", |ui| {
+                let compact = std::mem::replace(&mut self.ribbon_compact, false);
+                for page_id in ["pageDup", "pageRename", "pageDel", "pageLeft", "pageRight"] {
+                    ui.horizontal(|ui| self.ribbon_button(ui, ctx, page_id, action));
+                }
+                self.ribbon_compact = compact;
+            })
+            .response
+            .on_hover_text("Duplicate, rename, delete and move the page");
             return;
         }
         if matches!(id, "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor" | "p:shadow") {
@@ -7253,6 +7283,11 @@ impl LayoutCraftApp {
         let compact = self.ribbon_compact;
         let large = std::mem::take(&mut self.ribbon_large);
         let response = match icon.and_then(|name| self.icon_texture(ctx, &name)) {
+            // what is switched on or off shows a box, so that its state does not rest on a colour
+            _ if ribbon::is_check(id) => {
+                let mut on = selected;
+                ui.add_enabled(enabled, egui::Checkbox::new(&mut on, label.clone()))
+            }
             Some(texture) if large => large_button(ui, &texture, &label, enabled, selected),
             Some(texture) => {
                 let image = egui::Image::new(egui::load::SizedTexture::new(texture.id(), egui::vec2(18.0, 18.0)));

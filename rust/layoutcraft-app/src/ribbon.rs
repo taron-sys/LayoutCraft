@@ -52,6 +52,34 @@ impl Ribbon {
         let dump: Dump = serde_json::from_str(WEB_RIBBON).expect("ribbon-web.json is valid");
         Self { tabs: dump.tabs, icons: dump.icons }
     }
+
+    /// The web's ribbon as the desktop app groups it: on the Design tab the border commands are one drop-down in the
+    /// Backgrounds group.
+    pub fn for_desktop() -> Self {
+        let mut ribbon = Self::load();
+        if let Some(design) = ribbon.tabs.iter_mut().find(|tab| tab.name == "Design") {
+            let borders = design.groups.iter().position(|group| group.name == "Borders & Titles");
+            if let Some(at) = borders {
+                if design.groups.iter().any(|group| group.name == "Backgrounds") {
+                    let borders = design.groups.remove(at);
+                    let ids = borders.items.iter().filter_map(|item| match item {
+                        Item::Command { id } => Some(id.clone()),
+                        Item::Menu { .. } => None,
+                    });
+                    let menu = Item::Menu { menu: borders.name.clone(), ids: ids.collect() };
+                    if let Some(backgrounds) = design.groups.iter_mut().find(|group| group.name == "Backgrounds") {
+                        backgrounds.items.insert(0, menu);
+                    }
+                }
+            }
+        }
+        ribbon
+    }
+}
+
+/// The commands that switch something on or off, drawn as check boxes.
+pub fn is_check(id: &str) -> bool {
+    matches!(id, "showRulers" | "showGrid" | "showGuides" | "snapGrid" | "snapShapes" | "snapGuides" | "autoConnectToggle")
 }
 
 /// The SVG text of an icon file (without the `.svg`), drawn in `color` instead of the files' black.
@@ -490,6 +518,30 @@ mod tests {
             }
         }
         assert!(native("painter").is_none() && native("fitCurveBtn").is_none());
+    }
+
+    #[test]
+    fn the_desktop_grouping_keeps_every_command_of_the_web() {
+        let commands = |ribbon: Ribbon| {
+            let mut ids = std::collections::BTreeSet::new();
+            for tab in ribbon.tabs {
+                for item in tab.groups.into_iter().flat_map(|group| group.items) {
+                    match item {
+                        Item::Command { id } => {
+                            ids.insert(format!("{} {id}", tab.name));
+                        }
+                        Item::Menu { ids: inside, .. } => ids.extend(inside.into_iter().map(|id| format!("{} {id}", tab.name))),
+                    }
+                }
+            }
+            ids
+        };
+        assert_eq!(commands(Ribbon::for_desktop()), commands(Ribbon::load()));
+        let design = Ribbon::for_desktop().tabs.into_iter().find(|tab| tab.name == "Design").unwrap();
+        assert!(!design.groups.iter().any(|group| group.name == "Borders & Titles"), "it is a menu of Backgrounds now");
+        for id in Ribbon::load().tabs.iter().flat_map(|tab| &tab.groups).flat_map(|group| &group.items).filter_map(|item| match item { Item::Command { id } => Some(id), Item::Menu { .. } => None }) {
+            assert!(!is_check(id) || native(id).is_some(), "{id} can be switched");
+        }
     }
 
     #[test]
