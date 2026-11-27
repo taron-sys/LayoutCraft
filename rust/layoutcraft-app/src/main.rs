@@ -365,6 +365,8 @@ mod arrange_key_tests {
 /// What a tool or view shortcut asks for.
 #[derive(Clone, Copy, PartialEq)]
 enum ViewKey {
+    /// Go to the inspector's Style settings.
+    StyleSettings,
     Tool(Tool),
     FitPage,
     NextPage,
@@ -396,6 +398,7 @@ const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
     (egui::Modifiers::CTRL, egui::Key::PageUp, ViewKey::PreviousPage),
     (egui::Modifiers::CTRL, egui::Key::F, ViewKey::Find),
     (egui::Modifiers::CTRL, egui::Key::K, ViewKey::Hyperlink),
+    (egui::Modifiers::NONE, egui::Key::F3, ViewKey::StyleSettings),
     (egui::Modifiers::NONE, egui::Key::F5, ViewKey::FullScreen),
     (egui::Modifiers::ALT, egui::Key::F9, ViewKey::SnapDialog),
     // Ctrl+F1 (collapse the ribbon) is taken before these keys are read
@@ -3426,6 +3429,22 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn f3_goes_to_the_style_settings_of_the_selected_shape() {
+        let (mut driver, ids) = Driver::new();
+        driver.key(Key::F3, Modifiers::NONE);
+        assert!(!driver.app.style_focus && driver.app.status.contains("Select one shape"), "{}", driver.app.status);
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        let fill = |driver: &Driver| driver.app.style_draft.as_ref().map(|draft| draft.has_fill).expect("the style settings");
+        let before = fill(&driver);
+        driver.key(Key::F3, Modifiers::NONE);
+        // the Fill box has the keyboard: Space ticks or clears it
+        driver.key(Key::Space, Modifiers::NONE);
+        assert_ne!(fill(&driver), before, "{}", driver.app.status);
+        assert_eq!(driver.app.selected, Some(ids[0].clone()));
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4249,6 +4268,8 @@ struct LayoutCraftApp {
     /// The Size and Position fields of the inspector.
     size_pos: SizePos,
     name_field: NameField,
+    /// The first Style control of the inspector is to take the keyboard (F3).
+    style_focus: bool,
     /// The Styles window, while it is open.
     style_pick: Option<styles::StylePick>,
     /// The Layers window is open.
@@ -4420,6 +4441,7 @@ impl LayoutCraftApp {
             ruler_unit: (1.0, "in"),
             size_pos: SizePos::default(),
             name_field: NameField::default(),
+            style_focus: false,
             style_pick: None,
             layers_open: false,
             full_screen: false,
@@ -8347,6 +8369,14 @@ impl eframe::App for LayoutCraftApp {
             }
             match ctx.input_mut(consume_view_key) {
                 Some(ViewKey::Tool(tool)) => self.take_tool(tool),
+                Some(ViewKey::StyleSettings) => {
+                    // only when the inspector is there to show them, so that no later selection takes the keyboard
+                    if !self.full_screen && self.selected.as_deref().and_then(|id| self.doc_shape(id)).is_some_and(|shape| shape.group.is_none()) {
+                        self.style_focus = true;
+                    } else {
+                        self.status = "Select one shape to edit its style in the inspector.".to_string();
+                    }
+                }
                 Some(ViewKey::FitPage) => action = Some(Action::Fit),
                 Some(ViewKey::NextPage) => action = Some(Action::Page(self.page_index + 1)),
                 Some(ViewKey::PreviousPage) => action = Some(Action::Page(self.page_index.saturating_sub(1))),
@@ -8551,7 +8581,11 @@ impl eframe::App for LayoutCraftApp {
                                 ui.separator();
                                 ui.label("Style");
                                 ui.horizontal(|ui| {
-                                    ui.checkbox(&mut draft.has_fill, "Fill");
+                                    let first = ui.checkbox(&mut draft.has_fill, "Fill");
+                                    if std::mem::take(&mut self.style_focus) {
+                                        first.request_focus();
+                                        first.scroll_to_me(None);
+                                    }
                                     ui.color_edit_button_srgb(&mut draft.fill);
                                 });
                                 ui.horizontal(|ui| {

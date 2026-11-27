@@ -359,7 +359,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Crop tool | Ctrl+Shift+2 | none | none | none |
 | Pencil / Freeform / Line / Arc / Rectangle / Ellipse | Ctrl+4 / 5 / 6 / 7 / 8 / 9 | Ctrl+6 / 8 / 9 (line, rectangle, ellipse) | none | partial |
 | Format Painter | Ctrl+Shift+P | none | none | none |
-| Format Shape pane | F3 | none | none | none |
+| Format Shape pane | F3 | F3 goes to the inspector's Style settings (no pane of its own) | none | partial |
 | Text dialog | F11 | none | none | none |
 | Snap & Glue dialog | Alt+F9 | Alt+F9 (no glue settings) | none | same on desktop |
 | Full-screen view / exit | F5 / Esc | F5 / Esc | no key | same on desktop |
@@ -386,7 +386,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Find | Ctrl+F (web `findBtn`) | Ctrl+F | Ctrl+F | same on desktop |
 | Hyperlink | Ctrl+K (unverified in S1) | Ctrl+K | Ctrl+K | same on desktop |
 
-Count of the 41 rows above: same 26, diff 1, partial 3, none 11. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 26, diff 1, partial 4, none 10. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 
