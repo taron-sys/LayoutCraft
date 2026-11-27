@@ -3252,6 +3252,31 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_connector_reaches_a_point_of_a_group_under_a_member() {
+        // as in the switch modules of vendor stencils: the ports are connection points of the group, and a member that holds
+        // the picture lies over them (#77)
+        let (mut driver, ids) = Driver::new();
+        let member = driver.app.engine.draw(0, 0, 6.0, 1.0, 8.0, 2.0).unwrap();
+        let other = driver.app.engine.draw(0, 0, 8.0, 1.0, 9.0, 2.0).unwrap();
+        let group = driver.app.engine.group_op(0, 0, &format!("{member}\n{other}")).unwrap().trim_matches('"').to_string();
+        // a quarter of the way along the group, half way up: on the member, away from the member's own points
+        driver.app.engine.page_op(24, 0, 0, &format!("{group}|0.25|0.5")).unwrap();
+        let ctx = driver.ctx.clone();
+        driver.app.build_page(&ctx, true);
+        driver.frames(3);
+        let wanted = pos2((6.75 * super::DPI) as f32, ((driver.app.page_height_in - 1.5) * super::DPI) as f32);
+        let (number, port) = driver.app.sites_of(&group).into_iter().find(|(_, at)| at.distance(wanted) < 1.5).expect("the group's point");
+        assert_eq!(driver.app.pick_shape_near(port).as_deref(), Some(member.as_str()), "the member lies over the point");
+        driver.key(Key::Num3, CTRL);
+        let from = driver.middle_of(&ids[0]);
+        let to = driver.app.scene_to_screen(port, driver.app.image_rect(driver.app.last_viewport));
+        driver.drag(from, to);
+        let all: serde_json::Value = serde_json::from_str(&driver.app.engine.connectors_json(0).unwrap()).unwrap();
+        let end = all.as_array().unwrap().iter().find(|c| c["begin"]["glue"]["sheet"] == ids[0].as_str()).map(|c| c["end"]["glue"].clone());
+        assert_eq!(end, Some(serde_json::json!({ "sheet": group, "n": number })), "{}", driver.app.status);
+    }
+
+    #[test]
     fn the_connection_point_tool_adds_chooses_and_deletes_points() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -6180,6 +6205,36 @@ impl LayoutCraftApp {
         [(0.0, 0.0), (r, 0.0), (-r, 0.0), (0.0, r), (0.0, -r)].into_iter().find_map(|(dx, dy)| self.pick_shape_raw(at + egui::vec2(dx, dy)))
     }
 
+    /// A shape and the groups around it, innermost first: a member, its group, that group's group, up to the shape of the page. The
+    /// groups come from the page's group list, which also holds the groups that are not shapes of the page model themselves.
+    fn group_chain(&self, id: &str) -> Vec<String> {
+        let parent_of = |group: &serde_json::Value| group.get("parentId").and_then(|value| value.as_str()).map(str::to_string);
+        let groups = self.engine.document.as_ref().and_then(|document| document.pages.get(self.page_index)).map_or(&[][..], |page| page.groups.as_slice());
+        let mut chain = vec![id.to_string()];
+        let mut next = self.doc_shape(id).and_then(|shape| shape.group.as_ref()).and_then(parent_of);
+        while let Some(parent) = next.take() {
+            if chain.contains(&parent) {
+                break;
+            }
+            next = groups.iter().find(|group| group.get("visioId").and_then(|value| value.as_str()) == Some(parent.as_str())).and_then(parent_of);
+            chain.push(parent);
+        }
+        chain
+    }
+
+    /// What a connector end at the scene point `at` glues to: the topmost shape under it (a group member included) at its connection
+    /// point within reach; when that shape has none there, the nearest group around it that has one (the ports of a switch module are
+    /// points of the module, under a member that holds its picture). Without a point in reach: the topmost shape as a whole, at `at`.
+    fn connect_target(&mut self, at: egui::Pos2) -> Option<(String, egui::Pos2, Option<usize>)> {
+        let picked = self.pick_shape_near(at)?;
+        for id in self.group_chain(&picked) {
+            if let (point, Some(site)) = self.nearest_site(&id, at) {
+                return Some((id, point, Some(site)));
+            }
+        }
+        Some((picked, at, None))
+    }
+
     /// The rotate handle of a shape on screen: (middle of the top edge, the handle, the centre of the shape). `None` for connectors and grouped shapes.
     fn rotate_handle_screen(&self, id: &str, image_rect: egui::Rect) -> Option<(egui::Pos2, egui::Pos2, egui::Pos2)> {
         let shape = self.doc_shape(id)?;
@@ -6242,9 +6297,8 @@ impl LayoutCraftApp {
             return;
         }
         if self.tool == Tool::Connector {
-            match self.pick_shape_near(scene_pointer) {
-                Some(id) => {
-                    let (start_at, site) = self.nearest_site(&id, scene_pointer);
+            match self.connect_target(scene_pointer) {
+                Some((id, start_at, site)) => {
                     self.connect_from_site = site;
                     let start = egui::Rect::from_min_size(start_at, egui::Vec2::ZERO);
                     self.status = format!("Connector from shape {id}{}: release on another shape (on a connection point to glue it there).", site.map_or(String::new(), |n| format!(" point {n}")));
@@ -6512,16 +6566,13 @@ impl LayoutCraftApp {
     /// left loose at that page position: one `Engine::move_connector_end`, as the web shell's end handles.
     fn commit_connector_end(&mut self, ctx: &egui::Context, connector: &str, begin: bool, end: egui::Pos2) {
         let page = self.page_index;
-        let target = self.pick_shape_near(end);
+        let target = self.connect_target(end);
         let result = match &target {
-            Some(shape) => {
-                let site = self.nearest_site(shape, end).1;
-                self.engine.move_connector_end(page, connector, begin, Some((shape.as_str(), site)), (0.0, 0.0))
-            }
+            Some((shape, _, site)) => self.engine.move_connector_end(page, connector, begin, Some((shape.as_str(), *site)), (0.0, 0.0)),
             None => self.engine.move_connector_end(page, connector, begin, None, (f64::from(end.x) / DPI, self.page_height_in - f64::from(end.y) / DPI)),
         };
         let verb = match &target {
-            Some(shape) => format!("Glued the {} of the connector to shape {shape}", if begin { "start" } else { "end" }),
+            Some((shape, _, _)) => format!("Glued the {} of the connector to shape {shape}", if begin { "start" } else { "end" }),
             None => format!("Left the {} of the connector loose", if begin { "start" } else { "end" }),
         };
         self.finish_edit(ctx, result, &verb, Some(connector.to_string()));
@@ -10485,7 +10536,8 @@ impl eframe::App for LayoutCraftApp {
                             candidates.push(*end_pointer);
                         }
                         for at in candidates {
-                            if let Some(id) = self.pick_shape_near(at) {
+                            // the shape under the point and the groups around it: an end glues to the points of any of them
+                            for id in self.pick_shape_near(at).map(|id| self.group_chain(&id)).unwrap_or_default() {
                                 if !site_ids.contains(&id) {
                                     site_ids.push(id);
                                 }

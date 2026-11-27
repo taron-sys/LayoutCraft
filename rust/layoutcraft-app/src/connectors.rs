@@ -76,7 +76,8 @@ impl LayoutCraftApp {
     /// `end` (scene px). Each end is glued to the shape under it, else left loose there. One undo step.
     pub(super) fn commit_connector(&mut self, ctx: &egui::Context, from: &str, start: egui::Pos2, end: egui::Pos2) {
         let from_site = self.connect_from_site.take();
-        let to = self.pick_shape_near(end);
+        let target = self.connect_target(end);
+        let to = target.as_ref().map(|(id, _, _)| id.clone());
         if !from.is_empty() && to.as_deref() == Some(from) {
             self.status = "Release on a different shape, or on the empty page.".to_string();
             return;
@@ -89,7 +90,7 @@ impl LayoutCraftApp {
         let loose = |point: egui::Pos2| EndTarget::Free(f64::from(point.x) / super::DPI, page_height - f64::from(point.y) / super::DPI);
         let begin = if from.is_empty() { loose(start) } else { EndTarget::Glue(from.to_string(), from_site) };
         let finish = match &to {
-            Some(shape) => EndTarget::Glue(shape.clone(), self.nearest_site(shape, end).1),
+            Some(shape) => EndTarget::Glue(shape.clone(), target.as_ref().and_then(|(_, _, site)| *site)),
             None => loose(self.snapped_point(end)),
         };
         let words = |shape: Option<&str>| shape.map_or("the page".to_string(), |id| format!("shape {id}"));
