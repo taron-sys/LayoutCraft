@@ -162,7 +162,7 @@ these are row counts, not a count of every Visio button.
 | Tools: Text (Ctrl+2) | S9, S1 | insertTextBox | present | present | | P1 |
 | Tools: Text Block (Ctrl+Shift+4) | S5, S1 | - | missing | missing | Moves the text block inside a shape | P2 |
 | Tools: Connector (Ctrl+3) | S6, S1 | connectTool | present | present | Drag shape to shape; glue to connection point or whole shape | P0 |
-| Tools: Connection Point (Ctrl+Shift+1) | S1 | connPointTool | missing | present | Engine `connection_points_json` | P1 |
+| Tools: Connection Point (Ctrl+Shift+1) | S1 | connPointTool | partial | present | Desktop: a click adds a point, a click on one chooses it and Delete removes it; no moving of points, no adding on turned or flipped shapes | P1 |
 | Tools: Rectangle (Ctrl+8), Ellipse (Ctrl+9), Line (Ctrl+6), Arc (Ctrl+7), Freeform (Ctrl+5), Pencil (Ctrl+4) | S1 | drawTools | partial | present | Desktop: rectangle, rounded rectangle, ellipse, diamond, triangle, line and text box; no arc, freeform or pencil | P0 |
 | Tools: Crop (Ctrl+Shift+2) | S1 | - | missing | missing | Picture crop | P3 |
 | Tools: Pan (hand) | none in S11 | handTool | present | present | LayoutCraft addition; Visio's pan is wheel, Ctrl+Shift drag, Pan & Zoom (S11) | P3 |
@@ -354,7 +354,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Pointer tool | Ctrl+1 | Ctrl+1 | Esc | same on desktop |
 | Text tool | Ctrl+2 | Ctrl+2 (draws a text box) | none | same on desktop |
 | Connector tool | Ctrl+3 | Ctrl+3 | none | same on desktop |
-| Connection point tool | Ctrl+Shift+1 | none | none | none |
+| Connection point tool | Ctrl+Shift+1 | Ctrl+Shift+1 | none | same on desktop |
 | Text block tool | Ctrl+Shift+4 | none | none | none |
 | Crop tool | Ctrl+Shift+2 | none | none | none |
 | Pencil / Freeform / Line / Arc / Rectangle / Ellipse | Ctrl+4 / 5 / 6 / 7 / 8 / 9 | Ctrl+6 / 8 / 9 (line, rectangle, ellipse) | none | partial |
@@ -386,7 +386,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Find | Ctrl+F (web `findBtn`) | Ctrl+F | Ctrl+F | same on desktop |
 | Hyperlink | Ctrl+K (unverified in S1) | Ctrl+K | Ctrl+K | same on desktop |
 
-Count of the 41 rows above: same 25, diff 1, partial 3, none 12. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 26, diff 1, partial 3, none 11. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 

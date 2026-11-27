@@ -14,6 +14,7 @@ use layoutcraft_vsdx::{
 
 mod appearance;
 mod connectors;
+mod connpoints;
 mod help;
 mod mcpinfo;
 mod ribbon;
@@ -379,6 +380,9 @@ enum ViewKey {
 /// Tool and view shortcuts for features the app has, with Visio's documented keys (`docs/43-ui-parity.md` 4.1). The draw
 /// numbers are the positions in the ribbon's draw tools: 0 rectangle, 2 ellipse, 6 line.
 const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
+    // before Ctrl+1: egui ignores an extra Shift; some keyboards report Shift+1 as "!"
+    (CTRL_SHIFT, egui::Key::Num1, ViewKey::Tool(Tool::ConnectionPoint)),
+    (CTRL_SHIFT, egui::Key::Exclamationmark, ViewKey::Tool(Tool::ConnectionPoint)),
     (egui::Modifiers::CTRL, egui::Key::Num1, ViewKey::Tool(Tool::Select)),
     // the text tool draws a text box
     (egui::Modifiers::CTRL, egui::Key::Num2, ViewKey::Tool(Tool::Draw(5))),
@@ -3131,6 +3135,47 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_connection_point_tool_adds_chooses_and_deletes_points() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.key(Key::Num1, Modifiers { shift: true, ..CTRL });
+        assert!(driver.app.tool == super::Tool::ConnectionPoint && driver.app.selected.is_none(), "{}", driver.app.status);
+        let points = |driver: &mut Driver| driver.app.sites_of(&ids[0]);
+        let before = points(&mut driver);
+        // a place a fifth of the way in from the left and a third down from the top
+        let rect = LayoutCraftApp::selection_scene_rect(driver.app.scene_shape(&ids[0]).unwrap());
+        let wanted = pos2(rect.left() + rect.width() * 0.2, rect.top() + rect.height() / 3.0);
+        let at = driver.app.scene_to_screen(wanted, driver.app.image_rect(driver.app.last_viewport));
+        driver.click(at, Modifiers::NONE);
+        let added = points(&mut driver);
+        assert_eq!(added.len(), before.len() + 1, "{}", driver.app.status);
+        let new = added.iter().find(|point| !before.contains(point)).expect("a new point");
+        assert!(new.1.distance(wanted) < 1.5, "where it was clicked: {:?} {wanted:?}", new.1);
+        assert!(driver.app.selected.is_none());
+        // Delete without a chosen point takes nothing away, also not a selected shape
+        driver.app.selected = Some(ids[1].clone());
+        driver.key(Key::Delete, Modifiers::NONE);
+        assert!(driver.app.doc_shape(&ids[1]).is_some() && points(&mut driver).len() == added.len());
+        // choose the point, then delete it
+        driver.click(at, Modifiers::NONE);
+        assert_eq!(driver.app.chosen_connection_point(), Some((ids[0].as_str(), new.0)), "{}", driver.app.status);
+        assert_eq!(points(&mut driver).len(), added.len(), "choosing adds nothing");
+        driver.key(Key::Delete, Modifiers::NONE);
+        assert_eq!(points(&mut driver).len(), before.len(), "{}", driver.app.status);
+        driver.key(Key::Escape, Modifiers::NONE);
+        assert!(driver.app.tool == super::Tool::Select);
+        // a turned shape is refused, and said so
+        driver.app.selected = Some(ids[0].clone());
+        driver.key(Key::R, CTRL);
+        driver.key(Key::Num1, Modifiers { shift: true, ..CTRL });
+        let depth = driver.app.engine.undo_depth();
+        let middle = driver.middle_of(&ids[0]);
+        driver.click(middle + vec2(7.0, 11.0), Modifiers::NONE);
+        assert_eq!(driver.app.engine.undo_depth(), depth);
+        assert!(driver.app.status.contains("turned"), "{}", driver.app.status);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -3672,6 +3717,8 @@ enum Tool {
     Select,
     Draw(i32),
     Connector,
+    /// Adds, chooses and deletes connection points.
+    ConnectionPoint,
 }
 
 /// One open stencil of the Shapes pane: the engine's slot number, its title and its masters (id, name).
@@ -3997,6 +4044,8 @@ struct LayoutCraftApp {
     armed_master: Option<(usize, String, String)>,
     /// View > Add and Connect Arrows, the shape whose arrows are shown, and the line ends read for the menu.
     connect_arrows: bool,
+    /// The connection point the Connection Point tool has chosen.
+    chosen_point: Option<connpoints::ChosenPoint>,
     /// The list of shapes shown beside the connect arrow under the pointer.
     arrow_picker: Option<connectors::ArrowPicker>,
     arrow_shape: Option<String>,
@@ -4102,6 +4151,7 @@ impl LayoutCraftApp {
             tab_cycle: None,
             show_guides: true,
             connect_arrows: true,
+            chosen_point: None,
             arrow_picker: None,
             arrow_shape: None,
             line_ends_read: None,
@@ -5009,6 +5059,11 @@ impl LayoutCraftApp {
             self.drag = None;
             self.preview = None;
             self.panning = true;
+            return;
+        }
+        if self.tool == Tool::ConnectionPoint {
+            self.drag = None;
+            self.preview = None;
             return;
         }
         if shift && self.tool == Tool::Select {
@@ -6055,6 +6110,7 @@ impl LayoutCraftApp {
         let icon = self.ribbon.icons.get(id).cloned();
         let selected = (native == Some(ribbon::Native::Connector) && self.tool == Tool::Connector) || (native == Some(ribbon::Native::TextBox) && self.tool == Tool::Draw(5)) || (native == Some(ribbon::Native::Hand) && self.tool == Tool::Hand)
             || (native == Some(ribbon::Native::ChangeShape) && self.change_shape)
+            || (native == Some(ribbon::Native::ConnectionPoint) && self.tool == Tool::ConnectionPoint)
             || (native == Some(ribbon::Native::SnapGrid) && self.snap_grid)
             || (native == Some(ribbon::Native::SnapShapes) && self.snap_shapes)
             || (native == Some(ribbon::Native::SnapGuides) && self.snap_guides)
@@ -6082,6 +6138,7 @@ impl LayoutCraftApp {
                     ribbon::Native::Connector => self.tool = if selected { Tool::Select } else { Tool::Connector },
                     ribbon::Native::TextBox => self.tool = if selected { Tool::Select } else { Tool::Draw(5) },
                     ribbon::Native::Hand => self.tool = if selected { Tool::Select } else { Tool::Hand },
+                    ribbon::Native::ConnectionPoint => self.toggle_connection_point_tool(),
                     ribbon::Native::ChangeShape => {
                         self.change_shape = !self.change_shape && self.selected.is_some();
                         if self.change_shape {
@@ -6372,6 +6429,8 @@ impl LayoutCraftApp {
             N::ChangeShape => Action::Fit,
             // the Pan tool is a tool too
             N::Hand => Action::Fit,
+            // the tool is taken where the button is drawn
+            N::ConnectionPoint => Action::Fit,
             // the snap switches and the grid step are state, handled where the button is drawn
             N::SnapGrid | N::SnapShapes | N::SnapGuides | N::GridStep | N::ShowGrid | N::ShowRulers | N::ShowGuides | N::ConnectArrows => Action::Fit,
             N::ReverseEnds => Action::ReverseEnds,
@@ -7914,7 +7973,12 @@ impl eframe::App for LayoutCraftApp {
             {
                 action = Some(Action::EditText);
             }
-            if self.selected.is_some()
+            if self.tool == Tool::ConnectionPoint {
+                // Delete is the tool's: it never removes shapes while it is held
+                if ctx.input(|input| input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace)) {
+                    self.delete_connection_point(&ctx);
+                }
+            } else if self.selected.is_some()
                 && ctx.input(|input| {
                     input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace)
                 })
@@ -7963,7 +8027,7 @@ impl eframe::App for LayoutCraftApp {
                 }
             }
             match ctx.input_mut(consume_view_key) {
-                Some(ViewKey::Tool(tool)) => self.tool = tool,
+                Some(ViewKey::Tool(tool)) => self.take_tool(tool),
                 Some(ViewKey::FitPage) => action = Some(Action::Fit),
                 Some(ViewKey::NextPage) => action = Some(Action::Page(self.page_index + 1)),
                 Some(ViewKey::PreviousPage) => action = Some(Action::Page(self.page_index.saturating_sub(1))),
@@ -8005,6 +8069,9 @@ impl eframe::App for LayoutCraftApp {
                 self.text_editor = None;
                 // an Esc that left a text field (or a focused button) does not also drop the selection
                 if !self.focus_at_frame_start {
+                    if self.tool == Tool::ConnectionPoint {
+                        self.take_tool(Tool::Select);
+                    }
                     self.selected_guide = None;
                     self.guide_drag = None;
                     self.selected = None;
@@ -8676,6 +8743,15 @@ impl eframe::App for LayoutCraftApp {
                 }
                 // a magnifier click selects nothing
                 dropped_now |= magnifier;
+                if self.tool == Tool::ConnectionPoint {
+                    if !dropped_now && !self.space_down && response.clicked() {
+                        if let Some(pointer) = response.interact_pointer_pos() {
+                            let at = self.screen_to_scene(pointer, image_rect);
+                            self.click_connection_point(&ctx, at);
+                        }
+                    }
+                    dropped_now = true;
+                }
                 if response.clicked() && self.drag.is_none() && !self.panning && self.add_down && !dropped_now {
                     if let Some(pointer) = response.interact_pointer_pos() {
                         if image_rect.contains(pointer) {
@@ -8698,7 +8774,7 @@ impl eframe::App for LayoutCraftApp {
                         self.selected_guide = guide.map(|guide| guide.0);
                     }
                 }
-                if !magnifier && response.double_clicked() && self.drag.is_none() {
+                if !magnifier && self.tool != Tool::ConnectionPoint && response.double_clicked() && self.drag.is_none() {
                     if let Some(pointer) = response.interact_pointer_pos() {
                         if image_rect.contains(pointer) {
                             let scene_pointer = self.screen_to_scene(pointer, image_rect);
@@ -8906,6 +8982,7 @@ impl eframe::App for LayoutCraftApp {
                     }
                 }
                 self.show_connect_arrows(&response, &painter, image_rect);
+                self.show_connection_points(&response, &painter, image_rect);
                 if let (Some(DragState { mode: DragMode::Draw(kind), start_pointer, end_pointer, .. }), Some(rect)) = (&self.drag, self.preview) {
                     let stroke = egui::Stroke::new(2.0, egui::Color32::from_rgb(0, 160, 255));
                     if *kind == 6 {
