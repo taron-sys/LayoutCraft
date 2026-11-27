@@ -15,6 +15,7 @@ use layoutcraft_vsdx::{
 mod appearance;
 mod connectors;
 mod connpoints;
+mod filepage;
 mod gallery;
 mod styles;
 mod help;
@@ -3736,6 +3737,46 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_file_tab_is_a_page_that_returns_to_the_earlier_tab() {
+        let (mut driver, ids) = Driver::new();
+        let open = |driver: &mut Driver, label: &str| {
+            let at = *driver.texts(label).first().unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        open(&mut driver, "Design");
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(2);
+        open(&mut driver, "File");
+        assert!(driver.app.file_page_open() && driver.texts("Shapes").is_empty() && driver.texts("Design").is_empty());
+        assert!(!driver.texts("Blank drawing").is_empty() && !driver.texts("Recent").is_empty());
+        // the drawing behind the page takes no keys
+        let shapes = |driver: &Driver| driver.app.engine.document().unwrap().pages[0].shapes.len();
+        let before = shapes(&driver);
+        driver.key(Key::Delete, Modifiers::NONE);
+        driver.frames(2);
+        assert_eq!(shapes(&driver), before);
+        driver.key(Key::Escape, Modifiers::NONE);
+        driver.frames(3);
+        assert!(!driver.app.file_page_open());
+        assert_eq!(driver.app.ribbon.tabs[driver.app.ribbon_tab].name, "Design");
+        open(&mut driver, "File");
+        open(&mut driver, "\u{2190} Back");
+        assert!(!driver.app.file_page_open());
+        // a command closes the page and is carried out
+        open(&mut driver, "File");
+        open(&mut driver, "Document Properties");
+        assert!(!driver.app.file_page_open() && driver.app.doc_props_open);
+        // its window lies over the tabs
+        driver.app.doc_props_open = false;
+        driver.frames(3);
+        open(&mut driver, "File");
+        driver.app.dirty = false;
+        open(&mut driver, "Blank drawing");
+        assert!(!driver.app.file_page_open() && shapes(&driver) == 0, "{}", driver.app.status);
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -5025,6 +5066,8 @@ struct LayoutCraftApp {
     paste_count: u32,
     ribbon: ribbon::Ribbon,
     ribbon_tab: usize,
+    /// The tab to return to from the File page.
+    tab_before_file: usize,
     ribbon_collapsed: bool,
     ribbon_peek: bool,
     ribbon_compact: bool,
@@ -5229,6 +5272,7 @@ impl LayoutCraftApp {
             paste_count: 0,
             ribbon: ribbon::Ribbon::for_desktop(),
             ribbon_tab: 1,
+            tab_before_file: 1,
             ribbon_collapsed: false,
             ribbon_peek: false,
             ribbon_compact: false,
@@ -7195,33 +7239,6 @@ impl LayoutCraftApp {
                 ui.painter().line_segment([egui::pos2(x, rect.top() + 2.0), egui::pos2(x, rect.bottom() - 2.0)], ui.visuals().widgets.noninteractive.bg_stroke);
                 ui.add_space(5.0);
             }
-            if tab.name == "File" {
-                self.ribbon_file_group(ui, action);
-            }
-        });
-    }
-
-    /// The File tab's extra group: the path of a drawing to load, Reload, and the save commands (the web has them in its own File dialogs).
-    fn ribbon_file_group(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
-        ui.group(|ui| {
-            ui.vertical(|ui| {
-                ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut self.path_input).hint_text(r"path\to\drawing.vsdx").desired_width(240.0));
-                    if ui.button("Load").clicked() {
-                        *action = Some(Action::Load);
-                    }
-                    if ui.add_enabled(self.loaded_path.is_some(), egui::Button::new("Reload")).clicked() {
-                        *action = Some(Action::Reload);
-                    }
-                    if ui.add_enabled(self.loaded_path.is_some(), egui::Button::new("Save copy")).clicked() {
-                        *action = Some(Action::SaveCopy);
-                    }
-                    if ui.add_enabled(self.engine.export().is_some(), egui::Button::new("Save as…")).clicked() {
-                        *action = Some(Action::SaveAs);
-                    }
-                });
-                ui.label(egui::RichText::new("Open path").small().weak());
-            });
         });
     }
 
@@ -9365,7 +9382,7 @@ impl eframe::App for LayoutCraftApp {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         // read here, before the toolkit takes the focus away for an Esc: such an Esc is for the field alone
         self.focus_at_frame_start = ctx.memory(|memory| memory.focused()).is_some();
-        if self.canvas_keys && self.selected.is_some() && ctx.memory(|memory| memory.focused()).is_none() {
+        if self.canvas_keys && !self.file_page_open() && self.selected.is_some() && ctx.memory(|memory| memory.focused()).is_none() {
             self.tab_cycle = take_shape_tab(&mut raw_input.events).or(self.tab_cycle);
         }
     }
@@ -9401,6 +9418,13 @@ impl eframe::App for LayoutCraftApp {
                 self.load(&ctx, &path);
             }
         }
+
+        if self.file_page_open() {
+            let chosen = self.file_page(ui);
+            self.run_action(&ctx, None, chosen);
+            return;
+        }
+        self.tab_before_file = self.ribbon_tab;
 
         self.space_down = !ctx.egui_wants_keyboard_input() && ctx.input(|input| input.key_down(egui::Key::Space));
         if !ctx.egui_wants_keyboard_input() {
@@ -11179,6 +11203,13 @@ impl eframe::App for LayoutCraftApp {
             self.page_rename = None;
         }
 
+        self.run_action(&ctx, field_commit, action);
+    }
+}
+
+impl LayoutCraftApp {
+    /// Do what a frame asked for: first what a field that was left wants, then the chosen command.
+    fn run_action(&mut self, ctx: &egui::Context, field_commit: Option<Action>, action: Option<Action>) {
         // the field first, while its page is still the shown one
         match field_commit {
             Some(Action::ShapeName(ref id, ref wanted)) => self.set_shape_name(&ctx, id, wanted),
