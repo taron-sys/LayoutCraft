@@ -20,6 +20,24 @@ For Windows, macOS and Linux.
 > **Early preview.** LayoutCraft is young. Some drawings will not look or behave exactly as they did in the program that made
 > them, so keep a copy of important files. See [known gaps](docs/07-known-gaps.md).
 
+## How far along is it?
+
+**Good enough for everyday diagrams. Not yet a full replacement.**
+
+| | | |
+| --- | --- | ---: |
+| **On the way to version 1.0** | `██████████████░░░░░░` | 70 % |
+| Opening your Visio drawings so they look right | `█████████████████░░░` | 85 % |
+| Saving without losing what you did not change | `█████████████████░░░` | 85 % |
+| Everyday commands in the desktop app | `████████████████░░░░` | 81 % |
+| All the commands you know from Visio | `███████████░░░░░░░░░` | 54 % |
+| Older Visio files (`.vsd`, `.vdx`) | `████████████░░░░░░░░` | 60 % |
+| Export (PDF, SVG, DXF, draw.io, Excalidraw, web page) | `█████████████████░░░` | 85 % |
+
+<sub>As of 27 November 2026 (0.1.0-rc.4 and later). The two command rows are counted from the
+[comparison table](docs/43-ui-parity.md) (a command that is only partly there counts half); the other rows are the maintainers'
+estimates. What is still missing is listed under [known gaps](docs/07-known-gaps.md).</sub>
+
 ## What you can do with it
 
 - **Open your diagrams:** current and older Visio formats, draw.io and Excalidraw files.
