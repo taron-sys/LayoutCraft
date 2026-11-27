@@ -92,15 +92,15 @@ nice to have. Effort is an estimate in hours.
 | Drawing canvas | Page with horizontal and vertical rulers (S26), optional grid (S21) fixed or variable, guides dragged from rulers (S26 snippet), page breaks (unverified), workspace beyond the page. | Desktop: page raster with grid lines (`show_grid`), snapping to grid / shapes / guides read from the page; rulers (no drawing scale), guides dragged from them. Browser: rulers, guides (`shell.js` ruler guides), grid, page breaks. | Drawing scale on the desktop rulers; keyboard creation and moving of guides; page-break view. | P0 | 12-20 |
 | Page tabs | Tabs at the lower edge of the drawing: Page-1 and background pages such as VBackground-1 (S5); right-click a page tab for page properties (S1 snippet context, S27). | Browser: `#pageBar` with context menu (`contextmenu.js`). Desktop: a tab strip under the drawing with a right-click menu, drag to reorder and an add button; page buttons also in the status bar. | Background pages in the desktop strip; page properties from the menu; keyboard reordering other than the ribbon commands. | P0 | 8-14 |
 | Status bar | Left: items that act as shortcuts, e.g. clicking the width item opens Size & Position (S4); right: zoom controls, Full Screen, window switching (S4); zoom slider and Fit Page to Window at the lower right, and a button to open Pan & Zoom (S11). Page number and language: unverified. | Desktop bottom panel: previous / next page, "page n / m", status message, zoom slider, "zoom nn%", Fit and Full Screen buttons, "modified", and the selected shape's width, height and angle (a click goes to Size and Position). Browser: `#statusbar`. | Pan button; window switching; language item unverified. | P0 | 8-12 |
-| Zoom and pan | Zoom slider, Fit Page to Window, Pan & Zoom button (S11); Ctrl+wheel zooms, plain wheel scrolls, Ctrl+Shift magnifier (click zoom in, right-click out, drag a rectangle) (S11). | Desktop: Ctrl+wheel zooms at the pointer, the wheel scrolls (Shift: sideways), middle button / Space / Pan tool move; Ctrl+= / Ctrl+-; zoom slider and menu. Browser: wheel option (`wheelZoom`), Pan & Zoom pane. | Magnifier gesture, Pan & Zoom pane, a wheel-zooms option. | P1 | 8-14 |
+| Zoom and pan | Zoom slider, Fit Page to Window, Pan & Zoom button (S11); Ctrl+wheel zooms, plain wheel scrolls, Ctrl+Shift magnifier (click zoom in, right-click out, drag a rectangle) (S11). | Desktop: Ctrl+wheel zooms at the pointer, the wheel scrolls (Shift: sideways), middle button / Space / Pan tool move; Ctrl+= / Ctrl+-; zoom slider and menu; Ctrl+Shift magnifier (click zooms in, right click out, a dragged box fills the view, right drag pans); a Mouse wheel zooms option in the Zoom menu. Browser: wheel option (`wheelZoom`), Pan & Zoom pane. | Pan & Zoom pane. | P1 | 8-14 |
 | Task pane: Size & Position | View > Show > Task Panes > Size & Position: Width, Height, X, Y (pin position), Pin Pos, Angle; units typed in text; formulas (S12). | Desktop inspector: editable pin X and Y, width, height and angle (shapes of the page, not locked), in the page unit (in or mm). Browser: `paneSizePos`. | Choice of the reference point; typed units; formulas (P3); a dockable window. | P0 | 8-14 |
-| Task pane: Shape Data | Data entered per shape and shown in a window (View > Task Panes, Data > Show/Hide; S5). | Browser: Data panel (`dataBtn`). Desktop: a window for one selected shape (values, add, remove). | Type, prompt, hidden and order editing; several shapes at once; docking. | P1 | 10-16 |
+| Task pane: Shape Data | Data entered per shape and shown in a window (View > Task Panes, Data > Show/Hide; S5). | Browser: Data panel (`dataBtn`). Desktop: a window for one selected shape (values, add, remove); a field's type (text, yes or no, list) and prompt can be set and changed, and a field hidden or shown. | Number and date types; renaming a field; order editing; several shapes at once; docking. | P1 | 10-16 |
 | Task pane: Pan & Zoom | Thumbnail of the page with a blue frame; drag the frame to pan, resize to zoom, has a slider (S11). | Browser `panePanZoom` (frame drag, wheel). Desktop none. | Port to desktop. | P2 | 6-10 |
 | Task pane: Layers | Layer Properties dialog with Visible, Print, Active, Lock, Snap, Glue, Color columns; Assign to Layer (S22). | Desktop inspector: per layer Visible / Prints / Locked checkboxes, shape-on-layer checkbox, add and delete layer. Browser: layers panel. | Active, Snap, Glue, Color columns; Assign to Layer command in the Editing group. | P2 | 8-12 |
 | Task pane: Format Shape | Opened from the right-click menu or F3; tabs Fill & Line and Effects (Shadow, Reflection, Glow, 3-D Rotation) (S9, S1). | Desktop inspector "Style": fill, line colour, weight, pattern. Browser: Home > Shape Styles drop-down (fill, line, shadow). | Docked pane with tabs; text options; F3. | P1 | 14-22 |
 | Task pane: ShapeSheet | Developer > Shape Design > Show ShapeSheet for a shape, page or document (S14). | Browser `paneSheet` (read-only table from `shape_sheet_json`). Desktop: a read-only Shape Formulas window for one shape. | See naming: we call it a formula table; read-only first. | P3 | 10-16 |
 | Task pane behaviour | Panes can float or dock and be resized, opened from View > Show > Task Panes (S12, S16); F6 moves between panes (S1). | Desktop: two fixed side panels, resizable; no float; F6 not bound. Browser: F6 cycles regions (`keyboard.js`). | Dock / float; F6 on desktop. | P2 | 10-16 |
-| Context (right-click) menus | Shape menu has special commands for the shape; Format Shape from it (S5, S9). Page-tab menu exists (S1, S27). Canvas menu: unverified. | Desktop: shape menu (Cut, Copy, Paste, Duplicate, Delete, Group, Ungroup, order, rotate, flip, Edit text) and empty-page menu (Paste, Page setup, Fit, snap toggles). Browser: `contextmenu.js`. | Format Shape, Data, Container submenu; page-tab menu on desktop; Shift+F10 key (S1). | P1 | 6-10 |
+| Context (right-click) menus | Shape menu has special commands for the shape; Format Shape from it (S5, S9). Page-tab menu exists (S1, S27). Canvas menu: unverified. | Desktop: shape menu (Cut, Copy, Paste, Duplicate, Delete, Group, Ungroup, order, rotate, flip, Edit text, Style settings, Shape Fields) and empty-page menu (Paste, Page setup, Fit, snap toggles). Browser: `contextmenu.js`. | A Format Shape pane; Container submenu; Shift+F10 key (S1). | P1 | 6-10 |
 | Mini toolbars | AutoConnect mini toolbar of up to four Quick Shapes over the arrow (S3, S5, S6). Selection mini toolbar for text: unverified. | Browser: AutoConnect-style arrows (`autoConnectToggle`). Desktop: connect arrows without a picker. | The picker at the arrows; selection mini toolbar. | P0 | 12-20 |
 
 ## 3. Ribbon parity
@@ -152,24 +152,24 @@ these are row counts, not a count of every Visio button.
 | Clipboard: Copy | S4 | copy | present | present | | P0 |
 | Format Painter (Ctrl+Shift+P) | S1 | painter | missing | present | Engine copy format exists for browser | P1 |
 | Font: family | S1 (Font group named) | p:fontFamily | present | present | Desktop: font list with search | P1 |
-| Font: size and Increase/Decrease size (Ctrl+Shift+> and <) | S1 | p:fontSize | partial | present | Desktop: smaller / larger buttons and Ctrl+Shift+> / < (US key positions); no typed size | P1 |
+| Font: size and Increase/Decrease size (Ctrl+Shift+> and <) | S1 | p:fontSize | present | present | Desktop: smaller / larger buttons, a typed size, and Ctrl+Shift+> / < (US key positions) | P1 |
 | Font: Bold / Italic / Underline | S1 | p:bold | present | present | Desktop: buttons and Ctrl+B / I / U | P1 |
-| Font: strikethrough, caps, sub/superscript, font colour | S1 for caps and sub/superscript; others unverified | p:strike | partial | partial | Desktop: strikethrough of the whole text | P2 |
+| Font: strikethrough, caps, sub/superscript, font colour | S1 for caps and sub/superscript; others unverified | p:strike | partial | partial | Desktop: strikethrough, all capitals and text colour for the whole text; no sub / superscript or small caps | P2 |
 | Paragraph: align left / centre / right / justify | S1 | p:alignL | present | present | Desktop: the whole text of the selected shapes | P1 |
 | Paragraph: vertical align top / middle / bottom | S1 | p:alignL (menu) | missing | partial | | P2 |
 | Paragraph: indent, line spacing | unverified | p:indLeft, p:lineSp | present | present | Desktop: fixed choices of left indent and line spacing, whole text | P3 |
-| Tools: Pointer Tool (Ctrl+1) | S5, S1 | - (default tool) | partial | partial | No button, Esc returns to select | P1 |
+| Tools: Pointer Tool (Ctrl+1) | S5, S1 | - (default tool) | present | partial | Desktop: the Select button in Home > Tools, and Ctrl+1 | P1 |
 | Tools: Text (Ctrl+2) | S9, S1 | insertTextBox | present | present | | P1 |
 | Tools: Text Block (Ctrl+Shift+4) | S5, S1 | - | missing | missing | Moves the text block inside a shape | P2 |
 | Tools: Connector (Ctrl+3) | S6, S1 | connectTool | present | present | Drag shape to shape; glue to connection point or whole shape | P0 |
-| Tools: Connection Point (Ctrl+Shift+1) | S1 | connPointTool | missing | present | Engine `connection_points_json` | P1 |
+| Tools: Connection Point (Ctrl+Shift+1) | S1 | connPointTool | partial | present | Desktop: a click adds a point, a click on one chooses it and Delete removes it, a drag moves it; no placing on turned or flipped shapes | P1 |
 | Tools: Rectangle (Ctrl+8), Ellipse (Ctrl+9), Line (Ctrl+6), Arc (Ctrl+7), Freeform (Ctrl+5), Pencil (Ctrl+4) | S1 | drawTools | partial | present | Desktop: rectangle, rounded rectangle, ellipse, diamond, triangle, line and text box; no arc, freeform or pencil | P0 |
 | Tools: Crop (Ctrl+Shift+2) | S1 | - | missing | missing | Picture crop | P3 |
 | Tools: Pan (hand) | none in S11 | handTool | present | present | LayoutCraft addition; Visio's pan is wheel, Ctrl+Shift drag, Pan & Zoom (S11) | P3 |
 | Tools: Edit points / Fit curve | unverified | editPointsBtn, fitCurveBtn | missing | present | | P2 |
 | Shape Styles: quick style gallery | S9 | p:fillColor (menu) | missing | partial | | P1 |
-| Shape Styles: Fill (colour, no fill, more colours) | S9 | p:fillColor | partial | present | Desktop inspector "Style" panel | P0 |
-| Shape Styles: Line (colour, weight, dashes, arrows) | S9 | p:lineColor | partial | present | Arrowheads missing on desktop | P0 |
+| Shape Styles: Fill (colour, no fill, more colours) | S9 | p:fillColor | present | present | Desktop: swatches, none and More colours (a typed code or a picker) on the ribbon, and the inspector's Style panel | P0 |
+| Shape Styles: Line (colour, weight, dashes, arrows) | S9 | p:lineColor | present | present | Desktop: colour swatches and the Line ends menu (arrowheads and sizes) on the ribbon; weight and dash pattern in the inspector | P0 |
 | Shape Styles: Effects (shadow, reflection, glow, soft edges, bevel, 3-D rotation) | S9 | p:shadow | partial | partial | Shadow only (on / off) | P2 |
 | Arrange: Align Left / Center / Right / Top / Middle / Bottom | S13 | arrL arrCx arrRt arrT arrM arrB | present | present | Aligns to the first selected; Visio aligns to the primary shape (S13) | P0 |
 | Arrange: Auto Align | S13 | - | missing | missing | Straightens connector lines | P3 |
@@ -181,14 +181,14 @@ these are row counts, not a count of every Visio button.
 | Arrange: Bring Forward / Send Backward | unverified | zFwd zBwd | present | present | | P1 |
 | Arrange: Group / Ungroup | S1 | grp ungrp | present | present | Grouped shapes are read-only for edits on desktop ("Grouped: read-only in this slice") | P0 |
 | Arrange: same width / height / size | unverified | sameW sameH sameWH | present | present | To the first shape selected; connectors and group members are left out | P2 |
-| Arrange: reverse connector ends | unverified | reverseEnds | missing | present | | P2 |
+| Arrange: reverse connector ends | unverified | reverseEnds | present | present | | P2 |
 | Arrange: lock | unverified | lockShape | missing | present | | P2 |
 | Arrange: shape operations (Union, Combine, Fragment, Intersect, Subtract, Join, Trim) | S18 for Trim (Developer tab, Shape Design, Operations); the others unverified | opUnion opCombine opFragment opIntersect opSubtract opJoin opTrim | present | present | Visio puts them on Developer (S18); LayoutCraft shows them in Home > Arrange. Engine: `shape_operation`; follow Visio's place | P1 |
 | Editing: Select (Area Select, Lasso Select, Select All, Select by Type) | S19 | - | partial | partial | Rectangle drag and Ctrl+A exist; lasso and by-type missing | P1 |
-| Editing: Layers > Assign to Layer, Layer Properties | S22 | layersBtn | partial | present | Desktop: Layers window and inspector (visible, prints, locked, membership); no Active / Snap / Glue / Colour | P2 |
+| Editing: Layers > Assign to Layer, Layer Properties | S22 | layersBtn | partial | present | Desktop: Layers window and inspector (visible, prints, locked, membership, rename, colour); no Active / Snap / Glue | P2 |
 | Editing: Change Shape | unverified | changeShapeBtn | present | present | Desktop: the button, then a click in the Shapes panel, or the panel's context menu | P2 |
 | Editing: Find | unverified | findBtn | present | present | Desktop: finds and replaces on the current page | P2 |
-| Editing: Styles | unverified | stylesBtn | missing | present | | P2 |
+| Editing: Styles | unverified | stylesBtn | partial | present | Desktop: applies a style of the drawing to the selection, saves a new one (name, line and fill colour, weight, text colour, size, bold, italic) and deletes one made for the drawing; no base style or paragraph settings, no loading a style into the form to change it | P2 |
 | Duplicate (Ctrl+D is a web shortcut) | S1 | dup | present | present | Not a Visio Home button (unverified) | P1 |
 | Delete | S1 (Delete key) | del | present | present | | P0 |
 
@@ -197,7 +197,7 @@ these are row counts, not a count of every Visio button.
 | Visio command | Src | LC id | Desktop | Browser | Notes | Prio |
 |---|---|---|---|---|---|---|
 | Pages: new / duplicate / rename / delete / reorder (Reorder Pages dialog Ctrl+Alt+P; Page dialog Shift+F4) | S1 | pageTools, pageAdd pageDup pageRename pageDel pageLeft pageRight | present | present | Desktop ribbon items exist; no Reorder dialog | P0 |
-| Pages: background page | S5 | - | missing | partial | Engine `background_info_json` | P2 |
+| Pages: background page | S5 | - | partial | partial | Desktop: a page tab's menu makes a background page; Page setup chooses which one shows beneath a page and makes one ordinary again. A background page itself cannot be shown for editing | P2 |
 | Illustrations: Pictures | S25 snippet | insertPicture, pictureFile | missing | present | Engine `insert_picture` | P1 |
 | Illustrations: Icons | S25 snippet (Visio 2016 book) | - | missing | missing | Needs our own icon set | P3 |
 | Diagram Parts: Container | S20 | - | missing | missing | | P2 |
@@ -220,7 +220,7 @@ these are row counts, not a count of every Visio button.
 | Page Setup: dialog (page size, orientation) | S4 (orientation and size under Design); dialog also from the page-tab menu | pageSetup | present | present | | P0 |
 | Page Setup: Orientation | S4 | designOrientation | present | present | | P1 |
 | Page Setup: Size | S4 | designSize | present | present | | P1 |
-| Themes (hover preview) | S8 | themeGallery | partial | present | Engine `themes_json`; desktop has no hover preview or colour swatches; hover preview unverified in LC | P1 |
+| Themes (hover preview) | S8 | themeGallery | partial | present | Engine `themes_json`; desktop shows each theme's and variant's colours in the menus, with no hover preview; hover preview unverified in LC | P1 |
 | Variants | S8 | variantGallery | present | present | | P2 |
 | Backgrounds | S8 | paperColor | missing | partial | Visio adds a background page (S5, S8); LC sets a colour | P2 |
 | Borders & Titles | S8 | borderStyle borderTitle borderApply borderRemove | present | present | | P2 |
@@ -231,7 +231,7 @@ these are row counts, not a count of every Visio button.
 
 | Visio command | Src | LC id | Desktop | Browser | Notes | Prio |
 |---|---|---|---|---|---|---|
-| Show/Hide: Shape Data window | S5 | dataBtn | partial | present | Desktop: window for one shape: values, add a text field, remove; no type, prompt, hidden or order editing | P1 |
+| Show/Hide: Shape Data window | S5 | dataBtn | partial | present | Desktop: window for one shape: values, add and remove fields, set and change a field's type (text, yes or no, list) and prompt; hide or show a field; no number or date type, no renaming, no order editing | P1 |
 | External Data: Link Data to Shapes | S24 | - | missing | missing | Needs an import path | P3 |
 | Refresh All / AutoLink | S24 | - | missing | missing | | P3 |
 | Display Data: Data Graphics | S4, S5 | - | missing | missing | | P3 |
@@ -249,8 +249,8 @@ these are row counts, not a count of every Visio button.
 
 | Visio command | Src | LC id | Desktop | Browser | Notes | Prio |
 |---|---|---|---|---|---|---|
-| Comments: New Comment | S15 | newComment | partial | present | Desktop: Comments action, extent not verified in this pass | P1 |
-| Comments: Comments Pane | S15 | showComments | partial | present | | P1 |
+| Comments: New Comment | S15 | newComment | present | present | Desktop: the Comments window adds a comment to the page or the selected shape | P1 |
+| Comments: Comments Pane | S15 | showComments | partial | present | Desktop: a window that lists, changes and deletes comments; no replies, not docked | P1 |
 | Markup: Track Markup | S15 (not on the tab by default) | - | missing | missing | | P3 |
 | Proofing: spelling | S4 | - | missing | partial | Browser relies on the text editor's own check | P3 |
 | Language | S4 | - | missing | missing | | P3 |
@@ -267,14 +267,14 @@ these are row counts, not a count of every Visio button.
 | Show: Grid | S21 | showGrid | present | present | Ruler & Grid dialog (fixed / variable spacing, origin) missing | P0 |
 | Show: Guides | S26 snippet | showGuides | present | present | Desktop: drag from a ruler, move, drop on a ruler or press Delete; mouse only for creating and moving; no turned guides | P0 |
 | Show: Page Breaks | unverified | showBreaks | missing | present | | P2 |
-| Show: Task Panes menu | S12, S11 | paneShapes paneSizePos paneSheet panePanZoom | partial | present | Desktop: Shapes pane and Shape Formulas from the ribbon | P0 |
+| Show: Task Panes menu | S12, S11 | paneShapes paneSizePos paneSheet panePanZoom | partial | present | Desktop: Shapes pane, Size and Position (goes to the inspector's fields) and Shape Formulas from the ribbon; no Pan & Zoom, not grouped in one menu | P0 |
 | Zoom: Zoom (dialog) | S11 | zl | present | present | Desktop: the Zoom menu (fixed levels, fit, page width) and a Custom zoom window for a typed percentage | P1 |
 | Zoom: Fit Page to Window (Ctrl+Shift+W) | S11, S1 | fit | present | present | | P0 |
 | Zoom: 100%, Page Width | unverified | zoom100 zoomWidth | present | present | | P2 |
 | Zoom: zoom in / out (Alt+F6, Alt+Shift+F6 desktop; Ctrl+Plus/Minus web) | S1 | zin zout | present | present | LC uses Ctrl+= / Ctrl+- (web style) | P1 |
-| Visual Aids: Snap & Glue (dialog Alt+F9) | S1 | snapGrid snapShapes snapGuides gridStep | partial | present | Desktop: window (Alt+F9) for what is snapped to and the grid; no glue settings, no snap strength | P1 |
-| Visual Aids: Dynamic Grid (alignment, spacing, resizing guides; snap strength) | S10 | snapShapes | partial | partial | Desktop snaps to shapes and to equal spacing between two neighbours, drawing a guide through the centre; no spacing marks, no resize guides, no snap strength | P0 |
-| Visual Aids: AutoConnect | S6, S4 | autoConnectToggle | partial | present | Desktop: arrows add the picked shape or a copy and connect it; no shape picker at the arrow | P0 |
+| Visual Aids: Snap & Glue (dialog Alt+F9) | S1 | snapGrid snapShapes snapGuides gridStep | partial | present | Desktop: window (Alt+F9) for what is snapped to, the snap strength and the grid; no glue settings | P1 |
+| Visual Aids: Dynamic Grid (alignment, spacing, resizing guides; snap strength) | S10 | snapShapes | partial | partial | Desktop snaps to shapes and to equal spacing between two neighbours, drawing a guide through the centre and, while shapes are moved, a mark across each of two equal gaps; no repeated-spacing marks, no resize guides; one snap strength, in the Snap and Attach window | P0 |
+| Visual Aids: AutoConnect | S6, S4 | autoConnectToggle | partial | present | Desktop: arrows add the picked shape or a copy and connect it; hovering an arrow lists up to four shapes of the open stencil by name | P0 |
 | Window: New Window | unverified | newWindow | missing | present | | P3 |
 | Window: Tile, Cascade, Switch Windows (Shift+F7, Ctrl+Shift+F7) | S1 | - | missing | missing | Single-document app | P3 |
 | Macros | S19, S14 | - | missing | missing | Out of scope | P3 |
@@ -286,7 +286,7 @@ these are row counts, not a count of every Visio button.
 |---|---|---|---|---|---|---|
 | Shape Design: Show ShapeSheet (shape, page, document) | S14 | paneSheet | partial | partial | Read only, shapes only; sits in View, not Developer | P2 |
 | Shape Design: Geometry (Freeform, Arc, Pencil) | S14 | drawTools | missing | present | | P3 |
-| Shape Design: Shape Name | S14 | - | missing | missing | | P3 |
+| Shape Design: Shape Name | S14 | - | present | present | Desktop: the Name field of the inspector | P3 |
 | Shape Design: Behavior, Protection | S14 | - | missing | missing | | P3 |
 | Shape Design: Operations (Trim and the other operations) | S18 | opUnion ... opTrim | partial | present | Desktop has them in Home > Arrange; there is no Developer tab | P2 |
 | Stencil: new stencil | S14 | - | missing | missing | Needs stencil writer | P3 |
@@ -325,15 +325,15 @@ Compare File (`compareBtn`: present on both), AI assistant info (`mcpInfo`: pres
 | Move by drag, Shift constrains to an axis, drag to another page tab moves the shape | S19 | Drag; Shift pressed during the drag keeps it to one axis; no page-tab drop | Drag | Page-tab drop P3 |
 | Nudge: arrows move to the next snap position, Shift+arrow one pixel | S19, S1 | 0.05 in step, Shift 0.5 in (`nudge_delta`) | Same | Reverse the Shift meaning: P1 |
 | Glue: connectors glue to shape or a connection point; connection points drawn on hover | S6 (caption mentions a point connection at each end) | Release on a shape glues to the whole shape or to a connection point within reach; end handles can be dragged | Same plus Connection Point tool | Glue indicators; per-layer Glue switch: P1 |
-| Dynamic Grid: guides while moving near other shapes or page/container margins; spacing guides; snap strength in Visual Aids dialog | S10 | Snap to grid / shapes / guides and to equal spacing between neighbours, with a drawn guide line | Same | Spacing marks, repeated spacing and resize guides; snap strength; margin guides: P0 |
+| Dynamic Grid: guides while moving near other shapes or page/container margins; spacing guides; snap strength in Visual Aids dialog | S10 | Snap to grid / shapes / guides and to equal spacing between neighbours, with a drawn guide line; desktop also marks the two equal gaps | Same | Repeated spacing and resize guides; snap strength in the browser; margin guides: P0 |
 | Snap & Glue dialog (what snaps, what glues) | S1 | Toggles in View and the empty-page menu, and a window (Alt+F9) | Same | Glue settings: P1 |
-| AutoConnect: pointing at a shape shows four arrows; hovering an arrow shows a mini toolbar of up to four Quick Shapes; click adds and connects; dropping a Shapes-window item on an arrow also works; per-file setting, toggled in View | S3, S6, S7 | Arrows place the picked stencil shape or a copy of the shape and connect; toggled in View | Arrows place the picked stencil shape or a copy of the shape and connect | Port the shape picker at the arrow |
+| AutoConnect: pointing at a shape shows four arrows; hovering an arrow shows a mini toolbar of up to four Quick Shapes; click adds and connects; dropping a Shapes-window item on an arrow also works; per-file setting, toggled in View | S3, S6, S7 | Arrows place the picked stencil shape or a copy of the shape and connect; hovering an arrow lists the first four shapes of the open stencil (pointer only); a shape dragged from the panel onto an arrow is placed and connected; toggled in View | Arrows place the picked stencil shape or a copy of the shape and connect | Desktop: keyboard use, thumbnails, per-file setting. Browser: the shape picker |
 | Drag from stencil: drag a master onto the page creates an instance; the master stays | S5, S2 | Drag from pane (ghost label), click-then-click placement, Esc cancels | Drag | Done, plus drop on a shape to glue/replace: P3 |
 | Right-click menus | S5, S9 | See section 2 | See section 2 | P1 |
 | Text editing: select a shape and type starts editing; Esc or a click outside ends; F2 toggles text edit and selection; Ctrl+A in text selects all text | S5, S1 | F2, Ctrl+E or typing on one selected shape open a text window (typed characters are added after the text); Ctrl+Enter or F2 applies, Esc discards | F2, type-to-edit unverified | Type-to-edit: P0 |
 | Text Block tool moves the text block independently | S5 | none | none | P2 |
 | Zoom: Ctrl+wheel; plain wheel scrolls | S11 | Ctrl+wheel zooms, wheel scrolls | wheel scrolls; `wheelZoom` option | Desktop matches |
-| Pan: Pan & Zoom window; scroll; Ctrl+Shift right-drag | S11 | middle button, Space-drag, Pan tool | same plus pane | P2 |
+| Pan: Pan & Zoom window; scroll; Ctrl+Shift right-drag | S11 | middle button, Space-drag, Pan tool, Ctrl+Shift right-drag | same plus pane | P2 |
 | Tab / Shift+Tab cycle focus through shapes; Enter selects the focused shape | S1 | Tab / Shift+Tab select the next / previous shape once a shape is selected on the canvas | `tabThroughShapes` | Desktop: no keyboard way in without a selection (Ctrl+A first) |
 | Page change: Page Up / Page Down in full screen; Ctrl+Page Down next page | S1 | both | none | Desktop matches |
 
@@ -350,16 +350,16 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Send to back | Ctrl+Shift+B | Ctrl+Shift+B | Ctrl+Shift+B | same |
 | Rotate left / right | Ctrl+L / Ctrl+R | Ctrl+L / Ctrl+R | `[` / `]` | same on desktop |
 | Flip horizontal / vertical | Ctrl+H / Ctrl+J | Ctrl+H / Ctrl+J | `H` / `V` | same on desktop |
-| Align Shapes dialog | F8 | none | none | none |
+| Align Shapes dialog | F8 | F8 goes to the inspector's align buttons (no dialog) | none | partial |
 | Pointer tool | Ctrl+1 | Ctrl+1 | Esc | same on desktop |
-| Text tool | Ctrl+2 | none | none | none |
+| Text tool | Ctrl+2 | Ctrl+2 (draws a text box) | none | same on desktop |
 | Connector tool | Ctrl+3 | Ctrl+3 | none | same on desktop |
-| Connection point tool | Ctrl+Shift+1 | none | none | none |
+| Connection point tool | Ctrl+Shift+1 | Ctrl+Shift+1 | none | same on desktop |
 | Text block tool | Ctrl+Shift+4 | none | none | none |
 | Crop tool | Ctrl+Shift+2 | none | none | none |
 | Pencil / Freeform / Line / Arc / Rectangle / Ellipse | Ctrl+4 / 5 / 6 / 7 / 8 / 9 | Ctrl+6 / 8 / 9 (line, rectangle, ellipse) | none | partial |
 | Format Painter | Ctrl+Shift+P | none | none | none |
-| Format Shape pane | F3 | none | none | none |
+| Format Shape pane | F3 | F3 goes to the inspector's Style settings (no pane of its own) | none | partial |
 | Text dialog | F11 | none | none | none |
 | Snap & Glue dialog | Alt+F9 | Alt+F9 (no glue settings) | none | same on desktop |
 | Full-screen view / exit | F5 / Esc | F5 / Esc | no key | same on desktop |
@@ -386,7 +386,7 @@ same action, `none` not bound. Browser column from `web/shell.js` and `web/keybo
 | Find | Ctrl+F (web `findBtn`) | Ctrl+F | Ctrl+F | same on desktop |
 | Hyperlink | Ctrl+K (unverified in S1) | Ctrl+K | Ctrl+K | same on desktop |
 
-Count of the 41 rows above: same 24, diff 1, partial 3, none 13. This counts table rows, not Microsoft's whole list.
+Count of the 41 rows above: same 26, diff 1, partial 5, none 9. This counts table rows, not Microsoft's whole list.
 
 ### 4.2 Keyboard conflicts to resolve
 

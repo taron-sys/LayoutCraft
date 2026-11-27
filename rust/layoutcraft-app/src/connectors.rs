@@ -27,6 +27,16 @@ const ARROW_GAP_OVER_ROTATE: f32 = 46.0;
 const ARROW_HIT: f32 = 10.0;
 const ARROW_SIZE: f32 = 6.0;
 const DIRECTIONS: [Direction; 4] = [Direction::Right, Direction::Left, Direction::Up, Direction::Down];
+/// How many shapes of the open stencil are offered beside a connect arrow, and how far from the arrow's middle.
+const QUICK_SHAPES: usize = 4;
+const PICKER_GAP: f32 = 14.0;
+
+/// The list of shapes beside a connect arrow: whose arrow, which side, and where the list was drawn.
+pub(super) struct ArrowPicker {
+    id: String,
+    direction: Direction,
+    area: egui::Rect,
+}
 
 /// The line ends of the selected line as last read: (page, shape, undo depth) and the values.
 pub(super) type LineEndsRead = ((usize, String, usize), serde_json::Value);
@@ -141,29 +151,48 @@ impl LayoutCraftApp {
     pub(super) fn click_connect_arrow(&mut self, ctx: &egui::Context, pointer: egui::Pos2, image_rect: egui::Rect) -> bool {
         let Some((id, direction)) = self.connect_arrow_at(pointer, image_rect) else { return false };
         let picked = self.armed_master.take();
-        let pick = picked.as_ref().map(|(stencil, master, _)| (*stencil, master.as_str()));
-        match self.engine.connect_new_neighbour(self.page_index, &id, direction, pick) {
+        self.place_neighbour(ctx, &id, direction, picked.as_ref().map(|(stencil, master, _)| (*stencil, master.as_str())));
+        true
+    }
+
+    /// Place a shape (the master `pick`, else a copy of `id`) on that side of `id` and connect the two.
+    pub(super) fn place_neighbour(&mut self, ctx: &egui::Context, id: &str, direction: Direction, pick: Option<(usize, &str)>) {
+        match self.engine.connect_new_neighbour(self.page_index, id, direction, pick) {
             Ok(made) => {
                 self.arrow_shape = None;
+                self.arrow_picker = None;
                 self.finish_edit(ctx, Ok(()), &format!("Placed a shape {} and connected it", direction_words(direction)), Some(made));
             }
             Err(error) => self.status = format!("Could not add a connected shape: {error}"),
         }
-        true
+    }
+
+    /// The shapes offered beside a connect arrow, the first ones of the open stencil: (stencil, master, name).
+    fn quick_shapes(&self) -> Vec<(usize, String, String)> {
+        let open = self.stencils.iter().find(|stencil| Some(stencil.index) == self.open_stencil_shown);
+        open.map_or_else(Vec::new, |stencil| stencil.masters.iter().take(QUICK_SHAPES).map(|(master, name)| (stencil.index, master.clone(), name.clone())).collect())
     }
 
     /// Follow the pointer and draw the connect arrows of the shape under it.
     pub(super) fn show_connect_arrows(&mut self, response: &egui::Response, painter: &egui::Painter, image_rect: egui::Rect) {
         if !self.connect_arrows_allowed() {
             self.arrow_shape = None;
+            self.arrow_picker = None;
             return;
         }
-        let Some(pointer) = response.hover_pos() else {
+        // on the list of shapes, or on the way to it, the pointer keeps the list and its arrow (the list covers the canvas,
+        // so the canvas itself is not hovered there)
+        let on_picker = response.ctx.pointer_hover_pos().filter(|at| self.arrow_picker.as_ref().is_some_and(|picker| picker.area.expand(8.0).contains(*at)));
+        // while a shape is dragged from the Shapes panel the canvas is not hovered, but the arrows show where it can be let go
+        let dragged = response.ctx.pointer_latest_pos().filter(|at| self.pane_drag.is_some() && response.rect.contains(*at));
+        let Some(pointer) = on_picker.or(dragged).or_else(|| response.hover_pos()) else {
             self.arrow_shape = None;
+            self.arrow_picker = None;
             return;
         };
         // an arrow of the shown shape keeps it, even where it lies over a neighbour
-        if self.connect_arrow_at(pointer, image_rect).is_none() {
+        if on_picker.is_none() && self.connect_arrow_at(pointer, image_rect).is_none() {
+            self.arrow_picker = None;
             let under = self.pick_shape(self.screen_to_scene(pointer, image_rect)).filter(|id| self.takes_connect_arrows(id));
             self.arrow_shape = under.or_else(|| {
                 let id = self.arrow_shape.take()?;
@@ -171,10 +200,18 @@ impl LayoutCraftApp {
                 (self.takes_connect_arrows(&id) && arrow_area(rect, over_rotate).contains(pointer)).then_some(id)
             });
         }
-        let Some((rect, over_rotate)) = self.arrow_shape.as_ref().and_then(|id| self.arrow_frame(id, image_rect)) else { return };
+        let Some(id) = self.arrow_shape.clone() else { return };
+        let Some((rect, over_rotate)) = self.arrow_frame(&id, image_rect) else { return };
+        // a shape already being dragged needs no list of shapes
+        let shapes = if self.pane_drag.is_some() { Vec::new() } else { self.quick_shapes() };
+        let listed = on_picker.and(self.arrow_picker.as_ref().map(|picker| picker.direction));
+        let mut offer = None;
         for (direction, at) in arrow_places(rect, over_rotate) {
             // under the pointer an arrow grows as well as changing colour
-            let hot = at.distance(pointer) <= ARROW_HIT;
+            let hot = listed.map_or_else(|| at.distance(pointer) <= ARROW_HIT, |chosen| chosen == direction);
+            if hot && !shapes.is_empty() {
+                offer = Some((direction, at));
+            }
             let size = if hot { ARROW_SIZE * 1.5 } else { ARROW_SIZE };
             let step = screen_step(direction);
             let side = egui::vec2(-step.y, step.x);
@@ -184,7 +221,41 @@ impl LayoutCraftApp {
             if hot {
                 response.ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
                 let what = if self.armed_master.is_some() { "place the picked shape" } else { "copy this shape" };
-                response.clone().on_hover_text_at_pointer(format!("Click to {what} {} and connect them; drag to connect to a shape or to the page", direction_words(direction)));
+                // the list of shapes takes the place of the hint, which would cover it
+                if shapes.is_empty() && self.pane_drag.is_none() {
+                    response.clone().on_hover_text_at_pointer(format!("Click to {what} {} and connect them; drag to connect to a shape or to the page", direction_words(direction)));
+                }
+            }
+        }
+        let Some((direction, at)) = offer else {
+            self.arrow_picker = None;
+            return;
+        };
+        let pivot = match direction {
+            Direction::Right => egui::Align2::LEFT_CENTER,
+            Direction::Left => egui::Align2::RIGHT_CENTER,
+            Direction::Up => egui::Align2::CENTER_BOTTOM,
+            Direction::Down => egui::Align2::CENTER_TOP,
+        };
+        let mut chosen = None;
+        // not kept inside the window: that would push it over the arrow near an edge, and the arrow's click would pick a shape
+        let list = egui::Area::new(egui::Id::unique("quick-shapes")).order(egui::Order::Foreground).pivot(pivot).fixed_pos(at + screen_step(direction) * PICKER_GAP).constrain(false).show(&response.ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                for (stencil, master, name) in &shapes {
+                    let hint = format!("Place {name} {} and connect it", direction_words(direction));
+                    if ui.add(egui::Button::new(name).wrap_mode(egui::TextWrapMode::Extend)).on_hover_text(hint).clicked() {
+                        chosen = Some((*stencil, master.clone()));
+                    }
+                }
+            });
+        });
+        self.arrow_picker = Some(ArrowPicker { id, direction, area: list.response.rect });
+        if let Some((stencil, master)) = chosen {
+            if let Some(picker) = self.arrow_picker.take() {
+                self.armed_master = None;
+                self.place_neighbour(&response.ctx, &picker.id, picker.direction, Some((stencil, &master)));
+                // the click was on the list; the drawing keeps the keyboard
+                self.canvas_keys = true;
             }
         }
     }
