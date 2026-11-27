@@ -840,6 +840,10 @@ fn remove_shape(xml: &str, id: &str) -> Result<String> {
         at = tag_end - start;
     }
     let mut out = format!("{}{}", &xml[..start], &xml[end..]);
+    // no container or list goes on naming a shape that is gone
+    if let Some(pruned) = crate::containers::without_references(&out, |named| !gone.iter().any(|id| id == named)) {
+        out = pruned;
+    }
     let mut search = 0usize;
     while let Some(relative) = out[search..].find("<Connect") {
         let tag_start = search + relative;
@@ -1828,7 +1832,10 @@ pub fn paste_shapes_with_connects(
         for (old, new) in &map {
             out = out.replace(&format!("Sheet.{old}!"), &format!("Sheet.{new}\u{1}!"));
         }
-        pasted.push_str(&out.replace('\u{1}', ""));
+        let out = out.replace('\u{1}', "");
+        // membership of containers and lists holds among the pasted shapes only: a copy does not join or hold the originals
+        let own = |id: &str| map.iter().any(|(_, new)| new.to_string() == id);
+        pasted.push_str(&crate::containers::without_references(&out, own).unwrap_or(out));
     }
     let mut xml = package.text(&page.part)?.to_string();
     let insert = xml

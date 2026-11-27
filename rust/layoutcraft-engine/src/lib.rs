@@ -347,7 +347,16 @@ impl Engine {
     /// 17 / 18 shape data row; see the wasm crate's `vl_edit` for the meaning of `a`..`d` and `flag`) and re-import. Glued connectors follow.
     #[allow(clippy::too_many_arguments)]
     pub fn edit(&mut self, page: usize, op: i32, id: &str, a: f64, b: f64, c: f64, d: f64, flag: i32) -> Result<(), String> {
-        let id = id.to_string();
+        let mut id = id.to_string();
+        let mut op = op;
+        // deleting a container or a list takes what it holds with it
+        if matches!(op, 4 | 6) {
+            let named: Vec<String> = id.split('\n').filter(|one| !one.is_empty()).map(str::to_string).collect();
+            let all = self.with_contents(page, &named);
+            if all.len() > named.len() {
+                (op, id) = (6, all.join("\n"));
+            }
+        }
         let package = self.package.as_ref().ok_or("no document")?;
         let editor = match &self.import_state {
             Some(state) => state.open_editor(package, package, page),
@@ -380,10 +389,15 @@ impl Engine {
                 let part = package.pages().map_err(|e| e.to_string())?[page].part.clone();
                 let connects = package.connects(&part).map_err(|e| e.to_string())?;
                 let mut gone = Vec::new();
+                let mut below = Vec::new();
                 for one in id.split('\n').filter(|one| !one.is_empty()) {
-                    gone.extend(editor.subtree_ids(one).map_err(|e| e.to_string())?);
+                    let tree = editor.subtree_ids(one).map_err(|e| e.to_string())?;
+                    below.extend(tree.iter().filter(|inside| inside.as_str() != one).cloned());
+                    gone.extend(tree);
                     removed.push(one.to_string());
                 }
+                // a shape inside another one that goes needs no removal of its own
+                removed.retain(|one| !below.contains(one));
                 Ok::<_, layoutcraft_vsdx::Error>(editor.detach_patches(&gone, &connects))
             }
             // Op 10 formats shapes: the id parameter is "<id>\n<id>...\n<json>" with the JSON
@@ -892,12 +906,40 @@ impl Engine {
         if ids.is_empty() {
             return Err("nothing to copy".to_string());
         }
+        // a container or a list is copied with what it holds
+        let ids = self.with_contents(page, ids);
         let package = self.package_ref()?;
-        let (copied, rows) = layoutcraft_vsdx::groupedit::copy_shapes(package, page, ids).map_err(|e| e.to_string())?;
+        let (copied, rows) = layoutcraft_vsdx::groupedit::copy_shapes(package, page, &ids).map_err(|e| e.to_string())?;
         let count = copied.len();
         self.clipboard = copied;
         self.clipboard_connects = rows;
         Ok(count)
+    }
+
+    /// `ids` followed by everything the containers and lists among them hold, nested ones included, each once.
+    pub fn with_contents(&self, page: usize, ids: &[String]) -> Vec<String> {
+        let mut all: Vec<String> = Vec::new();
+        for id in ids {
+            if !all.contains(id) {
+                all.push(id.clone());
+            }
+        }
+        let Some(page) = self.document.as_ref().and_then(|document| document.pages.get(page)) else { return all };
+        let mut next = 0;
+        while next < all.len() {
+            let holders = page.containers.iter().filter(|record| record["visioId"].as_str() == Some(all[next].as_str()));
+            let held: Vec<String> = holders
+                .flat_map(|record| ["members", "items"].into_iter().flat_map(move |key| record[key].as_array().into_iter().flatten()))
+                .filter_map(|id| id.as_str().map(str::to_string))
+                .collect();
+            for id in held {
+                if !all.contains(&id) {
+                    all.push(id);
+                }
+            }
+            next += 1;
+        }
+        all
     }
 
     /// Paste the clipboard onto `page`, offset by (`dx`, `dy`) inches (y up), ONE undo step. Returns the new ids of the pasted top-level shapes.
