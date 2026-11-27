@@ -3190,6 +3190,42 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_comment_can_be_added_changed_and_deleted() {
+        let (mut driver, _) = Driver::new();
+        driver.app.comments_open = true;
+        driver.app.comment_text = "Either | or".to_string();
+        driver.frames(4);
+        let press = |driver: &mut Driver, label: &str| {
+            let button = *driver.texts(label).first().unwrap_or_else(|| panic!("no {label:?} button"));
+            driver.click(button.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let texts = |driver: &Driver| {
+            let list: serde_json::Value = serde_json::from_str(&driver.app.engine.comments_json().unwrap()).unwrap();
+            list.as_array().unwrap().iter().map(|comment| comment["text"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>()
+        };
+        press(&mut driver, "Add comment");
+        assert_eq!(texts(&driver), ["Either | or"], "{}", driver.app.status);
+        let depth = driver.app.engine.undo_depth();
+        // unchanged: nothing is written
+        press(&mut driver, "Edit comment");
+        press(&mut driver, "Save comment");
+        assert_eq!(driver.app.engine.undo_depth(), depth);
+        // a new comment being typed survives changing an old one
+        driver.app.comment_text = "half written".to_string();
+        press(&mut driver, "Edit comment");
+        driver.app.comment_edit.as_mut().expect("being changed").1 = "Neither".to_string();
+        driver.frames(2);
+        press(&mut driver, "Save comment");
+        assert_eq!((texts(&driver), driver.app.engine.undo_depth()), (vec!["Neither".to_string()], depth + 1), "{}", driver.app.status);
+        assert_eq!(driver.app.comment_text, "half written");
+        press(&mut driver, "Delete comment");
+        assert!(texts(&driver).is_empty(), "{}", driver.app.status);
+        driver.key(Key::Escape, Modifiers::NONE);
+        assert!(!driver.app.comments_open);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4084,6 +4120,8 @@ struct LayoutCraftApp {
     page_setup_size: (f64, f64),
     comments_open: bool,
     comment_text: String,
+    /// The comment whose text is being changed: its ID and the text in the field.
+    comment_edit: Option<(String, String)>,
     help_about_open: bool,
     mcp_open: bool,
     mcp_server: String,
@@ -4231,6 +4269,7 @@ impl LayoutCraftApp {
             page_setup_size: (11.0, 8.5),
             comments_open: false,
             comment_text: String::new(),
+            comment_edit: None,
             help_about_open: false,
             mcp_open: false,
             mcp_server: mcpinfo::server_placeholder().to_string(),
@@ -9414,6 +9453,14 @@ impl eframe::App for LayoutCraftApp {
             let mut open = true;
             let mut add = false;
             let list = self.engine.comments_json().ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).and_then(|value| value.as_array().cloned()).unwrap_or_default();
+            let id_of = |comment: &serde_json::Value| comment["id"].as_str().map_or_else(|| comment["id"].to_string(), str::to_string);
+            // an undo can take away the comment being changed
+            if self.comment_edit.as_ref().is_some_and(|(id, _)| list.iter().all(|comment| &id_of(comment) != id)) {
+                self.comment_edit = None;
+            }
+            let mut change: Option<(String, String)> = None;
+            let mut delete: Option<String> = None;
+            let (mut save, mut cancel) = (false, false);
             egui::Window::new("Comments").open(&mut open).collapsible(false).default_width(420.0).show(&ctx, |ui| {
                 if list.is_empty() {
                     ui.label("No comments yet.");
@@ -9421,31 +9468,74 @@ impl eframe::App for LayoutCraftApp {
                 for comment in &list {
                     let page = comment["page"].as_i64().map_or("-".to_string(), |page| (page + 1).to_string());
                     let shape = comment["shape"].as_str().map_or("the page".to_string(), |shape| format!("shape {shape}"));
-                    ui.label(egui::RichText::new(format!("{} on {shape} (page {page}), {}", comment["author"].as_str().unwrap_or(""), comment["date"].as_str().unwrap_or(""))).small().weak());
+                    let author = comment["author"].as_str().unwrap_or("");
+                    ui.label(egui::RichText::new(format!("{author} on {shape} (page {page}), {}", comment["date"].as_str().unwrap_or(""))).small().weak());
                     ui.add(egui::Label::new(comment["text"].as_str().unwrap_or("")).wrap());
+                    ui.horizontal(|ui| {
+                        if ui.small_button("Edit comment").on_hover_text(format!("Change the text of this comment by {author}")).clicked() {
+                            change = Some((id_of(comment), comment["text"].as_str().unwrap_or("").to_string()));
+                        }
+                        if ui.small_button("Delete comment").on_hover_text(format!("Delete this comment by {author} (Undo brings it back)")).clicked() {
+                            delete = Some(id_of(comment));
+                        }
+                    });
                     ui.separator();
                 }
-                ui.label(match &self.selected {
-                    Some(id) => format!("New comment on shape {id}:"),
-                    None => "New comment on the page:".to_string(),
-                });
-                ui.add(egui::TextEdit::multiline(&mut self.comment_text).desired_rows(3).desired_width(400.0));
-                if ui.add_enabled(!self.comment_text.trim().is_empty(), egui::Button::new("Add comment")).clicked() {
-                    add = true;
+                if let Some((_, changed)) = self.comment_edit.as_mut() {
+                    let label = ui.label("Change the comment:");
+                    ui.add(egui::TextEdit::multiline(changed).desired_rows(3).desired_width(400.0)).labelled_by(label.id);
+                    ui.horizontal(|ui| {
+                        save = ui.add_enabled(!changed.trim().is_empty(), egui::Button::new("Save comment")).clicked();
+                        cancel = ui.button("Cancel").clicked();
+                    });
+                } else {
+                    let label = ui.label(match &self.selected {
+                        Some(id) => format!("New comment on shape {id}:"),
+                        None => "New comment on the page:".to_string(),
+                    });
+                    ui.add(egui::TextEdit::multiline(&mut self.comment_text).desired_rows(3).desired_width(400.0)).labelled_by(label.id);
+                    if ui.add_enabled(!self.comment_text.trim().is_empty(), egui::Button::new("Add comment")).clicked() {
+                        add = true;
+                    }
                 }
             });
+            let page = self.page_index;
+            let selected = self.selected.clone();
             if add {
                 let shape = self.selected.clone().unwrap_or_default();
-                let text = format!("{shape}|Me|ME|{}|{}", iso_now(), self.comment_text.trim().replace('|', "/"));
-                let page = self.page_index;
+                // the text comes last, so it may contain the separator
+                let text = format!("{shape}|Me|ME|{}|{}", iso_now(), self.comment_text.trim());
                 let result = self.engine.page_op(20, page, 0, &text).map(|_| ());
                 if result.is_ok() {
                     self.comment_text.clear();
                 }
-                let selected = self.selected.clone();
                 self.finish_edit(&ctx, result, "Comment added", selected);
+            } else if let Some(id) = delete {
+                let result = self.engine.page_op(22, page, 0, &id).map(|_| ());
+                self.finish_edit(&ctx, result, "Comment deleted", selected);
+            } else if save {
+                if let Some((id, changed)) = self.comment_edit.clone() {
+                    let before = list.iter().find(|comment| id_of(comment) == id).and_then(|comment| comment["text"].as_str());
+                    // saving the same text writes nothing
+                    if before == Some(changed.trim()) {
+                        self.comment_edit = None;
+                    } else {
+                        let result = self.engine.page_op(21, page, 0, &format!("{id}|{}|{}", iso_now(), changed.trim())).map(|_| ());
+                        if result.is_ok() {
+                            self.comment_edit = None;
+                        }
+                        self.finish_edit(&ctx, result, "Comment changed", selected);
+                    }
+                }
             }
-            self.comments_open = open;
+            if cancel {
+                self.comment_edit = None;
+            }
+            if change.is_some() {
+                self.comment_edit = change;
+            }
+            // Esc closes it, unless a text field has the keyboard (then Esc only leaves the field)
+            self.comments_open = open && !(!self.focus_at_frame_start && ctx.input(|input| input.key_pressed(egui::Key::Escape)));
         }
         self.draw_find(&ctx);
         self.draw_links(&ctx);

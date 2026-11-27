@@ -249,8 +249,8 @@ these are row counts, not a count of every Visio button.
 
 | Visio command | Src | LC id | Desktop | Browser | Notes | Prio |
 |---|---|---|---|---|---|---|
-| Comments: New Comment | S15 | newComment | partial | present | Desktop: Comments action, extent not verified in this pass | P1 |
-| Comments: Comments Pane | S15 | showComments | partial | present | | P1 |
+| Comments: New Comment | S15 | newComment | present | present | Desktop: the Comments window adds a comment to the page or the selected shape | P1 |
+| Comments: Comments Pane | S15 | showComments | partial | present | Desktop: a window that lists, changes and deletes comments; no replies, not docked | P1 |
 | Markup: Track Markup | S15 (not on the tab by default) | - | missing | missing | | P3 |
 | Proofing: spelling | S4 | - | missing | partial | Browser relies on the text editor's own check | P3 |
 | Language | S4 | - | missing | missing | | P3 |
