@@ -983,6 +983,35 @@ fn theme_swatches(ui: &mut egui::Ui, colours: &serde_json::Value) {
     }
 }
 
+/// Give a control that shows a letter or a drawing the name assistive technology reads.
+fn name_control(ui: &egui::Ui, response: &egui::Response, name: &str) {
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_label(name));
+}
+
+/// A small button that draws four lines of text as the alignment `mode` (left, center, right, justify) sets them.
+fn align_button(ui: &mut egui::Ui, mode: &str, name: &str, enabled: bool, selected: bool) -> egui::Response {
+    ui.add_enabled_ui(enabled, |ui| {
+        let size = egui::vec2(26.0, ui.spacing().interact_size.y.min(26.0));
+        let (rect, response) = ui.allocate_exact_size(size, egui::Sense::click());
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, name));
+        let visuals = ui.style().interact_selectable(&response, selected);
+        ui.painter().rect(rect, visuals.corner_radius, visuals.weak_bg_fill, visuals.bg_stroke, egui::StrokeKind::Inside);
+        let (left, right) = (rect.center().x - 8.0, rect.center().x + 8.0);
+        for (row, short) in [false, true, false, true].into_iter().enumerate() {
+            let width = if short && mode != "justify" { 10.0 } else { 16.0 };
+            let from = match mode {
+                "center" => rect.center().x - width / 2.0,
+                "right" => right - width,
+                _ => left,
+            };
+            let y = rect.center().y - 6.0 + 4.0 * row as f32;
+            ui.painter().line_segment([egui::pos2(from, y), egui::pos2(from + width, y)], egui::Stroke::new(1.4, visuals.text_color()));
+        }
+        response
+    })
+    .inner
+}
+
 /// A ribbon command with its icon over its name, as high as a group.
 fn large_button(ui: &mut egui::Ui, icon: &egui::TextureHandle, label: &str, enabled: bool, selected: bool) -> egui::Response {
     ui.add_enabled_ui(enabled, |ui| {
@@ -2351,6 +2380,8 @@ mod app_frame_tests {
         frame: eframe::Frame,
         time: f64,
         modifiers: Modifiers,
+        /// The width of the window.
+        width: f32,
         /// What the last frame drew.
         drawn: Vec<egui::epaint::ClippedShape>,
     }
@@ -2369,7 +2400,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
             }
             app.baseline = app.engine.document().cloned();
             app.build_page(&ctx, true);
-            let mut driver = Driver { ctx, app, frame: eframe::Frame::_new_kittest(), time: 0.0, modifiers: Modifiers::NONE, drawn: Vec::new() };
+            let mut driver = Driver { ctx, app, frame: eframe::Frame::_new_kittest(), time: 0.0, modifiers: Modifiers::NONE, width: 1400.0, drawn: Vec::new() };
             driver.frames(3);
             (driver, ids)
         }
@@ -2378,7 +2409,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
             self.time += 0.1;
             events.insert(0, Event::ModifiersChanged(self.modifiers));
             let mut raw = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(1400.0, 900.0))),
+                screen_rect: Some(egui::Rect::from_min_size(pos2(0.0, 0.0), vec2(self.width, 900.0))),
                 time: Some(self.time),
                 events,
                 ..Default::default()
@@ -3537,6 +3568,37 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         driver.click(pos2(paste.center().x, paste.top() - 14.0), Modifiers::NONE);
         driver.frames(3);
         assert!(!driver.app.status.is_empty(), "a click on the picture reaches the command");
+    }
+
+    #[test]
+    fn a_wide_window_shows_the_font_and_paragraph_controls_in_the_ribbon() {
+        let (mut driver, ids) = Driver::new();
+        assert!(!driver.texts("Font \u{25be}").is_empty() && driver.texts("AA").is_empty(), "a narrow window folds them");
+        driver.app.selected = Some(ids[0].clone());
+        driver.width = 1920.0;
+        driver.frames(4);
+        assert!(driver.texts("Font \u{25be}").is_empty() && driver.texts("Paragraph \u{25be}").is_empty());
+        let size = driver.app.engine.undo_depth();
+        let capitals = driver.texts("AA")[0];
+        driver.click(capitals.center(), Modifiers::NONE);
+        driver.frames(3);
+        assert_eq!(driver.app.engine.undo_depth(), size + 1, "{}", driver.app.status);
+        // the alignment buttons are drawn, not written: four of one size above the Indent menu, centring the second
+        let indent = driver.texts("Indent \u{25be}")[0];
+        let mut buttons: Vec<egui::Rect> = driver
+            .drawn
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Rect(shape) if (shape.rect.width() - 26.0).abs() < 0.5 && shape.rect.bottom() < indent.top() && shape.rect.top() > 40.0 && shape.rect.left() > indent.left() - 20.0 && shape.rect.left() < indent.left() + 150.0 => Some(shape.rect),
+                _ => None,
+            })
+            .collect();
+        buttons.sort_by(|a, b| a.left().total_cmp(&b.left()));
+        assert_eq!(buttons.len(), 4, "{buttons:?}");
+        driver.click(buttons[1].center(), Modifiers::NONE);
+        driver.frames(3);
+        let shape = driver.app.doc_shape(&ids[0]).expect("the shape");
+        assert_eq!((driver.app.engine.undo_depth(), shape.align.as_deref()), (size + 2, Some("center")), "{}", driver.app.status);
     }
 
     #[test]
@@ -4830,6 +4892,8 @@ struct LayoutCraftApp {
     ribbon_compact: bool,
     /// The command being drawn is the large one of its group.
     ribbon_large: bool,
+    /// The Font and Paragraph controls are being drawn in the ribbon itself, where they are short.
+    ribbon_unfolded: bool,
     /// Installed font families for the picker (listed on first use) and the picker's search text.
     font_list: Option<Vec<String>>,
     font_filter: String,
@@ -5029,6 +5093,7 @@ impl LayoutCraftApp {
             ribbon_peek: false,
             ribbon_compact: false,
             ribbon_large: false,
+            ribbon_unfolded: false,
             font_list: None,
             font_filter: String::new(),
             font_warnings: Vec::new(),
@@ -6814,7 +6879,9 @@ impl LayoutCraftApp {
     fn draw_ribbon(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
         let ctx = ui.ctx().clone();
         // like the web: below 1750 px the buttons that have an icon and a text show only the icon
-        self.ribbon_compact = ribbon::is_compact(ctx.content_rect().width());
+        let width = ctx.content_rect().width();
+        let home = self.ribbon.tabs.get(self.ribbon_tab).is_some_and(|tab| tab.name == "Home");
+        self.ribbon_compact = ribbon::is_compact(width) || (home && width < ribbon::UNFOLDED_COMPACT_BELOW);
         // Ctrl+F1 collapses / expands the ribbon (web/keyboard.js)
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F1)) {
             self.ribbon_collapsed = !self.ribbon_collapsed;
@@ -6892,11 +6959,31 @@ impl LayoutCraftApp {
                     }
                 }
                 let group_ui = ui.vertical(|ui| {
+                    // a menu with room to stand open in the ribbon: its own rows instead of the drop-down
+                    let rows = match cells.as_slice() {
+                        [Cell::Menu(label, _)] => ribbon::unfolded(label, ctx.content_rect().width()),
+                        _ => None,
+                    };
                     let large: Vec<bool> = cells.iter().map(|cell| matches!(cell, Cell::Command(id) if ribbon::is_large(id))).collect();
                     let items = ui.horizontal_top(|ui| {
                         // every group is as high as its tallest, so the names under them stand on one line
                         ui.set_min_height(ribbon::ITEMS_HEIGHT);
                         ui.spacing_mut().interact_size.y = (ribbon::ITEMS_HEIGHT - ui.spacing().item_spacing.y) / 2.0;
+                        if let Some(rows) = rows {
+                            ui.vertical(|ui| {
+                                self.ribbon_unfolded = true;
+                                for row in rows {
+                                    ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 3.0;
+                                        for id in row.iter() {
+                                            self.ribbon_button(ui, ctx, id, action);
+                                        }
+                                    });
+                                }
+                                self.ribbon_unfolded = false;
+                            });
+                            return;
+                        }
                         for column in ribbon::columns(&large) {
                             ui.vertical(|ui| {
                                 for index in column {
@@ -7148,6 +7235,7 @@ impl LayoutCraftApp {
     /// The Font and Shape Styles controls of the Home tab for the selected shapes: B / I / U toggles, A- / A+ (one point), and fill / line colour
     /// swatch menus; every click is one `Engine::edit` op 10 (see `style_selected`).
     fn ribbon_format_controls(&mut self, ui: &mut egui::Ui, id: &str, action: &mut Option<Action>) {
+        let short = self.ribbon_unfolded;
         let primary = self.selected.as_deref().and_then(|selected| self.doc_shape(selected)).cloned();
         let enabled = primary.is_some() && self.texture.is_some();
         match id {
@@ -7159,7 +7247,9 @@ impl LayoutCraftApp {
                         "italic" => egui::RichText::new(label).italics(),
                         _ => egui::RichText::new(label).underline(),
                     };
-                    if ui.add_enabled(enabled, egui::Button::new(text).selected(on)).on_hover_text(key).clicked() {
+                    let button = ui.add_enabled(enabled, egui::Button::new(text).selected(on).min_size(egui::vec2(24.0, 0.0)));
+                    name_control(ui, &button, ["Bold", "Italic", "Underline"][usize::from(key == "italic") + 2 * usize::from(key == "underline")]);
+                    if button.on_hover_text(key).clicked() {
                         *action = Some(Action::StyleSelected(serde_json::json!({ key: !on }).to_string()));
                     }
                 }
@@ -7167,22 +7257,38 @@ impl LayoutCraftApp {
             "p:strike" => {
                 let [struck, capitals] = self.selection_text_flags();
                 let on = enabled && struck;
-                if ui.add_enabled(enabled, egui::Button::new(egui::RichText::new("Strike").strikethrough()).selected(on)).on_hover_text("Strikethrough of the whole text").clicked() {
+                let button = ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(if short { "S" } else { "Strike" }).strikethrough()).selected(on).min_size(egui::vec2(24.0, 0.0)));
+                name_control(ui, &button, "Strikethrough");
+                if button.on_hover_text("Strikethrough of the whole text").clicked() {
                     *action = Some(Action::FormatText(serde_json::json!({ "cells": { "Strikethru": if on { "0" } else { "1" } } })));
                 }
                 let on = enabled && capitals;
-                if ui.add_enabled(enabled, egui::Button::new("Caps").selected(on)).on_hover_text("All capitals for the whole text").clicked() {
+                let button = ui.add_enabled(enabled, egui::Button::new(if short { "AA" } else { "Caps" }).selected(on));
+                name_control(ui, &button, "All capitals");
+                if button.on_hover_text("All capitals for the whole text").clicked() {
                     *action = Some(Action::FormatText(serde_json::json!({ "cells": { "Case": if on { "0" } else { "1" } } })));
                 }
-                if ui.add_enabled(enabled, egui::Button::new("Text colour...")).on_hover_text("Colour of the text of the selected shapes").clicked() {
+                // in the ribbon: a letter over a bar of the colour the text has now
+                let colour = primary.as_ref().and_then(|shape| shape.text_color.as_deref()).and_then(typed_colour);
+                let button = ui.add_enabled(enabled, egui::Button::new(if short { "A" } else { "Text colour..." }).min_size(egui::vec2(24.0, 0.0)));
+                name_control(ui, &button, "Text colour");
+                if let (true, Some([r, g, b])) = (short, colour) {
+                    let bar = egui::Rect::from_min_max(button.rect.left_bottom() + egui::vec2(4.0, -5.0), button.rect.right_bottom() + egui::vec2(-4.0, -2.0));
+                    ui.painter().rect(bar, 0.0, egui::Color32::from_rgb(r, g, b), egui::Stroke::new(1.0, ui.visuals().weak_text_color()), egui::StrokeKind::Outside);
+                }
+                if button.on_hover_text("Colour of the text of the selected shapes").clicked() {
                     *action = Some(Action::ColourDialog("textColor"));
-                    ui.close();
+                    if !short {
+                        ui.close();
+                    }
                 }
             }
             "p:alignL" => {
                 let current = primary.as_ref().and_then(|shape| shape.align.clone());
                 for (label, model, cell, tip) in [("Left", "left", "0", "Align text left"), ("Centre", "center", "1", "Centre text"), ("Right", "right", "2", "Align text right"), ("Justify", "justify", "3", "Justify text")] {
-                    if ui.add_enabled(enabled, egui::Button::new(label).selected(current.as_deref() == Some(model))).on_hover_text(tip).clicked() {
+                    let chosen = current.as_deref() == Some(model);
+                    let button = if short { align_button(ui, model, tip, enabled, chosen) } else { ui.add_enabled(enabled, egui::Button::new(label).selected(chosen)) };
+                    if button.on_hover_text(tip).clicked() {
                         *action = Some(Action::FormatText(serde_json::json!({ "para": { "HorzAlign": cell } })));
                     }
                 }
@@ -7203,7 +7309,7 @@ impl LayoutCraftApp {
             }
             "p:lineSp" => {
                 ui.add_enabled_ui(enabled, |ui| {
-                    ui.menu_button("Line spacing \u{25be}", |ui| {
+                    ui.menu_button(if short { "Spacing \u{25be}" } else { "Line spacing \u{25be}" }, |ui| {
                         for multiple in LINE_SPACINGS {
                             if ui.button(format!("{multiple}")).clicked() {
                                 *action = Some(Action::FormatText(line_spacing_spec(multiple)));
@@ -7223,7 +7329,11 @@ impl LayoutCraftApp {
             }
             "p:fontFamily" => {
                 let (name, replaced) = self.selected_font().unwrap_or_default();
-                let label = if name.is_empty() { "Font family".to_string() } else { name.clone() };
+                let mut label = if name.is_empty() { "Font family".to_string() } else { name.clone() };
+                // in the ribbon a long name is cut, so that the group keeps its width
+                if short && label.chars().count() > 14 {
+                    label = format!("{}\u{2026}", label.chars().take(13).collect::<String>());
+                }
                 let mut title = egui::RichText::new(format!("{label} \u{25be}"));
                 if replaced.is_some() {
                     title = title.color(appearance::chrome(ui.visuals().dark_mode).error);

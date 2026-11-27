@@ -68,6 +68,23 @@ pub fn is_compact(width: f32) -> bool {
     width < COMPACT_BELOW
 }
 
+/// From this window width on, Home shows the Font and Paragraph controls in the ribbon instead of behind a drop-down.
+pub const UNFOLD_FROM: f32 = 1500.0;
+/// Below this window width the unfolded Home tab shows its other small commands as icons only, to make room.
+pub const UNFOLDED_COMPACT_BELOW: f32 = 1900.0;
+
+/// The rows of command ids of a menu that is laid out in the ribbon of a window `width` wide; `None` = it stays a drop-down.
+pub fn unfolded(menu: &str, width: f32) -> Option<&'static [&'static [&'static str]]> {
+    if width < UNFOLD_FROM {
+        return None;
+    }
+    match menu {
+        "Font" => Some(&[&["p:fontFamily", "p:fontSize"], &["p:bold", "p:strike"]]),
+        "Paragraph" => Some(&[&["p:alignL"], &["p:indLeft", "p:lineSp"]]),
+        _ => None,
+    }
+}
+
 /// The height of a group's commands: a large button, or two small ones above each other.
 pub const ITEMS_HEIGHT: f32 = 62.0;
 
