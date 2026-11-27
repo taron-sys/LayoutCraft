@@ -157,8 +157,9 @@ fn add_part(rels: &mut String, types: &mut String, part: &str, id: &str, rel_typ
     if rels.is_empty() {
         *rels = "<?xml version='1.0' encoding='UTF-8' standalone='yes'?><Relationships xmlns='http://schemas.openxmlformats.org/package/2006/relationships'></Relationships>".to_string();
     }
-    let at = rels.rfind("</Relationships>").ok_or_else(|| Error("bad _rels/.rels".to_string()))?;
-    rels.insert_str(at, &format!("<Relationship Id='{id}' Type='{rel_type}' Target='{part}'/>"));
+    if !crate::writer::insert_relationship(rels, &format!("<Relationship Id='{id}' Type='{rel_type}' Target='{part}'/>")) {
+        return Err(Error("bad _rels/.rels".to_string()));
+    }
     let at = types.rfind("</Types>").ok_or_else(|| Error("bad [Content_Types].xml".to_string()))?;
     types.insert_str(at, &format!("<Override PartName='/{part}' ContentType='{content_type}'/>"));
     Ok(())

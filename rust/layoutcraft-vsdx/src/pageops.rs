@@ -218,8 +218,9 @@ pub fn add_page(package: &Package, after: usize, name: Option<&str>) -> Result<(
     let mut xml = pages.xml.clone();
     xml.insert_str(reference.end, &new_element);
     let mut rels = pages.rels.clone();
-    let at = rels.rfind("</Relationships>").ok_or_else(|| Error("bad pages.xml.rels".to_string()))?;
-    rels.insert_str(at, &format!("<Relationship Id='{rel}' Type='{REL_PAGE}' Target='page{part_no}.xml'/>"));
+    if !crate::writer::insert_relationship(&mut rels, &format!("<Relationship Id='{rel}' Type='{REL_PAGE}' Target='page{part_no}.xml'/>")) {
+        return Err(Error("bad pages.xml.rels".to_string()));
+    }
     let mut content_types = package.text(CONTENT_TYPES)?.to_string();
     add_override(&mut content_types, &part)?;
     let mut extras: BTreeMap<String, Vec<u8>> = BTreeMap::new();
@@ -360,8 +361,9 @@ pub fn duplicate_page(package: &Package, index: usize) -> Result<(Vec<u8>, usize
     let mut xml = pages.xml.clone();
     xml.insert_str(original.end, &format!("{open}{body}"));
     let mut rels = pages.rels.clone();
-    let at = rels.rfind("</Relationships>").ok_or_else(|| Error("bad pages.xml.rels".to_string()))?;
-    rels.insert_str(at, &format!("<Relationship Id='{rel}' Type='{REL_PAGE}' Target='page{part_no}.xml'/>"));
+    if !crate::writer::insert_relationship(&mut rels, &format!("<Relationship Id='{rel}' Type='{REL_PAGE}' Target='page{part_no}.xml'/>")) {
+        return Err(Error("bad pages.xml.rels".to_string()));
+    }
     let mut content_types = package.text(CONTENT_TYPES)?.to_string();
     add_override(&mut content_types, &new_part)?;
     let mut extras: BTreeMap<String, Vec<u8>> = BTreeMap::new();
@@ -1010,7 +1012,7 @@ pub fn apply_theme_page(package: &Package, name: &str, page: Option<usize>) -> R
             let part = format!("visio/theme/theme{}.xml", max + 1);
             let types = package.text("[Content_Types].xml")?.to_string();
             let rels_part = "visio/_rels/document.xml.rels";
-            let rels = package.text(rels_part)?.to_string();
+            let mut rels = package.text(rels_part)?.to_string();
             let override_tag = format!("<Override PartName=\"/{part}\" ContentType=\"application/vnd.openxmlformats-officedocument.theme+xml\"/>");
             let mut max_id = 0u64;
             for chunk in rels.split("Id=").skip(1) {
@@ -1018,11 +1020,11 @@ pub fn apply_theme_page(package: &Package, name: &str, page: Option<usize>) -> R
                 max_id = max_id.max(digits.parse::<u64>().unwrap_or(0));
             }
             let rel = format!("<Relationship Id=\"rId{}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme\" Target=\"theme/theme{}.xml\"/>", max_id + 1, max + 1);
-            if !rels.contains("</Relationships>") {
+            if !crate::writer::insert_relationship(&mut rels, &rel) {
                 return Err(Error("the document part has no relationships".to_string()));
             }
             extras.insert("[Content_Types].xml".to_string(), types.replacen("</Types>", &format!("{override_tag}</Types>"), 1).into_bytes());
-            extras.insert(rels_part.to_string(), rels.replacen("</Relationships>", &format!("{rel}</Relationships>"), 1).into_bytes());
+            extras.insert(rels_part.to_string(), rels.into_bytes());
             new_part = Some(part);
         }
         parts
@@ -1031,7 +1033,7 @@ pub fn apply_theme_page(package: &Package, name: &str, page: Option<usize>) -> R
         // from the document part, as Visio itself writes them (probe-theme-apply.ps1)
         let types = package.text("[Content_Types].xml")?.to_string();
         let rels_part = "visio/_rels/document.xml.rels";
-        let rels = package.text(rels_part)?.to_string();
+        let mut rels = package.text(rels_part)?.to_string();
         let override_tag = "<Override PartName=\"/visio/theme/theme1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.theme+xml\"/>";
         let types = types.replacen("</Types>", &format!("{override_tag}</Types>"), 1);
         let mut max = 0u64;
@@ -1040,11 +1042,11 @@ pub fn apply_theme_page(package: &Package, name: &str, page: Option<usize>) -> R
             max = max.max(digits.parse::<u64>().unwrap_or(0));
         }
         let rel = format!("<Relationship Id=\"rId{}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme\" Target=\"theme/theme1.xml\"/>", max + 1);
-        if !rels.contains("</Relationships>") {
+        if !crate::writer::insert_relationship(&mut rels, &rel) {
             return Err(Error("the document part has no relationships".to_string()));
         }
         extras.insert("[Content_Types].xml".to_string(), types.into_bytes());
-        extras.insert(rels_part.to_string(), rels.replacen("</Relationships>", &format!("{rel}</Relationships>"), 1).into_bytes());
+        extras.insert(rels_part.to_string(), rels.into_bytes());
         new_part = Some("visio/theme/theme1.xml".to_string());
         vec!["visio/theme/theme1.xml".to_string()]
     } else {
