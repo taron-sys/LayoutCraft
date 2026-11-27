@@ -197,7 +197,7 @@ these are row counts, not a count of every Visio button.
 | Visio command | Src | LC id | Desktop | Browser | Notes | Prio |
 |---|---|---|---|---|---|---|
 | Pages: new / duplicate / rename / delete / reorder (Reorder Pages dialog Ctrl+Alt+P; Page dialog Shift+F4) | S1 | pageTools, pageAdd pageDup pageRename pageDel pageLeft pageRight | present | present | Desktop ribbon items exist; no Reorder dialog | P0 |
-| Pages: background page | S5 | - | present | partial | Desktop: a page tab's menu makes a background page; Page setup chooses which one shows beneath a page and makes one ordinary again. A background page itself cannot be shown for editing | P2 |
+| Pages: background page | S5 | - | partial | partial | Desktop: a page tab's menu makes a background page; Page setup chooses which one shows beneath a page and makes one ordinary again. A background page itself cannot be shown for editing | P2 |
 | Illustrations: Pictures | S25 snippet | insertPicture, pictureFile | missing | present | Engine `insert_picture` | P1 |
 | Illustrations: Icons | S25 snippet (Visio 2016 book) | - | missing | missing | Needs our own icon set | P3 |
 | Diagram Parts: Container | S20 | - | missing | missing | | P2 |
