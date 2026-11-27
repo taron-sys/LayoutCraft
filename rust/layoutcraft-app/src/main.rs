@@ -3817,6 +3817,41 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert_eq!((shapes(&driver), driver.app.engine.undo_depth()), (count, depth), "{}", driver.app.status);
     }
 
+    /// A command that selects something else (here: a shape added by a connect arrow) leaves only that selected.
+    #[test]
+    fn a_newly_made_shape_is_the_whole_selection() {
+        let (mut driver, ids) = Driver::new();
+        driver.key(Key::A, CTRL);
+        assert_eq!(driver.app.all_selected().len(), 2);
+        let image = driver.app.image_rect(driver.app.last_viewport);
+        let frame = driver.app.scene_rect_to_screen(LayoutCraftApp::selection_scene_rect(driver.app.scene_shape(&ids[0]).unwrap()), image);
+        driver.run(vec![Event::PointerMoved(frame.center())]);
+        driver.frames(2);
+        let arrow = pos2(frame.center().x, frame.bottom() + 16.0);
+        driver.run(vec![Event::PointerMoved(arrow)]);
+        driver.frames(2);
+        driver.click(arrow, Modifiers::NONE);
+        let made = driver.app.selected.clone().expect("the new shape");
+        assert!(!ids.contains(&made), "{}", driver.app.status);
+        assert_eq!(driver.app.all_selected(), [made], "{}", driver.app.status);
+        // a command that keeps the first shape keeps the others
+        driver.key(Key::A, CTRL);
+        let chosen = driver.app.all_selected();
+        driver.key(Key::B, CTRL);
+        assert_eq!(driver.app.all_selected(), chosen, "{}", driver.app.status);
+        // so does moving them together by the second one
+        let (second, depth) = (chosen[1].clone(), driver.app.engine.undo_depth());
+        let from = driver.middle_of(&second);
+        driver.drag(from, from + vec2(0.0, -60.0));
+        assert!(driver.app.engine.undo_depth() > depth, "moved: {}", driver.app.status);
+        // the one dragged may become the first; the same shapes stay selected
+        let sorted = |mut ids: Vec<String>| {
+            ids.sort();
+            ids
+        };
+        assert_eq!(sorted(driver.app.all_selected()), sorted(chosen), "{}", driver.app.status);
+    }
+
     #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
@@ -8773,6 +8808,12 @@ impl LayoutCraftApp {
             return;
         }
         self.dirty = self.has_changes();
+        // a command that selects something that was not selected replaces the whole selection; one that names a selected shape
+        // keeps the others
+        match &selected {
+            Some(id) if self.all_selected().contains(id) => self.extra_selected.retain(|other| other != id),
+            _ => self.extra_selected.clear(),
+        }
         self.selected = selected;
         self.drag = None;
         self.preview = None;
