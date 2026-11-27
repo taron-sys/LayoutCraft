@@ -238,7 +238,8 @@ impl LayoutCraftApp {
             Direction::Down => egui::Align2::CENTER_TOP,
         };
         let mut chosen = None;
-        let list = egui::Area::new(egui::Id::unique("quick-shapes")).order(egui::Order::Foreground).pivot(pivot).fixed_pos(at + screen_step(direction) * PICKER_GAP).show(&response.ctx, |ui| {
+        // not kept inside the window: that would push it over the arrow near an edge, and the arrow's click would pick a shape
+        let list = egui::Area::new(egui::Id::unique("quick-shapes")).order(egui::Order::Foreground).pivot(pivot).fixed_pos(at + screen_step(direction) * PICKER_GAP).constrain(false).show(&response.ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 for (stencil, master, name) in &shapes {
                     let hint = format!("Place {name} {} and connect it", direction_words(direction));

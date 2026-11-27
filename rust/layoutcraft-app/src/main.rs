@@ -3631,6 +3631,34 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         }
     }
 
+    /// Near the window's edge the list must not be pushed back over the arrow: a click there is the arrow's.
+    #[test]
+    fn the_shape_list_never_covers_its_connect_arrow() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.open_builtin_stencil();
+        driver.app.shapes_open = false;
+        driver.frames(3);
+        let frame = |driver: &Driver| {
+            let image = driver.app.image_rect(driver.app.last_viewport);
+            driver.app.scene_rect_to_screen(LayoutCraftApp::selection_scene_rect(driver.app.scene_shape(&ids[0]).unwrap()), image)
+        };
+        // move the page so that the shape's lower edge is just above the bottom of the canvas: no room for a list below it
+        let canvas = driver.app.last_viewport;
+        driver.app.fit_pending = false;
+        driver.app.pan.y += canvas.bottom() - 22.0 - frame(&driver).bottom();
+        driver.frames(3);
+        let at = frame(&driver);
+        driver.run(vec![Event::PointerMoved(at.center())]);
+        driver.frames(2);
+        let arrow = pos2(at.center().x, at.bottom() + 16.0);
+        driver.run(vec![Event::PointerMoved(arrow)]);
+        driver.frames(6);
+        driver.click(arrow, Modifiers::NONE);
+        let made = driver.app.selected.clone().expect("the arrow placed a shape");
+        let size = |id: &str| driver.app.doc_shape(id).map(|shape| (shape.w, shape.h)).unwrap();
+        assert!(made != ids[0] && size(&made) == size(&ids[0]), "a copy, as the arrow gives: {:?} {:?} {}", size(&made), size(&ids[0]), driver.app.status);
+    }
+
     #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
