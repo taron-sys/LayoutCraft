@@ -15,6 +15,7 @@ use layoutcraft_vsdx::{
 mod appearance;
 mod connectors;
 mod connpoints;
+mod styles;
 mod help;
 mod mcpinfo;
 mod ribbon;
@@ -3264,6 +3265,34 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_style_of_the_drawing_can_be_applied_to_the_selection() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.engine.page_op(37, 0, 0, r##"{"name":"Alarm","fillColor":"#c00000","lineColor":"#101010"}"##).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        let press = |driver: &mut Driver, label: &str| {
+            let at = driver.texts(label).into_iter().min_by(|a, b| a.top().total_cmp(&b.top())).unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        // what Home > Editing > Styles does (an icon without text in a window this narrow)
+        driver.app.style_pick = Some(Default::default());
+        driver.frames(3);
+        let fill = |driver: &Driver| driver.app.doc_shape(&ids[0]).and_then(|shape| shape.fill.clone()).map(|fill| fill.to_lowercase());
+        let (before, other, depth) = (fill(&driver), driver.app.doc_shape(&ids[1]).and_then(|shape| shape.fill.clone()), driver.app.engine.undo_depth());
+        press(&mut driver, "Choose a style");
+        press(&mut driver, "Alarm");
+        press(&mut driver, "Apply style to selection");
+        assert_ne!(fill(&driver), before, "{}", driver.app.status);
+        assert_eq!(fill(&driver).as_deref(), Some("#c00000"), "{}", driver.app.status);
+        assert_eq!(driver.app.engine.undo_depth(), depth + 1);
+        assert_eq!(driver.app.doc_shape(&ids[1]).and_then(|shape| shape.fill.clone()), other, "only the selection");
+        driver.key(Key::Escape, Modifiers::NONE);
+        assert!(driver.app.style_pick.is_none());
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4087,6 +4116,8 @@ struct LayoutCraftApp {
     /// The Size and Position fields of the inspector.
     size_pos: SizePos,
     name_field: NameField,
+    /// The Styles window, while it is open.
+    style_pick: Option<styles::StylePick>,
     /// The Layers window is open.
     layers_open: bool,
     /// The full-screen view is on.
@@ -4256,6 +4287,7 @@ impl LayoutCraftApp {
             ruler_unit: (1.0, "in"),
             size_pos: SizePos::default(),
             name_field: NameField::default(),
+            style_pick: None,
             layers_open: false,
             full_screen: false,
             data_pane: None,
@@ -6503,6 +6535,7 @@ impl LayoutCraftApp {
             N::Layers => Action::Layers,
             N::CopyPicture => Action::CopyPicture,
             N::ShapeFormulas => Action::ShapeFormulas,
+            N::Styles => Action::Styles,
             N::SizePosition => Action::SizePosition,
             N::FullScreen => Action::FullScreen,
             N::ShapeData => Action::ShapeData,
@@ -9614,6 +9647,7 @@ impl eframe::App for LayoutCraftApp {
         self.draw_find(&ctx);
         self.draw_links(&ctx);
         self.draw_snap_window(&ctx);
+        self.draw_styles_window(&ctx);
         self.draw_zoom_window(&ctx);
         self.draw_colour_window(&ctx, &mut action);
         self.draw_sheet_pane(&ctx);
@@ -9860,6 +9894,7 @@ impl eframe::App for LayoutCraftApp {
                 self.status = if on { "The mouse wheel zooms." } else { "The mouse wheel scrolls; Ctrl+wheel zooms." }.to_string();
             }
             Some(Action::ShapeName(ref id, ref wanted)) => self.set_shape_name(&ctx, id, wanted),
+            Some(Action::Styles) => self.style_pick = if self.style_pick.is_some() { None } else { Some(styles::StylePick::default()) },
             Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
                 self.zoom = zoom_for_percent(f64::from(percent), self.raster_scale);
@@ -9903,6 +9938,8 @@ enum Action {
     /// Show the page at this percentage of actual size.
     ZoomTo(u32),
     ZoomDialog,
+    /// Show or hide the Styles window.
+    Styles,
     /// Name the shape (its ID, the wanted name; empty for the automatic one).
     ShapeName(String, String),
     /// Whether a plain mouse wheel zooms.

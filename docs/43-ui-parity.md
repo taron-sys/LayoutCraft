@@ -188,7 +188,7 @@ these are row counts, not a count of every Visio button.
 | Editing: Layers > Assign to Layer, Layer Properties | S22 | layersBtn | partial | present | Desktop: Layers window and inspector (visible, prints, locked, membership); no Active / Snap / Glue / Colour | P2 |
 | Editing: Change Shape | unverified | changeShapeBtn | present | present | Desktop: the button, then a click in the Shapes panel, or the panel's context menu | P2 |
 | Editing: Find | unverified | findBtn | present | present | Desktop: finds and replaces on the current page | P2 |
-| Editing: Styles | unverified | stylesBtn | missing | present | | P2 |
+| Editing: Styles | unverified | stylesBtn | partial | present | Desktop: applies a style of the drawing to the selection; no defining, changing or deleting of styles | P2 |
 | Duplicate (Ctrl+D is a web shortcut) | S1 | dup | present | present | Not a Visio Home button (unverified) | P1 |
 | Delete | S1 (Delete key) | del | present | present | | P0 |
 
