@@ -1012,6 +1012,33 @@ fn align_button(ui: &mut egui::Ui, mode: &str, name: &str, enabled: bool, select
     .inner
 }
 
+/// What the top row says: the drawing's file name (or that it is new), whether it has unsaved changes, and the product.
+fn window_title(path: Option<&Path>, open: bool, changed: bool) -> String {
+    if !open {
+        return "LayoutCraft".to_string();
+    }
+    let name = path.and_then(|path| path.file_name()).map_or_else(|| "New drawing".to_string(), |name| name.to_string_lossy().into_owned());
+    format!("{name}{} - LayoutCraft", if changed { " (unsaved changes)" } else { "" })
+}
+
+/// A ribbon tab: its name, with a line under the chosen one (not a filled box).
+fn ribbon_tab(ui: &mut egui::Ui, name: &str, chosen: bool) -> egui::Response {
+    let text = egui::RichText::new(name);
+    let text = if chosen { text.strong() } else { text };
+    let response = ui.add(egui::Button::new(text).frame(false).min_size(egui::vec2(36.0, 24.0)));
+    ui.ctx().accesskit_node_builder(response.id, |node| node.set_selected(chosen));
+    let line = if chosen {
+        egui::Stroke::new(3.0, ui.visuals().selection.stroke.color)
+    } else if response.hovered() || response.has_focus() {
+        egui::Stroke::new(1.0, ui.visuals().text_color())
+    } else {
+        return response;
+    };
+    let y = response.rect.bottom() - 1.5;
+    ui.painter().line_segment([egui::pos2(response.rect.left() + 4.0, y), egui::pos2(response.rect.right() - 4.0, y)], line);
+    response
+}
+
 /// A ribbon command with its icon over its name, as high as a group.
 fn large_button(ui: &mut egui::Ui, icon: &egui::TextureHandle, label: &str, enabled: bool, selected: bool) -> egui::Response {
     ui.add_enabled_ui(enabled, |ui| {
@@ -3599,6 +3626,40 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         driver.frames(3);
         let shape = driver.app.doc_shape(&ids[0]).expect("the shape");
         assert_eq!((driver.app.engine.undo_depth(), shape.align.as_deref()), (size + 2, Some("center")), "{}", driver.app.status);
+    }
+
+    #[test]
+    fn the_chosen_tab_is_underlined_and_the_top_row_names_the_drawing() {
+        let (mut driver, ids) = Driver::new();
+        let underlined = |driver: &Driver, tab: &str| {
+            let name = driver.texts(tab)[0];
+            driver.drawn.iter().any(|clipped| match &clipped.shape {
+                egui::Shape::LineSegment { points, stroke } => {
+                    stroke.width > 2.0 && points[0].y >= name.bottom() - 1.0 && points[0].y < name.bottom() + 12.0 && points[0].x <= name.center().x && points[1].x >= name.center().x
+                }
+                _ => false,
+            })
+        };
+        assert!(underlined(&driver, "Home") && !underlined(&driver, "Design"));
+        let tab = driver.texts("Design")[0];
+        driver.click(tab.center(), Modifiers::NONE);
+        driver.frames(3);
+        assert!(underlined(&driver, "Design") && !underlined(&driver, "Home"));
+        let title = |driver: &Driver| {
+            let all: Vec<(String, egui::Rect)> = driver.drawn.iter().filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(shown) if shown.galley.text().ends_with("LayoutCraft") => Some((shown.galley.text().to_string(), shown.galley.rect.translate(shown.pos.to_vec2()))),
+                _ => None,
+            }).collect();
+            assert_eq!(all.len(), 1, "{all:?}");
+            all[0].clone()
+        };
+        let (saved, at) = title(&driver);
+        assert!(at.bottom() <= tab.top() && (at.center().x - driver.width / 2.0).abs() < 2.0, "{at:?}");
+        assert!(!saved.contains("unsaved"), "{saved}");
+        driver.app.selected = Some(ids[0].clone());
+        driver.key(Key::Delete, Modifiers::NONE);
+        driver.frames(3);
+        assert!(title(&driver).0.contains("unsaved"), "{}", title(&driver).0);
     }
 
     #[test]
@@ -6887,16 +6948,23 @@ impl LayoutCraftApp {
             self.ribbon_collapsed = !self.ribbon_collapsed;
             self.ribbon_peek = false;
         }
-        // the quick access toolbar of the web ribbon: save, undo, redo
-        ui.horizontal(|ui| {
+        // the top row: save, undo and redo (the quick access toolbar of the web ribbon), and in its middle the drawing's name
+        let row = ui.horizontal(|ui| {
+            let compact = std::mem::replace(&mut self.ribbon_compact, true);
             for id in ["save", "undo", "redo"] {
                 self.ribbon_button(ui, &ctx, id, action);
             }
+            self.ribbon_compact = compact;
         });
+        let buttons = row.response.rect;
+        let name = window_title(self.loaded_path.as_deref(), self.engine.export().is_some(), self.dirty);
+        let space = egui::Rect::from_center_size(egui::pos2(ui.max_rect().center().x, buttons.center().y), egui::vec2((width - 2.0 * (buttons.width() + 24.0)).max(80.0), buttons.height()));
+        ui.put(space, egui::Label::new(name).truncate());
         ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 12.0;
             for index in 0..self.ribbon.tabs.len() {
                 let name = self.ribbon.tabs[index].name.clone();
-                if ui.selectable_label(self.ribbon_tab == index, name).clicked() {
+                if ribbon_tab(ui, &name, self.ribbon_tab == index).clicked() {
                     if self.ribbon_collapsed && self.ribbon_peek && self.ribbon_tab == index {
                         self.ribbon_peek = false;
                     } else {
