@@ -112,10 +112,15 @@ related }]` (`kind` is `list` for a record with items); members get `shape.conta
 `containers`). A shape can belong to several containers (a CFF task is in the pool list, a lane and a phase).
 
 Deleting a container or list deletes what it holds, and copying one copies what it holds, the copies naming each other;
-a deleted shape's references leave the other shapes' cells ([45](45-containers.md)). Moving a container does not carry its
-members yet, and moving a shape in or out does not change membership.
+a deleted shape's references leave the other shapes' cells ([45](45-containers.md)). Moving a container or list moves what it holds with it;
+moving a shape in or out does not change membership yet.
 
 ## Geometry
+
+A shape or group with **no Geometry section** (none of its own and none from a master) paints no fill and no line, whatever
+its cells say; its text and its member shapes still draw, and a picture is its own content. Measured 2026-11-27 in Visio
+16.0 through automation: rectangles whose section was deleted, and a group, drawn for the purpose, exported to PNG with no
+pixel of their fill colours.
 
 `partsOf` builds the drawable representation:
 

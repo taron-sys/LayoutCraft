@@ -743,7 +743,9 @@ fn resolve_node(
             ))
         })?)
     } else if node.master.is_some() {
-        master.and_then(|m| m.top.as_deref().and_then(|top| m.shapes.get(top)))
+        // A master of several shapes may list a ruler guide first. The group made from it is not that guide: it takes
+        // nothing from it (its members name their own master shapes).
+        master.and_then(|m| m.top.as_deref().and_then(|top| m.shapes.get(top))).filter(|top| top.shape_type.as_deref() != Some("Guide") || node.shape_type.as_deref() != Some("Group"))
     } else {
         None
     };

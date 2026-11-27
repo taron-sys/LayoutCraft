@@ -137,3 +137,56 @@ fn nested_containers_go_with_the_outer_one() {
     assert_eq!(engine.with_contents(0, &[ids[0].clone()]), ids[..3]);
     assert_eq!(engine.with_contents(0, &[ids[3].clone(), ids[3].clone()]), [ids[3].clone()]);
 }
+
+/// Where each shape of the first page is, by sheet ID.
+fn places(engine: &Engine) -> std::collections::BTreeMap<String, (f64, f64)> {
+    page(engine).shapes.iter().filter_map(|shape| shape.visio_id.clone().map(|id| (id, (shape.x, shape.y)))).collect()
+}
+
+/// How far shape `id` went between two states, in scene pixels.
+fn went(before: &std::collections::BTreeMap<String, (f64, f64)>, engine: &Engine, id: &str) -> (i64, i64) {
+    let now = places(engine)[id];
+    ((now.0 - before[id].0).round() as i64, (now.1 - before[id].1).round() as i64)
+}
+
+#[test]
+fn moving_a_container_moves_what_it_holds_by_the_same_way_in_one_step() {
+    let (mut engine, ids) = framed();
+    let (before, depth) = (places(&engine), engine.undo_depth());
+    engine.edit(0, 2, &ids[0], 1.0, -0.5, 0.0, 0.0, 0).unwrap();
+    let frame = went(&before, &engine, &ids[0]);
+    assert!(frame.0 > 0 && frame.1 > 0, "right and down on the screen: {frame:?}");
+    assert_eq!((went(&before, &engine, &ids[1]), went(&before, &engine, &ids[2])), (frame, frame));
+    assert_eq!(went(&before, &engine, &ids[3]), (0, 0), "a shape outside stays");
+    assert_eq!(engine.undo_depth(), depth + 1);
+    assert_eq!(page(&engine).containers[0]["members"], serde_json::json!([ids[1], ids[2]]));
+}
+
+#[test]
+fn a_selection_with_a_container_and_its_member_moves_each_once() {
+    let (mut engine, ids) = framed();
+    let before = places(&engine);
+    engine.edit(0, 5, &format!("{}\n{}\n{}", ids[1], ids[0], ids[3]), 1.0, 0.0, 0.0, 0.0, 0).unwrap();
+    let frame = went(&before, &engine, &ids[0]);
+    for id in &ids[1..] {
+        assert_eq!(went(&before, &engine, id), frame, "{id}");
+    }
+}
+
+#[test]
+fn moving_a_member_leaves_the_container_where_it_is() {
+    let (mut engine, ids) = framed();
+    let before = places(&engine);
+    engine.edit(0, 2, &ids[1], 0.25, 0.0, 0.0, 0.0, 0).unwrap();
+    assert!(went(&before, &engine, &ids[1]).0 > 0);
+    assert_eq!((went(&before, &engine, &ids[0]), went(&before, &engine, &ids[2])), ((0, 0), (0, 0)));
+}
+
+#[test]
+fn a_connector_leaving_a_container_follows_while_the_move_is_previewed() {
+    let (mut engine, ids) = framed();
+    let line = engine.add_connector(0, &ids[1], None, &ids[3], None).unwrap();
+    // dragging the frame moves the glued member, so its connector has a new route
+    let routes: serde_json::Value = serde_json::from_str(&engine.preview_move(0, &[ids[0].clone()], (0.0, 1.0)).unwrap()).unwrap();
+    assert!(routes.as_array().unwrap().iter().any(|route| route["id"].as_str() == Some(line.as_str())), "{routes}");
+}
