@@ -960,6 +960,17 @@ fn current_theme(info: &serde_json::Value, page: usize) -> (Option<String>, u64)
     }
 }
 
+/// A theme's colours as small squares, from the list of hex codes the engine gives; each has an outline, so that a pale one
+/// shows on the menu.
+fn theme_swatches(ui: &mut egui::Ui, colours: &serde_json::Value) {
+    ui.spacing_mut().item_spacing.x = 2.0;
+    for [r, g, b] in colours.as_array().into_iter().flatten().filter_map(|colour| typed_colour(colour.as_str()?)) {
+        let (rect, _) = ui.allocate_exact_size(egui::vec2(11.0, 11.0), egui::Sense::hover());
+        let outline = egui::Stroke::new(1.0, ui.visuals().weak_text_color());
+        ui.painter().rect(rect, 0.0, egui::Color32::from_rgb(r, g, b), outline, egui::StrokeKind::Inside);
+    }
+}
+
 /// The `Engine::page_op` number that applies a theme (or, with `variant`, a colour variant) to every page or to one page.
 fn theme_op(variant: bool, all_pages: bool) -> i32 {
     match (variant, all_pages) {
@@ -3324,6 +3335,48 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         press(&mut driver, "Letterhead", true);
         press(&mut driver, "None", false);
         assert!(info(&driver)["assigned"][0].is_null(), "{}", driver.app.status);
+    }
+
+    #[test]
+    fn the_theme_and_variant_menus_show_each_choice_s_colours() {
+        let (mut driver, _) = Driver::new();
+        let info: serde_json::Value = serde_json::from_str(&driver.app.engine.themes_json().unwrap()).unwrap();
+        let theme = &info["themes"][1];
+        let name = theme["name"].as_str().unwrap().to_string();
+        let colour = |hex: &serde_json::Value| super::typed_colour(hex.as_str().unwrap()).map(|[r, g, b]| egui::Color32::from_rgb(r, g, b)).unwrap();
+        let painted = |driver: &Driver, wanted: egui::Color32| {
+            driver.drawn.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::Rect(square) if square.fill == wanted && (square.rect.width() - 11.0).abs() < 0.5))
+        };
+        let press = |driver: &mut Driver, label: &str| {
+            let at = driver.texts(label).into_iter().min_by(|a, b| a.top().total_cmp(&b.top())).unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        // in a window this narrow the menu sits in the drop-down of its group, under a button of the same name
+        let open_menu = |driver: &mut Driver, label: &str| {
+            press(driver, label);
+            let inner = driver.texts(label).into_iter().max_by(|a, b| a.top().total_cmp(&b.top())).expect("the menu");
+            if driver.texts(label).len() > 1 {
+                driver.click(inner.center(), Modifiers::NONE);
+                driver.frames(3);
+            }
+        };
+        press(&mut driver, "Design");
+        open_menu(&mut driver, "Themes \u{25be}");
+        for accent in theme["accents"].as_array().unwrap() {
+            assert!(painted(&driver, colour(accent)), "{name} {accent}");
+        }
+        press(&mut driver, &name);
+        let now: serde_json::Value = serde_json::from_str(&driver.app.engine.themes_json().unwrap()).unwrap();
+        assert_eq!(super::current_theme(&now, 0).0.as_deref(), Some(name.as_str()), "the name still applies: {}", driver.app.status);
+        open_menu(&mut driver, "Variants \u{25be}");
+        let variants = theme["variants"].as_array().unwrap();
+        assert!(!variants.is_empty());
+        for variant in variants {
+            for hex in variant.as_array().unwrap() {
+                assert!(painted(&driver, colour(hex)), "{name} {hex}");
+            }
+        }
     }
 
     #[test]
@@ -7060,7 +7113,15 @@ impl LayoutCraftApp {
                 if !variants {
                     for theme in info["themes"].as_array().into_iter().flatten() {
                         let Some(name) = theme["name"].as_str() else { continue };
-                        if ui.selectable_label(current.as_deref() == Some(name), name).clicked() {
+                        let chosen = ui
+                            .horizontal(|ui| {
+                                // the colours first, as in a list with a picture beside each name
+                                theme_swatches(ui, &theme["accents"]);
+                                ui.add_space(4.0);
+                                ui.selectable_label(current.as_deref() == Some(name), name).clicked()
+                            })
+                            .inner;
+                        if chosen {
                             *action = Some(Action::Theme(op, name.to_string()));
                             ui.close();
                         }
@@ -7068,8 +7129,18 @@ impl LayoutCraftApp {
                 } else if current.is_none() {
                     ui.label("Apply a theme first (Design > Themes).");
                 } else {
+                    // each variant of the shown theme by its first two colours
+                    let shown = info["themes"].as_array().into_iter().flatten().find(|theme| theme["name"].as_str() == current.as_deref());
                     for choice in 0..4u64 {
-                        if ui.selectable_label(choice == variant, format!("Variant {}", choice + 1)).clicked() {
+                        let colours = shown.map_or(serde_json::Value::Null, |theme| theme["variants"][choice as usize].clone());
+                        let chosen = ui
+                            .horizontal(|ui| {
+                                theme_swatches(ui, &colours);
+                                ui.add_space(4.0);
+                                ui.selectable_label(choice == variant, format!("Variant {}", choice + 1)).clicked()
+                            })
+                            .inner;
+                        if chosen {
                             *action = Some(Action::Theme(op, choice.to_string()));
                             ui.close();
                         }
