@@ -3293,6 +3293,40 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn page_setup_chooses_the_background_page() {
+        let (mut driver, _) = Driver::new();
+        let info = |driver: &Driver| serde_json::from_str::<serde_json::Value>(&driver.app.engine.background_info_json().unwrap()).unwrap();
+        // a second page, made a background page
+        driver.app.engine.page_op(1, 0, 0, "Letterhead").unwrap();
+        let tabs = driver.app.engine.document().unwrap().pages.len();
+        let at = driver.app.engine.document().unwrap().pages.iter().position(|page| page.name == "Letterhead").expect("the new page");
+        driver.app.engine.page_op(13, at, 0, "").unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        assert_eq!(info(&driver)["backgrounds"].as_array().map(Vec::len), Some(1), "{tabs}");
+        // a background page has no tab: the page numbers the window uses are those of the pages that have one
+        assert_eq!(driver.app.engine.document().unwrap().pages.len(), info(&driver)["assigned"].as_array().map_or(0, Vec::len));
+        assert_eq!(driver.app.page_index, 0);
+        driver.app.page_setup_open = true;
+        driver.frames(4);
+        let press = |driver: &mut Driver, label: &str, last: bool| {
+            let mut found = driver.texts(label);
+            found.sort_by(|a, b| a.top().total_cmp(&b.top()));
+            let at = if last { found.pop() } else { found.first().copied() }.unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let depth = driver.app.engine.undo_depth();
+        press(&mut driver, "None", false);
+        press(&mut driver, "Letterhead", true);
+        assert_eq!(info(&driver)["assigned"][0], info(&driver)["backgrounds"][0]["id"], "{}", driver.app.status);
+        assert_eq!(driver.app.engine.undo_depth(), depth + 1);
+        // and none again
+        press(&mut driver, "Letterhead", true);
+        press(&mut driver, "None", false);
+        assert!(info(&driver)["assigned"][0].is_null(), "{}", driver.app.status);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -9525,6 +9559,10 @@ impl eframe::App for LayoutCraftApp {
             let mut open = true;
             let mut apply = false;
             let info = self.engine.page_size_json(self.page_index).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+            let backgrounds = self.engine.background_info_json().ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).unwrap_or_default();
+            // the chosen background page's ID, empty for none
+            let assigned = backgrounds["assigned"][self.page_index].as_str().unwrap_or("").to_string();
+            let mut background = assigned.clone();
             egui::Window::new("Page setup").open(&mut open).collapsible(false).show(&ctx, |ui| {
                 egui::Grid::new("page-setup").num_columns(2).show(ui, |ui| {
                     ui.label("Width");
@@ -9542,11 +9580,35 @@ impl eframe::App for LayoutCraftApp {
                         ui.label(if info["metric"].as_bool() == Some(true) { "Metric" } else { "Inches" });
                         ui.end_row();
                     }
+                    let label = ui.label("Background page");
+                    let pages: Vec<(&str, &str)> = backgrounds["backgrounds"].as_array().map_or_else(Vec::new, |list| list.iter().filter_map(|page| Some((page["id"].as_str()?, page["name"].as_str()?))).collect());
+                    if pages.is_empty() {
+                        ui.label("None in this drawing");
+                    } else {
+                        let shown = pages.iter().find(|page| page.0 == background).map_or("None", |page| page.1);
+                        egui::ComboBox::from_id_salt("page-background")
+                            .selected_text(shown)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut background, String::new(), "None");
+                                for (id, name) in &pages {
+                                    ui.selectable_value(&mut background, id.to_string(), *name);
+                                }
+                            })
+                            .response
+                            .labelled_by(label.id)
+                            .on_hover_text("Shown beneath this page; choosing applies at once");
+                    }
+                    ui.end_row();
                 });
                 if ui.button("Apply").clicked() {
                     apply = true;
                 }
             });
+            if background != assigned {
+                let result = self.engine.page_op(12, self.page_index, 0, &background).map(|_| ());
+                let selected = self.selected.clone();
+                self.finish_edit(&ctx, result, if background.is_empty() { "The page has no background page now" } else { "Background page set" }, selected);
+            }
             if apply {
                 let text = format!("{},{}", self.page_setup_size.0, self.page_setup_size.1);
                 let page = self.page_index;
