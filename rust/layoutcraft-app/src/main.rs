@@ -2680,6 +2680,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     #[test]
     fn a_size_field_applies_on_enter_and_escape_only_leaves_it() {
         let (mut driver, ids) = Driver::new();
+        driver.app.inspector_open = true;
         driver.app.selected = Some(ids[0].clone());
         driver.frames(3);
         // what a click on the status bar's size does: the Width field takes the keyboard
@@ -3344,6 +3345,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     #[test]
     fn a_shape_can_be_named_in_the_inspector() {
         let (mut driver, ids) = Driver::new();
+        driver.app.inspector_open = true;
         let name = |driver: &Driver, id: &str| serde_json::from_str::<serde_json::Value>(&driver.app.engine.shape_names_json(0).unwrap()).unwrap()[id].as_str().unwrap_or("").to_string();
         let enter = |driver: &mut Driver, id: &str, typed: &str, end: Key| {
             driver.app.selected = Some(id.to_string());
@@ -3691,6 +3693,49 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_inspector_is_closed_until_something_asks_for_it() {
+        let (mut driver, ids) = Driver::new();
+        let shown = |driver: &Driver| !driver.texts("Document").is_empty();
+        assert!(!shown(&driver));
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        // the status bar knows the size without it, and a click there goes to the fields
+        let size = driver.drawn.iter().find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text().starts_with("Width ") => Some(text.galley.rect.translate(text.pos.to_vec2())),
+            _ => None,
+        });
+        assert!(!shown(&driver));
+        driver.click(size.expect("the size in the status bar").center(), Modifiers::NONE);
+        driver.frames(3);
+        assert!(shown(&driver), "{}", driver.app.status);
+        let close = |driver: &mut Driver| {
+            let at = driver.texts("Close")[0];
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        driver.app.inspector_open = true;
+        driver.frames(2);
+        close(&mut driver);
+        assert!(!shown(&driver));
+        for (key, selected) in [(Key::F3, 0), (Key::F8, 1)] {
+            driver.app.extra_selected = ids[1..1 + selected].to_vec();
+            driver.frames(2);
+            driver.key(key, Modifiers::NONE);
+            driver.frames(3);
+            assert!(shown(&driver), "{key:?}: {}", driver.app.status);
+            close(&mut driver);
+        }
+        // View > Show > Inspector
+        let tab = driver.texts("View")[0];
+        driver.click(tab.center(), Modifiers::NONE);
+        driver.frames(3);
+        let switch = driver.texts("Inspector")[0];
+        driver.click(switch.center(), Modifiers::NONE);
+        driver.frames(3);
+        assert!(shown(&driver), "{}", driver.app.status);
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -3723,8 +3768,10 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         driver.app.selected = Some(ids[0].clone());
         driver.frames(3);
         let fill = |driver: &Driver| driver.app.style_draft.as_ref().map(|draft| draft.has_fill).expect("the style settings");
-        let before = fill(&driver);
+        assert!(!driver.app.inspector_open);
         driver.key(Key::F3, Modifiers::NONE);
+        driver.frames(2);
+        let before = fill(&driver);
         // the Fill box has the keyboard: Space ticks or clears it
         driver.key(Key::Space, Modifiers::NONE);
         assert_ne!(fill(&driver), before, "{}", driver.app.status);
@@ -3979,6 +4026,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     #[test]
     fn panels_forget_the_drawing_that_was_open_before() {
         let (mut driver, ids) = Driver::new();
+        driver.app.inspector_open = true;
         driver.app.engine.page_op(40, 0, 0, &format!("{}|Router", ids[0])).unwrap();
         let mut row = super::new_data_row("Owner", &[]).unwrap();
         row.value = "Network team".to_string();
@@ -4159,6 +4207,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     fn one_click_on_a_page_tab_writes_the_field_left_and_changes_page() {
         for field in ["name", "width"] {
             let (mut driver, ids) = Driver::new();
+            driver.app.inspector_open = true;
             driver.app.engine.page_op(5, 0, 0, "").unwrap();
             driver.app.build_page(&driver.ctx.clone(), false);
             driver.app.selected = Some(ids[0].clone());
@@ -5032,6 +5081,8 @@ struct LayoutCraftApp {
     style_pick: Option<styles::StylePick>,
     /// The Layers window is open.
     layers_open: bool,
+    /// The right-hand panel (document, selection, style, arrange, layers): closed until asked for.
+    inspector_open: bool,
     /// The full-screen view is on.
     full_screen: bool,
     /// The Shape Data window, while it is open.
@@ -5218,6 +5269,7 @@ impl LayoutCraftApp {
             align_focus: false,
             style_pick: None,
             layers_open: false,
+            inspector_open: false,
             full_screen: false,
             data_pane: None,
             link_draft: None,
@@ -7279,7 +7331,8 @@ impl LayoutCraftApp {
             || (native == Some(ribbon::Native::ShowGrid) && self.show_grid)
             || (native == Some(ribbon::Native::ShowRulers) && self.show_rulers)
             || (native == Some(ribbon::Native::ShowGuides) && self.show_guides)
-            || (native == Some(ribbon::Native::ConnectArrows) && self.connect_arrows);
+            || (native == Some(ribbon::Native::ConnectArrows) && self.connect_arrows)
+            || (native == Some(ribbon::Native::Inspector) && self.inspector_open);
         let compact = self.ribbon_compact;
         let large = std::mem::take(&mut self.ribbon_large);
         let response = match icon.and_then(|name| self.icon_texture(ctx, &name)) {
@@ -7324,6 +7377,7 @@ impl LayoutCraftApp {
                     ribbon::Native::SnapGuides => self.snap_guides = !self.snap_guides,
                     ribbon::Native::ShowGrid => self.show_grid = !self.show_grid,
                     ribbon::Native::ConnectArrows => self.connect_arrows = !self.connect_arrows,
+                    ribbon::Native::Inspector => self.inspector_open = !self.inspector_open,
                     ribbon::Native::ShowRulers => self.show_rulers = !self.show_rulers,
                     ribbon::Native::ShowGuides => {
                         self.show_guides = !self.show_guides;
@@ -7657,7 +7711,7 @@ impl LayoutCraftApp {
             // the tool is taken where the button is drawn
             N::ConnectionPoint => Action::Fit,
             // the snap switches and the grid step are state, handled where the button is drawn
-            N::SnapGrid | N::SnapShapes | N::SnapGuides | N::GridStep | N::ShowGrid | N::ShowRulers | N::ShowGuides | N::ConnectArrows => Action::Fit,
+            N::SnapGrid | N::SnapShapes | N::SnapGuides | N::GridStep | N::ShowGrid | N::ShowRulers | N::ShowGuides | N::ConnectArrows | N::Inspector => Action::Fit,
             N::ReverseEnds => Action::ReverseEnds,
         }
     }
@@ -8675,13 +8729,33 @@ impl LayoutCraftApp {
     fn go_to_style_settings(&mut self) {
         // only when the inspector is there to show them, so that no later selection takes the keyboard
         if !self.full_screen && self.selected.as_deref().and_then(|id| self.doc_shape(id)).is_some_and(|shape| shape.group.is_none()) {
+            self.inspector_open = true;
             self.style_focus = true;
         } else {
             self.status = "Select one shape to edit its style in the inspector.".to_string();
         }
     }
 
-    fn size_pos_controls(&mut self, ui: &mut egui::Ui, id: &str, action: &mut Option<Action>) {
+    /// Open the inspector with the keyboard in a Size and Position field, or say why there is none.
+    fn go_to_size_fields(&mut self, field: usize) {
+        let Some(selected) = self.selected.clone() else {
+            self.status = "Select a shape to see its size and position.".to_string();
+            return;
+        };
+        self.read_size_fields(&selected);
+        match &self.size_pos.fields {
+            Some(Err(reason)) => self.status = reason.to_string(),
+            _ if self.full_screen => self.status = "Leave Full Screen to edit size and position.".to_string(),
+            _ => {
+                self.inspector_open = true;
+                self.size_pos.focus = Some(field);
+            }
+        }
+    }
+
+    /// Read the size and position of shape `id` of the shown page, unless that was done since the page last changed. The
+    /// status bar shows them whether or not the inspector is open.
+    fn read_size_fields(&mut self, id: &str) {
         let key = (self.page_index, id.to_string());
         if self.size_pos.key.as_ref() != Some(&key) {
             let metric = self.engine.page_size_json(self.page_index).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).is_some_and(|size| size["metric"].as_bool() == Some(true));
@@ -8698,6 +8772,10 @@ impl LayoutCraftApp {
             });
             self.size_pos.key = Some(key);
         }
+    }
+
+    fn size_pos_controls(&mut self, ui: &mut egui::Ui, id: &str, action: &mut Option<Action>) {
+        self.read_size_fields(id);
         ui.add_space(4.0);
         ui.label("Size and Position");
         let unit = self.size_pos.unit;
@@ -9425,6 +9503,7 @@ impl eframe::App for LayoutCraftApp {
                 Some(ViewKey::Tool(tool)) => self.take_tool(tool),
                 Some(ViewKey::AlignButtons) => {
                     if !self.full_screen && self.selected.is_some() && !self.extra_selected.is_empty() {
+                        self.inspector_open = true;
                         self.align_focus = true;
                     } else {
                         self.status = "Select two or more shapes to align them.".to_string();
@@ -9520,7 +9599,14 @@ impl eframe::App for LayoutCraftApp {
                 if let Some(geometry) = status_geometry(&self.size_pos, self.page_index, self.selected.as_deref()).filter(|_| !self.full_screen) {
                     ui.separator();
                     if ui.button(geometry).on_hover_text("Edit in Size and Position").clicked() {
-                        self.size_pos.focus = Some(2);
+                        self.go_to_size_fields(2);
+                    }
+                }
+                if !self.font_warnings.is_empty() && !self.inspector_open {
+                    ui.separator();
+                    let text = egui::RichText::new("\u{26a0} Fonts replaced").color(appearance::chrome(ui.visuals().dark_mode).error);
+                    if ui.button(text).on_hover_text("A font of this drawing is not installed here; show which").clicked() {
+                        self.inspector_open = true;
                     }
                 }
                 ui.separator();
@@ -9554,12 +9640,23 @@ impl eframe::App for LayoutCraftApp {
             });
         }
 
-        if !self.full_screen {
+        if let Some(selected) = self.selected.clone() {
+            self.read_size_fields(&selected);
+        }
+
+        if self.inspector_open && !self.full_screen {
             egui::Panel::right("inspector")
                 .default_size(250.0)
                 .resizable(true)
                 .show(ui, |ui| {
-                    ui.heading("Document");
+                    ui.horizontal(|ui| {
+                        ui.heading("Document");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.small_button("Close").on_hover_text("Close this panel (View > Show > Inspector)").clicked() {
+                                self.inspector_open = false;
+                            }
+                        });
+                    });
                     if let Some(document) = &self.engine.document {
                         ui.label(format!("Pages: {}", document.pages.len()));
                         ui.label(format!("Media: {}", document.media.len()));
@@ -11118,12 +11215,7 @@ impl eframe::App for LayoutCraftApp {
                 }
             }
             Some(Action::ShapeFormulas) => self.sheet_pane = if self.sheet_pane.is_some() { None } else { Some(SheetPane::default()) },
-            // the fields are those the inspector drew for the selection; without them there is nothing to go to
-            Some(Action::SizePosition) => match (&self.selected, &self.size_pos.fields) {
-                (Some(_), Some(Ok(_))) => self.size_pos.focus = Some(0),
-                (Some(_), Some(Err(reason))) => self.status = reason.to_string(),
-                _ => self.status = "Select a shape to see its size and position.".to_string(),
-            },
+            Some(Action::SizePosition) => self.go_to_size_fields(0),
             Some(Action::DeleteGuide) => self.delete_selected_guide(&ctx),
             Some(Action::SizeField(ref id, field, value, per_inch)) => self.set_size_field(&ctx, id, field, value, per_inch),
             Some(Action::FullScreen) => self.toggle_full_screen(&ctx),

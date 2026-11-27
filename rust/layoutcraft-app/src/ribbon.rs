@@ -54,7 +54,7 @@ impl Ribbon {
     }
 
     /// The web's ribbon as the desktop app groups it: on the Design tab the border commands are one drop-down in the
-    /// Backgrounds group.
+    /// Backgrounds group, and View > Show has a switch for the app's own right-hand panel.
     pub fn for_desktop() -> Self {
         let mut ribbon = Self::load();
         if let Some(design) = ribbon.tabs.iter_mut().find(|tab| tab.name == "Design") {
@@ -73,13 +73,17 @@ impl Ribbon {
                 }
             }
         }
+        let show = ribbon.tabs.iter_mut().find(|tab| tab.name == "View").and_then(|tab| tab.groups.iter_mut().find(|group| group.name == "Show"));
+        if let Some(show) = show {
+            show.items.push(Item::Command { id: "paneInspector".to_string() });
+        }
         ribbon
     }
 }
 
 /// The commands that switch something on or off, drawn as check boxes.
 pub fn is_check(id: &str) -> bool {
-    matches!(id, "showRulers" | "showGrid" | "showGuides" | "snapGrid" | "snapShapes" | "snapGuides" | "autoConnectToggle")
+    matches!(id, "paneInspector" | "showRulers" | "showGrid" | "showGuides" | "snapGrid" | "snapShapes" | "snapGuides" | "autoConnectToggle")
 }
 
 /// The SVG text of an icon file (without the `.svg`), drawn in `color` instead of the files' black.
@@ -137,6 +141,8 @@ pub fn columns(large: &[bool]) -> Vec<Vec<usize>> {
 /// What the native app does for a web command id (the ids of `ribbon.js`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Native {
+    /// show or hide the right-hand panel
+    Inspector,
     Undo,
     Redo,
     SaveAs,
@@ -319,6 +325,7 @@ pub fn native(id: &str) -> Option<Native> {
         "borderStyle" | "borderTitle" | "borderApply" | "borderRemove" => Native::Borders,
         "showComments" => Native::Comments,
         "newComment" => Native::Comments,
+        "paneInspector" => Native::Inspector,
         _ => return None,
     })
 }
@@ -340,6 +347,7 @@ pub fn label(id: &str) -> String {
         "reportBtn" => "Reports",
         "exportBtn" => "Export...",
         "paneShapes" => "Shapes",
+        "paneInspector" => "Inspector",
         "stylesBtn" => "Styles",
         "copyImgBtn" => "Copy as Picture",
         "paneSheet" => "Shape Formulas",
@@ -536,7 +544,10 @@ mod tests {
             }
             ids
         };
-        assert_eq!(commands(Ribbon::for_desktop()), commands(Ribbon::load()));
+        let mut expected = commands(Ribbon::load());
+        // the desktop's own addition
+        expected.insert("View paneInspector".to_string());
+        assert_eq!(commands(Ribbon::for_desktop()), expected);
         let design = Ribbon::for_desktop().tabs.into_iter().find(|tab| tab.name == "Design").unwrap();
         assert!(!design.groups.iter().any(|group| group.name == "Borders & Titles"), "it is a menu of Backgrounds now");
         for id in Ribbon::load().tabs.iter().flat_map(|tab| &tab.groups).flat_map(|group| &group.items).filter_map(|item| match item { Item::Command { id } => Some(id), Item::Menu { .. } => None }) {

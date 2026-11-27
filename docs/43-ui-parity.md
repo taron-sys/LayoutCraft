@@ -267,7 +267,7 @@ these are row counts, not a count of every Visio button.
 | Show: Grid | S21 | showGrid | present | present | Ruler & Grid dialog (fixed / variable spacing, origin) missing | P0 |
 | Show: Guides | S26 snippet | showGuides | present | present | Desktop: drag from a ruler, move, drop on a ruler or press Delete; mouse only for creating and moving; no turned guides | P0 |
 | Show: Page Breaks | unverified | showBreaks | missing | present | | P2 |
-| Show: Task Panes menu | S12, S11 | paneShapes paneSizePos paneSheet panePanZoom | partial | present | Desktop: Shapes pane, Size and Position (goes to the inspector's fields) and Shape Formulas from the ribbon; no Pan & Zoom, not grouped in one menu | P0 |
+| Show: Task Panes menu | S12, S11 | paneShapes paneSizePos paneSheet panePanZoom | partial | present | Desktop: Shapes pane, Size and Position (goes to the inspector's fields), Shape Formulas and an Inspector switch from the ribbon (the inspector is closed until asked for, also by F3 and F8); no Pan & Zoom, not grouped in one menu | P0 |
 | Zoom: Zoom (dialog) | S11 | zl | present | present | Desktop: the Zoom menu (fixed levels, fit, page width) and a Custom zoom window for a typed percentage | P1 |
 | Zoom: Fit Page to Window (Ctrl+Shift+W) | S11, S1 | fit | present | present | | P0 |
 | Zoom: 100%, Page Width | unverified | zoom100 zoomWidth | present | present | | P2 |
