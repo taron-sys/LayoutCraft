@@ -3659,6 +3659,37 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert!(made != ids[0] && size(&made) == size(&ids[0]), "a copy, as the arrow gives: {:?} {:?} {}", size(&made), size(&ids[0]), driver.app.status);
     }
 
+    /// The window follows the page: its fields are those of the page that is shown, so Apply cannot give one page another's size.
+    #[test]
+    fn page_setup_left_open_takes_the_size_of_the_page_shown() {
+        let (mut driver, _) = Driver::new();
+        driver.app.engine.page_op(1, 0, 0, "Wide").unwrap();
+        driver.app.engine.page_op(6, 1, 0, "20,5").unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        let sizes = |driver: &Driver| (0..2).map(|page| super::page_dimensions(&driver.app.engine, page).unwrap()).collect::<Vec<_>>();
+        let before = sizes(&driver);
+        assert_ne!(before[0], before[1]);
+        let press = |driver: &mut Driver, label: &str| {
+            let at = *driver.texts(label).first().unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        // opened on the first page, as the Page setup command does
+        driver.app.page_setup_size = before[0];
+        driver.app.page_setup_open = true;
+        driver.frames(4);
+        press(&mut driver, "Wide");
+        assert_eq!(driver.app.page_index, 1);
+        press(&mut driver, "Apply");
+        assert_eq!(sizes(&driver), before, "{}", driver.app.status);
+        // typed values are kept while the page stays
+        driver.app.page_setup_size = (7.0, 6.0);
+        driver.frames(3);
+        press(&mut driver, "Apply");
+        assert_eq!(sizes(&driver), vec![before[0], (7.0, 6.0)], "{}", driver.app.status);
+    }
+
     #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
@@ -4564,6 +4595,8 @@ struct LayoutCraftApp {
     check_alt: bool,
     check_issues: Vec<layoutcraft_engine::check::Issue>,
     page_setup_size: (f64, f64),
+    /// The page, and its size then, that the Page setup fields were last filled from.
+    page_setup_read: Option<(usize, (f64, f64))>,
     comments_open: bool,
     comment_text: String,
     /// The comment whose text is being changed: its ID and the text in the field.
@@ -4719,6 +4752,7 @@ impl LayoutCraftApp {
             check_alt: false,
             check_issues: Vec::new(),
             page_setup_size: (11.0, 8.5),
+            page_setup_read: None,
             comments_open: false,
             comment_text: String::new(),
             comment_edit: None,
@@ -10055,6 +10089,13 @@ impl eframe::App for LayoutCraftApp {
             let mut open = true;
             let mut apply = false;
             let info = self.engine.page_size_json(self.page_index).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok());
+            // another page, or another size (an undo, another drawing): the fields show it; typed values stay until then
+            if let Some(size) = page_dimensions(&self.engine, self.page_index) {
+                if self.page_setup_read != Some((self.page_index, size)) {
+                    self.page_setup_size = size;
+                    self.page_setup_read = Some((self.page_index, size));
+                }
+            }
             let backgrounds = self.engine.background_info_json().ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).unwrap_or_default();
             // the chosen background page's ID, empty for none
             let assigned = backgrounds["assigned"][self.page_index].as_str().unwrap_or("").to_string();
