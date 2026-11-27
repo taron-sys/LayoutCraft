@@ -3487,6 +3487,37 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_page_can_become_a_background_page_and_come_back() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.engine.page_op(1, 0, 0, "Letterhead").unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        let names = |driver: &Driver| driver.app.engine.document().unwrap().pages.iter().map(|page| page.name.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&driver), ["Page-1", "Letterhead"]);
+        // the tab's menu
+        let tab = *driver.texts("Letterhead").first().expect("the tab");
+        let at = tab.center();
+        let right = |pressed| Event::PointerButton { pos: at, button: PointerButton::Secondary, pressed, modifiers: Modifiers::NONE };
+        driver.run(vec![Event::PointerMoved(at)]);
+        driver.run(vec![right(true)]);
+        driver.run(vec![right(false)]);
+        driver.frames(3);
+        let press = |driver: &mut Driver, label: &str| {
+            let at = *driver.texts(label).first().unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        press(&mut driver, "Make a background page");
+        assert_eq!(names(&driver), ["Page-1"], "{}", driver.app.status);
+        assert!(driver.app.page_index == 0 && driver.app.doc_shape(&ids[0]).is_some(), "a page with a tab is shown");
+        driver.app.page_setup_open = true;
+        driver.frames(4);
+        press(&mut driver, "Make Letterhead an ordinary page");
+        assert!(names(&driver).contains(&"Letterhead".to_string()), "{} {:?}", driver.app.status, names(&driver));
+        assert_eq!(driver.app.engine.document().unwrap().pages[driver.app.page_index].name, "Letterhead", "and shown");
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -7925,6 +7956,7 @@ impl LayoutCraftApp {
                             ("Move left", at > 0, Action::PageMove(-1)),
                             ("Move right", at + 1 < count, Action::PageMove(1)),
                             ("Delete the page", count > 1, Action::PageDelete),
+                            ("Make a background page", count > 1, Action::PageToBackground),
                         ] {
                             if ui.add_enabled(enabled, egui::Button::new(name)).clicked() {
                                 *action = Some(command);
@@ -8220,7 +8252,9 @@ impl LayoutCraftApp {
     fn run_page_op(&mut self, ctx: &egui::Context, op: i32, a: usize, b: usize, text: &str, verb: &str) {
         match self.engine.page_op(op, a, b, text) {
             Ok(show) => {
-                self.page_index = show.trim().parse().unwrap_or(0);
+                // making a page a background page can leave the number past the last page that has a tab
+                let last = self.engine.document().map_or(0, |document| document.pages.len().saturating_sub(1));
+                self.page_index = show.trim().parse().unwrap_or(0).min(last);
                 self.selected = None;
                 self.drag = None;
                 self.preview = None;
@@ -9790,6 +9824,8 @@ impl eframe::App for LayoutCraftApp {
             // the chosen background page's ID, empty for none
             let assigned = backgrounds["assigned"][self.page_index].as_str().unwrap_or("").to_string();
             let mut background = assigned.clone();
+            // the background page that is to be an ordinary page again
+            let mut ordinary: Option<String> = None;
             egui::Window::new("Page setup").open(&mut open).collapsible(false).show(&ctx, |ui| {
                 egui::Grid::new("page-setup").num_columns(2).show(ui, |ui| {
                     ui.label("Width");
@@ -9827,10 +9863,20 @@ impl eframe::App for LayoutCraftApp {
                     }
                     ui.end_row();
                 });
+                for page in backgrounds["backgrounds"].as_array().into_iter().flatten() {
+                    if let (Some(id), Some(name)) = (page["id"].as_str(), page["name"].as_str()) {
+                        if ui.button(format!("Make {name} an ordinary page")).on_hover_text("It gets a page tab again; pages that showed it no longer do").clicked() {
+                            ordinary = Some(id.to_string());
+                        }
+                    }
+                }
                 if ui.button("Apply").clicked() {
                     apply = true;
                 }
             });
+            if let Some(id) = ordinary {
+                self.run_page_op(&ctx, 14, 0, 0, &id, "Made an ordinary page again");
+            }
             if background != assigned {
                 let result = self.engine.page_op(12, self.page_index, 0, &background).map(|_| ());
                 let selected = self.selected.clone();
@@ -10184,6 +10230,7 @@ impl eframe::App for LayoutCraftApp {
             }
             Some(Action::ShapeName(ref id, ref wanted)) => self.set_shape_name(&ctx, id, wanted),
             Some(Action::Styles) => self.style_pick = if self.style_pick.is_some() { None } else { Some(styles::StylePick::default()) },
+            Some(Action::PageToBackground) => self.run_page_op(&ctx, 13, self.page_index, 0, "", "Made a background page (Page setup makes it ordinary again)"),
             Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
                 self.zoom = zoom_for_percent(f64::from(percent), self.raster_scale);
@@ -10227,6 +10274,8 @@ enum Action {
     /// Show the page at this percentage of actual size.
     ZoomTo(u32),
     ZoomDialog,
+    /// Make the shown page a background page: it leaves the tabs.
+    PageToBackground,
     /// Show or hide the Styles window.
     Styles,
     /// Name the shape (its ID, the wanted name; empty for the automatic one).
