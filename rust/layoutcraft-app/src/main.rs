@@ -3690,6 +3690,42 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert_eq!(sizes(&driver), vec![before[0], (7.0, 6.0)], "{}", driver.app.status);
     }
 
+    /// Another drawing can have the same page, shape ID and undo depth: nothing read from the one before may be shown for
+    /// it, and no half-made change may be written to it.
+    #[test]
+    fn panels_forget_the_drawing_that_was_open_before() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.engine.page_op(40, 0, 0, &format!("{}|Router", ids[0])).unwrap();
+        let mut row = super::new_data_row("Owner", &[]).unwrap();
+        row.value = "Network team".to_string();
+        super::write_data_row(&mut driver.app.engine, 0, &ids[0], &row).unwrap();
+        driver.app.engine.page_op(20, 0, 0, "|Me|ME|2026-01-01T10:00:00|first drawing").unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.app.selected = Some(ids[0].clone());
+        driver.app.data_pane = Some(DataPane::default());
+        driver.frames(4);
+        let depth = driver.app.engine.undo_depth();
+        assert_eq!(driver.app.name_field.text, "Router");
+        driver.app.comment_edit = Some(("0".to_string(), "changed".to_string()));
+        driver.app.layer_rename = Some(((0, 0, depth), "Wiring".to_string()));
+        driver.app.layer_colour = Some(((0, 0, depth), "#102030".to_string()));
+        // another drawing with the same shape IDs, brought to the same undo depth
+        let ctx = driver.ctx.clone();
+        driver.app.new_drawing(&ctx);
+        let others: Vec<String> = [1.0, 6.0].iter().map(|x| driver.app.engine.draw(0, 0, *x, 3.0, x + 2.0, 5.0).unwrap()).collect();
+        assert_eq!(others, ids);
+        while driver.app.engine.undo_depth() < depth {
+            driver.app.engine.edit(0, 2, &others[1], 0.1, 0.0, 0.0, 0.0, 0).unwrap();
+        }
+        assert_eq!(driver.app.engine.undo_depth(), depth);
+        driver.app.build_page(&ctx, false);
+        assert!(driver.app.comment_edit.is_none() && driver.app.layer_rename.is_none() && driver.app.layer_colour.is_none());
+        driver.app.selected = Some(others[0].clone());
+        driver.frames(4);
+        assert_ne!(driver.app.name_field.text, "Router", "the name is this drawing's");
+        assert!(driver.app.data_pane.as_ref().is_some_and(|pane| pane.rows.is_empty()), "the fields are this drawing's");
+    }
+
     #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
@@ -4799,6 +4835,7 @@ impl LayoutCraftApp {
             Some(document) => document.clone(),
             None => return,
         };
+        self.forget_drawing_state();
         self.baseline = Some(document);
         self.loaded_path = if is_scene { None } else { Some(path.to_path_buf()) };
         self.path_input = path.display().to_string();
@@ -4833,6 +4870,7 @@ impl LayoutCraftApp {
             self.status = format!("Could not create a drawing: {error}");
             return;
         }
+        self.forget_drawing_state();
         self.baseline = self.engine.document().cloned();
         self.loaded_path = None;
         self.path_input.clear();
@@ -4845,6 +4883,27 @@ impl LayoutCraftApp {
         self.pending_open = None;
         self.build_page(ctx, true);
         self.status = "New drawing; Save as keeps it.".to_string();
+    }
+
+    /// Another drawing is open: drop what panels and forms hold of the one before. Its page numbers, shape IDs and undo
+    /// depth can all match the new one's.
+    fn forget_drawing_state(&mut self) {
+        self.name_field = NameField::default();
+        if self.data_pane.is_some() {
+            self.data_pane = Some(DataPane::default());
+        }
+        self.comment_edit = None;
+        self.comment_text.clear();
+        self.layer_rename = None;
+        self.layer_colour = None;
+        self.chosen_point = None;
+        self.moving_point = None;
+        self.link_draft = None;
+        self.size_pos.key = None;
+        self.text_editor = None;
+        if self.style_pick.is_some() {
+            self.style_pick = Some(styles::StylePick::default());
+        }
     }
 
     fn reload(&mut self, ctx: &egui::Context) {
