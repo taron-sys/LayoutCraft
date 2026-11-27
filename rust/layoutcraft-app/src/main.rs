@@ -1724,10 +1724,29 @@ mod magnifier_tests {
     }
 }
 
+/// What a wheel movement means when "Mouse wheel zooms" is on: a plain up or down movement becomes a zoom (up zooms in);
+/// a sideways movement still moves the page, and Ctrl+wheel arrives as a zoom already.
+fn wheel_zooming(on: bool, factor: f32, scroll: egui::Vec2) -> (f32, egui::Vec2) {
+    if on && (factor - 1.0).abs() <= 1e-4 && scroll.y != 0.0 {
+        ((scroll.y * 0.003).exp(), egui::vec2(scroll.x, 0.0))
+    } else {
+        (factor, scroll)
+    }
+}
+
 #[cfg(test)]
 mod wheel_tests {
-    use super::wheel_view;
+    use super::{wheel_view, wheel_zooming};
     use eframe::egui::{self, vec2, Event, Modifiers, MouseWheelSource, MouseWheelUnit, TouchPhase};
+
+    #[test]
+    fn with_the_wheel_set_to_zoom_up_zooms_in_and_sideways_still_moves() {
+        let (up, down) = (wheel_zooming(true, 1.0, vec2(0.0, 40.0)).0, wheel_zooming(true, 1.0, vec2(0.0, -40.0)).0);
+        assert!(up > 1.01 && down < 0.99 && (up * down - 1.0).abs() < 1e-5);
+        for (on, factor, scroll) in [(false, 1.0, vec2(0.0, 40.0)), (true, 1.0, vec2(25.0, 0.0)), (true, 1.4, vec2(0.0, 0.0))] {
+            assert_eq!(wheel_zooming(on, factor, scroll), (factor, scroll));
+        }
+    }
 
     #[test]
     fn zooming_keeps_the_point_under_the_pointer_and_scrolling_only_moves() {
@@ -3051,6 +3070,41 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_wheel_can_be_set_to_zoom_from_the_view_tab() {
+        let (mut driver, _) = Driver::new();
+        let wheel = |driver: &mut Driver| {
+            let at = driver.app.last_viewport.center();
+            driver.run(vec![Event::PointerMoved(at)]);
+            driver.run(vec![Event::MouseWheel { unit: egui::MouseWheelUnit::Line, delta: vec2(0.0, 1.0), modifiers: Modifiers::NONE, phase: egui::TouchPhase::Move, source: egui::MouseWheelSource::Wheel }]);
+            // the toolkit spreads one notch over several frames
+            driver.frames(40);
+        };
+        let (zoom, pan) = (driver.app.zoom, driver.app.pan);
+        wheel(&mut driver);
+        assert!(driver.app.zoom == zoom && driver.app.pan.y != pan.y, "by itself the wheel scrolls");
+        let click = |driver: &mut Driver, found: &dyn Fn(&str) -> bool| {
+            let at = driver
+                .drawn
+                .iter()
+                .find_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(shown) if found(shown.galley.text()) => Some(egui::Rect::from_min_size(shown.pos, shown.galley.size()).center()),
+                    _ => None,
+                })
+                .expect("the control");
+            driver.click(at, Modifiers::NONE);
+            driver.frames(3);
+        };
+        click(&mut driver, &|text| text == "View");
+        // the Zoom menu says the percentage shown
+        click(&mut driver, &|text| text.ends_with("% \u{25be}"));
+        click(&mut driver, &|text| text == "Mouse wheel zooms");
+        assert!(driver.app.wheel_zooms, "{}", driver.app.status);
+        let (zoom, pan) = (driver.app.zoom, driver.app.pan);
+        wheel(&mut driver);
+        assert!(driver.app.zoom > zoom * 1.01, "{zoom} {} {pan:?}", driver.app.zoom);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -3844,6 +3898,8 @@ struct LayoutCraftApp {
     focus_at_frame_start: bool,
     /// The Snap and Attach window is open.
     snap_open: bool,
+    /// A plain mouse wheel zooms instead of scrolling.
+    wheel_zooms: bool,
     /// The zoom window, while it is open.
     zoom_draft: Option<ZoomDraft>,
     /// The window for another fill or line colour, while it is open.
@@ -4009,6 +4065,7 @@ impl LayoutCraftApp {
             help_shortcuts_open: false,
             focus_at_frame_start: false,
             snap_open: false,
+            wheel_zooms: false,
             zoom_draft: None,
             colour_draft: None,
             magnify_from: None,
@@ -7341,6 +7398,11 @@ impl LayoutCraftApp {
                     *action = Some(Action::ZoomDialog);
                     ui.close();
                 }
+                let mut wheel = self.wheel_zooms;
+                if ui.checkbox(&mut wheel, "Mouse wheel zooms").on_hover_text("The plain wheel zooms at the pointer (Ctrl+wheel always does)").changed() {
+                    *action = Some(Action::WheelZooms(wheel));
+                    ui.close();
+                }
                 ui.separator();
                 for (name, command) in [("Fit page to window", Action::Fit), ("Page width", Action::FitWidth)] {
                     if ui.button(name).clicked() {
@@ -8335,6 +8397,7 @@ impl eframe::App for LayoutCraftApp {
                 if response.hovered() {
                     // Ctrl+wheel (or a pinch) zooms at the pointer; the wheel alone scrolls, sideways with Shift
                     let (factor, scroll) = ui.input(|input| (input.zoom_delta(), input.smooth_scroll_delta));
+                    let (factor, scroll) = wheel_zooming(self.wheel_zooms, factor, scroll);
                     if let Some(pointer) = response.hover_pos().filter(|_| (factor - 1.0).abs() > 1e-4 || scroll != egui::Vec2::ZERO) {
                         (self.zoom, self.pan) = wheel_view(self.zoom, self.pan, pointer - viewport.center(), factor, scroll);
                         self.fit_pending = false;
@@ -9502,6 +9565,10 @@ impl eframe::App for LayoutCraftApp {
             }
             Some(Action::Say(ref message)) => self.status = message.clone(),
             Some(Action::ColourDialog(key)) => self.colour_draft = Some(ColourDraft { key, text: String::new(), refused: false, focus: true }),
+            Some(Action::WheelZooms(on)) => {
+                self.wheel_zooms = on;
+                self.status = if on { "The mouse wheel zooms." } else { "The mouse wheel scrolls; Ctrl+wheel zooms." }.to_string();
+            }
             Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
                 self.zoom = zoom_for_percent(f64::from(percent), self.raster_scale);
@@ -9545,6 +9612,8 @@ enum Action {
     /// Show the page at this percentage of actual size.
     ZoomTo(u32),
     ZoomDialog,
+    /// Whether a plain mouse wheel zooms.
+    WheelZooms(bool),
     /// Ask for another colour for "fill" or "line".
     ColourDialog(&'static str),
     /// Put a message in the status bar.
