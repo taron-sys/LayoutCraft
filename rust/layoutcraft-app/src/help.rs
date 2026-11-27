@@ -48,7 +48,7 @@ pub const SHORTCUTS: &[(&str, &[(&str, &str)])] = &[
         "Tools",
         &[
             ("Ctrl+1", "Pointer tool"),
-            ("Ctrl+3", "Connector tool"),
+            ("Ctrl+2", "Text tool (draw a text box)"), ("Ctrl+3", "Connector tool"),
             ("Ctrl+6 / Ctrl+8 / Ctrl+9", "Draw a line / rectangle / ellipse"),
         ],
     ),

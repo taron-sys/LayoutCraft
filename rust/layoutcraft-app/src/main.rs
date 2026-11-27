@@ -380,6 +380,8 @@ enum ViewKey {
 /// numbers are the positions in the ribbon's draw tools: 0 rectangle, 2 ellipse, 6 line.
 const VIEW_KEYS: &[(egui::Modifiers, egui::Key, ViewKey)] = &[
     (egui::Modifiers::CTRL, egui::Key::Num1, ViewKey::Tool(Tool::Select)),
+    // the text tool draws a text box
+    (egui::Modifiers::CTRL, egui::Key::Num2, ViewKey::Tool(Tool::Draw(5))),
     (egui::Modifiers::CTRL, egui::Key::Num3, ViewKey::Tool(Tool::Connector)),
     (egui::Modifiers::CTRL, egui::Key::Num6, ViewKey::Tool(Tool::Draw(6))),
     (egui::Modifiers::CTRL, egui::Key::Num8, ViewKey::Tool(Tool::Draw(0))),
@@ -3102,6 +3104,19 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         let (zoom, pan) = (driver.app.zoom, driver.app.pan);
         wheel(&mut driver);
         assert!(driver.app.zoom > zoom * 1.01, "{zoom} {} {pan:?}", driver.app.zoom);
+    }
+
+    #[test]
+    fn ctrl_2_takes_the_text_tool_and_a_drag_makes_a_text_box() {
+        let (mut driver, _) = Driver::new();
+        let count = |driver: &Driver| driver.app.engine.document().unwrap().pages[0].shapes.len();
+        let before = count(&driver);
+        driver.key(Key::Num2, CTRL);
+        assert!(driver.app.tool == super::Tool::Draw(5), "{}", driver.app.status);
+        let canvas = driver.app.last_viewport;
+        let from = canvas.center() + vec2(-60.0, 120.0);
+        driver.drag(from, from + vec2(120.0, 50.0));
+        assert_eq!(count(&driver), before + 1, "{}", driver.app.status);
     }
 
     #[test]
