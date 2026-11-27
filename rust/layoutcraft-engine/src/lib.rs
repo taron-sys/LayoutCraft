@@ -794,12 +794,9 @@ impl Engine {
             // 35: Fit Curve: the open polyline with the shape id in the text becomes a smooth spline through its vertices (step 285)
             35 => (layoutcraft_vsdx::groupedit::vertices::fit_curve(package, a, name.trim()).map_err(|e| e.to_string())?, a),
             // 31: choose variant 0..3 (the number in the text) of the drawing's theme (Design > Variants; probe-variants.ps1)
-            31 => (layoutcraft_vsdx::pageops::set_theme_variant(package, name.trim().parse::<u32>().map_err(|_| "the variant is a number from 0 to 3")?).map_err(|e| e.to_string())?, a),
-            // 30: apply the gallery theme named in the text to the whole drawing (Design > Themes; step 257)
-            30 => (layoutcraft_vsdx::pageops::apply_theme(package, name.trim()).map_err(|e| e.to_string())?, a),
-            // 32: apply the theme to shown page `a` only (a theme per page); 33: variant 0..3 of page `a` only
-            32 => (layoutcraft_vsdx::pageops::apply_theme_page(package, name.trim(), Some(a)).map_err(|e| e.to_string())?, a),
-            33 => (layoutcraft_vsdx::pageops::set_theme_variant_page(package, name.trim().parse::<u32>().map_err(|_| "the variant is a number from 0 to 3")?, Some(a)).map_err(|e| e.to_string())?, a),
+            // 30: apply the gallery theme named in the text to the whole drawing (Design > Themes; step 257); 31: the colour
+            // variant 0..3 in the text, for the whole drawing; 32 and 33: the same for shown page `a` only (see `theme_edit`)
+            30..=33 => (theme_edit(package, op, a, &name)?, a),
             // 12: show the background page with the ID in the text (empty = none) beneath page `a`; 13: make page `a` a background
             // page; 14: make the background page with the ID in the text an ordinary page again (the output is its page index)
             12 => (layoutcraft_vsdx::pageops::set_back_page(package, a, if name.trim().is_empty() { None } else { Some(name.trim()) }).map_err(|e| e.to_string())?, a),
@@ -1392,6 +1389,46 @@ impl Engine {
             "scale": {"paper": scale.paper, "paperUnit": unit_name(&scale.paper_unit), "drawing": scale.drawing, "drawingUnit": unit_name(&scale.drawing_unit), "type": scale.scale_type},
             "print": print.as_ref().map(|p| serde_json::json!({"orientation": p.orientation, "margins": p.margins, "grid": p.grid, "scale": [p.scale.0, p.scale.1], "fit": p.fit, "pages": [p.pages.0, p.pages.1], "center": [p.center.0, p.center.1], "paper": paper.map(|s| [s.0, s.1])})),
         }).to_string())
+    }
+}
+
+/// The package after theme operation `op` (see `Engine::page_op`): 30 the theme named `value` for the whole drawing, 31 the
+/// colour variant `value` (0..3) for the whole drawing, 32 and 33 the same for shown page `page` only.
+fn theme_edit(package: &Package, op: i32, page: usize, value: &str) -> Result<Vec<u8>, String> {
+    use layoutcraft_vsdx::pageops;
+    let variant = || value.trim().parse::<u32>().map_err(|_| "the variant is a number from 0 to 3".to_string());
+    match op {
+        30 => pageops::apply_theme(package, value.trim()),
+        31 => pageops::set_theme_variant(package, variant()?),
+        32 => pageops::apply_theme_page(package, value.trim(), Some(page)),
+        33 => pageops::set_theme_variant_page(package, variant()?, Some(page)),
+        _ => return Err(format!("{op} is not a theme operation")),
+    }
+    .map_err(|e| e.to_string())
+}
+
+impl Engine {
+    /// The drawing as it would be after theme operation `op` (30 to 33, as `page_op` takes them): for showing a choice before
+    /// it is made. The open drawing, its history and its pictures stay as they are.
+    pub fn preview_theme(&self, op: i32, page: usize, value: &str) -> Result<Document, String> {
+        let package = self.package.as_ref().ok_or("no document")?;
+        let bytes = theme_edit(package, op, page, value)?;
+        let changed = Package::from_bytes(&bytes).map_err(|e| e.to_string())?;
+        import_document(&changed).map_err(|e| e.to_string())
+    }
+
+    /// A small drawing of our own in theme `theme`, colour variant `variant`: what a theme gallery draws as its picture.
+    pub fn theme_sample(theme: &str, variant: u32) -> Result<Document, String> {
+        let mut sample = Engine::new();
+        sample.new_blank(4.0, 2.75, false, "Theme")?;
+        let first = sample.draw(0, 0, 0.35, 1.5, 1.85, 2.4)?;
+        let second = sample.draw(0, 1, 2.15, 1.5, 3.65, 2.4)?;
+        let third = sample.draw(0, 0, 2.15, 0.35, 3.65, 1.0)?;
+        sample.add_connector(0, &first, None, &third, None)?;
+        sample.edit(0, 8, &format!("{second}\nAa"), 0.0, 0.0, 0.0, 0.0, 0)?;
+        sample.page_op(30, 0, 0, theme)?;
+        sample.page_op(31, 0, 0, &variant.to_string())?;
+        sample.document.take().ok_or_else(|| "the sample could not be drawn".to_string())
     }
 }
 
