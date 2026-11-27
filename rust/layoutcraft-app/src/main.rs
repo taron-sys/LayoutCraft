@@ -3852,6 +3852,59 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert_eq!(sorted(driver.app.all_selected()), sorted(chosen), "{}", driver.app.status);
     }
 
+    /// Undo can take a selected shape away: it leaves the selection, so the next command works on what is there.
+    #[test]
+    fn undo_drops_shapes_that_are_gone_from_the_selection() {
+        let (mut driver, ids) = Driver::new();
+        let third = driver.app.engine.draw(0, 0, 4.0, 1.0, 5.0, 2.0).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        driver.key(Key::A, CTRL);
+        assert!(driver.app.all_selected().contains(&third));
+        driver.key(Key::Z, CTRL);
+        assert!(driver.app.doc_shape(&third).is_none(), "undone: {}", driver.app.status);
+        let mut selected = driver.app.all_selected();
+        selected.sort();
+        assert_eq!(selected, ids, "{}", driver.app.status);
+        driver.key(Key::Delete, Modifiers::NONE);
+        assert!(driver.app.engine.document().unwrap().pages[0].shapes.is_empty(), "{}", driver.app.status);
+    }
+
+    /// Leaving a field of the inspector by clicking a page tab writes the field and shows that page, with the one click.
+    #[test]
+    fn one_click_on_a_page_tab_writes_the_field_left_and_changes_page() {
+        for field in ["name", "width"] {
+            let (mut driver, ids) = Driver::new();
+            driver.app.engine.page_op(5, 0, 0, "").unwrap();
+            driver.app.build_page(&driver.ctx.clone(), false);
+            driver.app.selected = Some(ids[0].clone());
+            driver.frames(4);
+            let other = driver.app.engine.document().unwrap().pages[1].name.clone();
+            let tab = *driver.texts(&other).first().expect("the second page's tab");
+            let read = |driver: &Driver, page: usize| {
+                let names: serde_json::Value = serde_json::from_str(&driver.app.engine.shape_names_json(page).unwrap()).unwrap();
+                let shape = driver.app.engine.document().unwrap().pages[page].shapes.iter().find(|shape| shape.visio_id.as_deref() == Some(ids[0].as_str())).unwrap();
+                (names[&ids[0]].as_str().unwrap_or("").to_string(), shape.w)
+            };
+            let before = (read(&driver, 0), read(&driver, 1));
+            if field == "name" {
+                let label = *driver.texts("Name").first().expect("the Name field");
+                driver.click(pos2(label.right() + 40.0, label.center().y), Modifiers::NONE);
+            } else {
+                driver.app.size_pos.focus = Some(2);
+            }
+            driver.frames(2);
+            driver.key(Key::A, CTRL);
+            driver.write("3");
+            driver.click(tab.center(), Modifiers::NONE);
+            driver.frames(4);
+            assert_eq!(driver.app.page_index, 1, "{field}: {}", driver.app.status);
+            let after = (read(&driver, 0), read(&driver, 1));
+            assert_ne!(after.0, before.0, "{field}: written to the shape it was typed for");
+            assert_eq!(after.1, before.1, "{field}: and nothing on the page that is shown now");
+        }
+    }
+
     #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
@@ -6310,6 +6363,12 @@ impl LayoutCraftApp {
         self.drag = None;
         self.preview = None;
         self.build_page(ctx, false);
+        // an undo or redo can take selected shapes away: those that are gone leave the selection
+        let mut kept = self.all_selected();
+        kept.retain(|id| self.doc_shape(id).is_some() || self.is_connector(id));
+        let mut kept = kept.into_iter();
+        self.selected = kept.next();
+        self.extra_selected = kept.collect();
     }
 
     fn has_changes(&self) -> bool {
@@ -8841,6 +8900,9 @@ impl eframe::App for LayoutCraftApp {
         self.shift_down = ctx.input(|input| input.modifiers.shift);
         self.add_down = ctx.input(|input| adds_to_selection(input.modifiers));
         let mut action: Option<Action> = None;
+        // what an inspector field that was just left asks for: kept apart, so that it does not take the place of the click that
+        // left the field (a page tab)
+        let mut field_commit: Option<Action> = None;
         if let Some(backwards) = self.tab_cycle.take() {
             self.cycle_shape(backwards);
         }
@@ -9147,8 +9209,8 @@ impl eframe::App for LayoutCraftApp {
                                 ui.label("Rotated: move only, resize disabled");
                             }
                         }
-                        self.shape_name_controls(ui, &selected, &mut action);
-                        self.size_pos_controls(ui, &selected, &mut action);
+                        self.shape_name_controls(ui, &selected, &mut field_commit);
+                        self.size_pos_controls(ui, &selected, &mut field_commit);
                         ui.horizontal(|ui| {
                             if ui.button("Edit text").clicked() {
                                 action = Some(Action::EditText);
@@ -10616,6 +10678,12 @@ impl eframe::App for LayoutCraftApp {
             self.page_rename = None;
         }
 
+        // the field first, while its page is still the shown one
+        match field_commit {
+            Some(Action::ShapeName(ref id, ref wanted)) => self.set_shape_name(&ctx, id, wanted),
+            Some(Action::SizeField(ref id, field, value, per_inch)) => self.set_size_field(&ctx, id, field, value, per_inch),
+            _ => {}
+        }
         match action {
             Some(Action::Load) => self.load_from_input(&ctx),
             Some(Action::OpenDialog) => self.open_dialog(&ctx),
