@@ -271,7 +271,7 @@ pub fn import_document_with(
         new_page_caches.push(keep_cache.then(|| std::sync::Arc::new(PageCache { key: cache_key, nodes: node_caches })));
         let page_connects = package.connects(&page.part)?;
         let sites = glued_sites(package, page_index, &page_connects);
-        let connectors = convert_connectors(
+        let mut connectors = convert_connectors(
             &resolved,
             page_height,
             &page_connects,
@@ -301,13 +301,14 @@ pub fn import_document_with(
         apply_layer_colors(&mut shapes, &resolved, &layers);
         let guides = collect_guides(&resolved);
         let groups = collect_groups(&resolved, &shapes, page_height);
+        let containers = crate::containers::apply(&resolved, &mut shapes, &mut connectors);
         out.push(Page {
             id: page.id.clone(),
             name: page.name,
             shapes,
             connectors,
             groups,
-            containers: Vec::new(),
+            containers,
             layers,
             guides,
             line_jump: page.line_jump.clone(),

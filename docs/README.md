@@ -46,6 +46,7 @@ is intended to be read before changing the importer or writer.
   and the residual owner/counsel questions
 - [43 UI parity with Visio](43-ui-parity.md) — layout and convention comparison, ribbon table, keys,
   roadmap and naming proposals (planning document)
+- [45 Containers](45-containers.md) — what was measured about containers and their membership
 - [Feature names](feature-names.md) — naming checks and the labels to ship (naming policy record, not legal advice)
 
 ## Quick start

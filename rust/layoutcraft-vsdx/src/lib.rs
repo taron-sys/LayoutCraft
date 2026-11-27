@@ -19,6 +19,7 @@ const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 pub(crate) const REL_NS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 pub mod colorexpr;
+mod containers;
 pub mod comments;
 pub mod docprops;
 pub mod emf;

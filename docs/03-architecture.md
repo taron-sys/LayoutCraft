@@ -170,13 +170,8 @@ stay absolute; selection uses `rootId` to pick the whole group.
 
 Container/list membership is imported from the `Relationships` graph into
 `page.containers` (`visioId`, `kind`, `members`, `items`, `related`) and onto
-members as `shape.containers`/`listOf` (a shape can belong to several). The
-editor uses it to bring a container frame's transitive members into a selection;
-the writer reconciles add/remove edits into both sides' `Relationships` cells.
-An authored container is a normal model shape with `containerInfo`
-(`containerKind='container'`, `containerId=shape.id`) plus a `page.containers`
-record with no `visioId`; the writer emits its User rows and resolves its
-membership to the new sheet ID. Full swimlane/CFF authoring is not implemented.
+members as `shape.containers`/`listOf` (a shape can belong to several)
+(`docs/04-visio-import.md`). Editing and authoring containers is not implemented.
 
 ### Coordinate systems and units
 

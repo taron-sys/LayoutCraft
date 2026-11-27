@@ -105,19 +105,14 @@ container: SUM(DEPENDSON(1,Sheet.7!SheetRef(),Sheet.6!SheetRef()))
 member:    SUM(DEPENDSON(4,Sheet.1!SheetRef()))
 ```
 
-`parseRelationships` decodes types 1 (container→members), 2 (list→items),
-4 (member→containers), 5 (list item→list) and 11 (list↔related list). The page
-gets `containers: [{ visioId, kind, containerType, listDirection, members,
-items, related }]`; members get `shape.containers` / `shape.listOf`. A shape can
-belong to several containers (a CFF task is in the pool list, a lane and a
-phase). Lists such as `Swimlane List` / `Phase List` are ordinary imported
-shapes with `containerKind='list'`.
+`layoutcraft-vsdx/src/containers.rs` decodes types 1 (container→members), 2 (list→items),
+4 (member→containers), 5 (list item→list) and 11 (list↔related list); either end of a membership is enough, and a
+reference to a shape the page does not have is left out. The page gets `containers: [{ visioId, kind, members, items,
+related }]` (`kind` is `list` for a record with items); members get `shape.containers` / `shape.listOf` (connectors
+`containers`). A shape can belong to several containers (a CFF task is in the pool list, a lane and a phase).
 
-The editor uses this graph transitively: selecting a container frame brings its
-members, list items and their members, so a drag moves pool → lists → lanes →
-tasks. Adding/removing regular membership is written back through both sides'
-`Relationships` cells; authoring a container/list shape from scratch is not
-implemented yet.
+Editing does not use this yet: moving, deleting or copying a container does not carry its members, and membership is not
+written back (the browser editor that did was removed, `docs/42-javascript-removal.md`).
 
 ## Geometry
 
