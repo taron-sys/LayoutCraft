@@ -3547,6 +3547,33 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_layer_can_be_given_a_colour_and_lose_it() {
+        let (mut driver, _) = Driver::new();
+        driver.app.engine.page_op(7, 0, 0, "Wiring").unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.app.layers_open = true;
+        driver.frames(4);
+        let colour = |driver: &Driver| driver.app.engine.document().unwrap().pages[0].layers[0].color.clone().and_then(|colour| super::typed_colour(&colour));
+        let press = |driver: &mut Driver, label: &str| {
+            let at = driver.texts(label).into_iter().min_by(|a, b| a.left().total_cmp(&b.left())).unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        assert_eq!(colour(&driver), None);
+        let depth = driver.app.engine.undo_depth();
+        for (typed, wanted) in [("blue", None), ("#2060c0", Some([0x20, 0x60, 0xc0]))] {
+            press(&mut driver, "Colour");
+            driver.app.layer_colour.as_mut().expect("the form").1 = typed.to_string();
+            driver.frames(2);
+            press(&mut driver, "Apply colour");
+            assert_eq!(colour(&driver), wanted, "{}", driver.app.status);
+        }
+        press(&mut driver, "Colour");
+        press(&mut driver, "No colour");
+        assert_eq!((colour(&driver), driver.app.engine.undo_depth()), (None, depth + 2), "{}", driver.app.status);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4327,6 +4354,8 @@ struct LayoutCraftApp {
     /// The layer being renamed: (page, layer number, undo depth when it was chosen) and the name in the field. The depth
     /// drops the form after any edit, as layer numbers may have moved.
     layer_rename: Option<((usize, u32, usize), String)>,
+    /// The layer whose colour is being set, keyed as `layer_rename`, and the colour code in the field.
+    layer_colour: Option<((usize, u32, usize), String)>,
     /// Pastes since the last copy (each lands a step further from the original).
     paste_count: u32,
     ribbon: ribbon::Ribbon,
@@ -4513,6 +4542,7 @@ impl LayoutCraftApp {
             page_rename: None,
             layer_name: String::new(),
             layer_rename: None,
+            layer_colour: None,
             paste_count: 0,
             ribbon: ribbon::Ribbon::load(),
             ribbon_tab: 1,
@@ -7700,8 +7730,12 @@ impl LayoutCraftApp {
         if self.layer_rename.as_ref().is_some_and(|((at, _, then), _)| *at != page || *then != depth) {
             self.layer_rename = None;
         }
+        if self.layer_colour.as_ref().is_some_and(|((at, _, then), _)| *at != page || *then != depth) {
+            self.layer_colour = None;
+        }
         for layer in &layers {
-            ui.horizontal(|ui| {
+            // wrapped: a long layer name must not widen the inspector
+            ui.horizontal_wrapped(|ui| {
                 let (mut visible, mut print, mut locked) = (layer.visible, layer.print, layer.locked);
                 let a = ui.checkbox(&mut visible, "V").on_hover_text("Visible");
                 let b = ui.checkbox(&mut print, "P").on_hover_text("Prints");
@@ -7714,7 +7748,17 @@ impl LayoutCraftApp {
                 if ui.add_enabled(has_selection, egui::Checkbox::new(&mut on_layer, "Sel")).on_hover_text("The selected shape is on this layer").changed() && on_layer != was {
                     *action = Some(Action::LayerShape(layer.index as usize, on_layer));
                 }
+                if let Some(colour) = layer.color.as_ref().filter(|colour| typed_colour(colour).is_some()) {
+                    // the layer's colour as a square; its code on hover, so that it does not rest on colour
+                    let [r, g, b] = typed_colour(colour).unwrap_or_default();
+                    let (rect, square) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+                    ui.painter().rect(rect, 0.0, egui::Color32::from_rgb(r, g, b), egui::Stroke::new(1.0, ui.visuals().weak_text_color()), egui::StrokeKind::Inside);
+                    square.on_hover_text(format!("Layer colour {colour}"));
+                }
                 ui.label(&layer.name);
+                if ui.small_button("Colour").on_hover_text(format!("Colour of the shapes on the layer {}", layer.name)).clicked() {
+                    self.layer_colour = Some(((page, layer.index, depth), layer.color.clone().filter(|colour| typed_colour(colour).is_some()).unwrap_or_default()));
+                }
                 if ui.small_button("Rename").on_hover_text(format!("Rename the layer {}", layer.name)).clicked() {
                     self.layer_rename = Some(((page, layer.index, depth), layer.name.clone()));
                 }
@@ -7722,6 +7766,34 @@ impl LayoutCraftApp {
                     *action = Some(Action::LayerOp(9, layer.index as usize, String::new()));
                 }
             });
+            if let Some((_, code)) = self.layer_colour.as_mut().filter(|((_, index, _), _)| *index == layer.index) {
+                let (mut apply, mut none, mut cancel) = (false, false, false);
+                ui.horizontal(|ui| {
+                    let label = ui.label("Colour code");
+                    let field = ui.add(egui::TextEdit::singleline(code).hint_text("#rrggbb").desired_width(70.0)).labelled_by(label.id);
+                    apply = field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                    let mut picked = typed_colour(code).unwrap_or_default();
+                    if ui.color_edit_button_srgb(&mut picked).changed() {
+                        *code = hex(picked);
+                    }
+                });
+                ui.horizontal(|ui| {
+                    apply |= ui.small_button("Apply colour").clicked();
+                    none = ui.small_button("No colour").clicked();
+                    cancel = ui.small_button("Cancel").clicked();
+                });
+                if none {
+                    *action = Some(Action::LayerOp(10, layer.index as usize, "none".to_string()));
+                } else if apply {
+                    match typed_colour(code) {
+                        Some(colour) => *action = Some(Action::LayerOp(10, layer.index as usize, hex(colour))),
+                        None => *action = Some(Action::Say("Type a colour as #rrggbb, or pick one.".to_string())),
+                    }
+                }
+                if cancel {
+                    self.layer_colour = None;
+                }
+            }
             let renaming = self.layer_rename.as_mut().filter(|((_, index, _), _)| *index == layer.index);
             if let Some((_, name)) = renaming {
                 let (mut save, mut cancel) = (false, false);
