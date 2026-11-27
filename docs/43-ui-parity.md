@@ -220,7 +220,7 @@ these are row counts, not a count of every Visio button.
 | Page Setup: dialog (page size, orientation) | S4 (orientation and size under Design); dialog also from the page-tab menu | pageSetup | present | present | | P0 |
 | Page Setup: Orientation | S4 | designOrientation | present | present | | P1 |
 | Page Setup: Size | S4 | designSize | present | present | | P1 |
-| Themes (hover preview) | S8 | themeGallery | partial | present | Engine `themes_json`; desktop Design tab shows themes and the four variants as pictures drawn by our renderer (the theme list with names stays beside them), with no hover preview; hover preview unverified in LC | P1 |
+| Themes (hover preview) | S8 | themeGallery | partial | present | Engine `themes_json`; desktop Design tab shows themes and the four variants as pictures drawn by our renderer (the theme list with names stays beside them); resting the pointer or the keyboard focus on one shows the shown page that way until it leaves; not compared with Visio by hand | P1 |
 | Variants | S8 | variantGallery | present | present | | P2 |
 | Backgrounds | S8 | paperColor | missing | partial | Visio adds a background page (S5, S8); LC sets a colour | P2 |
 | Borders & Titles | S8 | borderStyle borderTitle borderApply borderRemove | present | present | | P2 |

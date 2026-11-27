@@ -3446,6 +3446,59 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn resting_on_a_theme_picture_shows_it_on_the_page_until_the_pointer_leaves() {
+        let (mut driver, _) = Driver::new();
+        let tab = driver.texts("Design")[0];
+        driver.click(tab.center(), Modifiers::NONE);
+        driver.frames(40);
+        let drawn = |driver: &Driver, id: egui::TextureId| {
+            driver.drawn.iter().find_map(|clipped| match &clipped.shape {
+                egui::Shape::Mesh(mesh) if mesh.texture_id == id => Some(clipped.shape.visual_bounding_rect()),
+                egui::Shape::Rect(shape) if shape.brush.as_ref().is_some_and(|brush| brush.fill_texture_id == id) => Some(shape.rect),
+                _ => None,
+            })
+        };
+        let info: serde_json::Value = serde_json::from_str(&driver.app.engine.themes_json().unwrap()).unwrap();
+        let name = info["themes"][1]["name"].as_str().unwrap().to_string();
+        let picture = driver.app.theme_pictures[&(name.clone(), 0)].as_ref().unwrap().id();
+        let at = drawn(&driver, picture).expect("the picture").center();
+        let before = (driver.app.engine.export().unwrap().to_vec(), driver.app.engine.undo_depth());
+        let page = driver.app.texture.as_ref().unwrap().id();
+        assert!(drawn(&driver, page).is_some() && driver.app.theme_preview.is_none());
+        driver.run(vec![Event::PointerMoved(at)]);
+        driver.frames(6);
+        let preview = driver.app.theme_preview.as_ref().expect("a preview").texture.id();
+        assert!(drawn(&driver, preview).is_some() && drawn(&driver, page).is_none(), "the preview takes the page's place");
+        assert_eq!((driver.app.engine.export().unwrap().to_vec(), driver.app.engine.undo_depth()), before, "nothing changed");
+        driver.run(vec![Event::PointerMoved(pos2(700.0, 600.0))]);
+        driver.frames(3);
+        assert!(driver.app.theme_preview.is_none() && drawn(&driver, page).is_some());
+        // the keyboard: focus on a picture previews it too
+        let mut reached = false;
+        for _ in 0..60 {
+            driver.key(Key::Tab, Modifiers::NONE);
+            driver.frames(4);
+            reached |= driver.app.theme_preview.is_some();
+            if reached {
+                break;
+            }
+        }
+        assert!(reached, "Tab reaches a theme picture");
+        assert_eq!(driver.app.engine.undo_depth(), before.1);
+        // the page changes under a picture that still has the focus: it is drawn again for the new page
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(6);
+        assert!(driver.app.theme_preview.is_some());
+        // choosing it is one step, and the preview gives way to the real page
+        driver.run(vec![Event::PointerMoved(at)]);
+        driver.frames(6);
+        driver.click(at, Modifiers::NONE);
+        driver.frames(6);
+        assert_eq!(driver.app.engine.undo_depth(), before.1 + 1, "{}", driver.app.status);
+        assert!(driver.app.theme_preview.is_none());
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4795,6 +4848,11 @@ struct LayoutCraftApp {
     /// The Design tab's pictures by theme name and variant (`None` = it could not be drawn), and the first theme in the row.
     theme_pictures: BTreeMap<(String, u32), Option<egui::TextureHandle>>,
     theme_first: usize,
+    /// The theme operation and value whose picture the pointer (or keyboard focus) is on in this frame, since when it has
+    /// been, and the page drawn as that choice would leave it.
+    theme_hover: Option<(i32, String)>,
+    theme_resting: Option<((i32, String), f64)>,
+    theme_preview: Option<gallery::Preview>,
     /// "Change Shape" is waiting for a click on a shape of the Shapes panel.
     change_shape: bool,
     /// The Find window, while it is open.
@@ -4969,6 +5027,9 @@ impl LayoutCraftApp {
             theme_cache: None,
             theme_pictures: BTreeMap::new(),
             theme_first: 0,
+            theme_hover: None,
+            theme_resting: None,
+            theme_preview: None,
             change_shape: false,
             find: None,
             struck_cache: None,
@@ -5159,6 +5220,35 @@ impl LayoutCraftApp {
         self.build_page(ctx, true);
     }
 
+    /// The scene of the shown page of `document` (the open drawing, or a preview of it), spanning at least the whole page.
+    fn page_scene(&self, document: &Document) -> Result<Scene, String> {
+        let package = self.engine.package.as_ref().ok_or("no drawing is open")?;
+        let mut media: BTreeMap<String, Vec<u8>> = BTreeMap::new();
+        for (id, record) in &document.media {
+            // media_bytes converts what the renderer cannot draw itself (BMP to PNG, EMF / WMF to SVG): the raw part bytes of a stencil picture are an EMF
+            if let Some(bytes) = layoutcraft_vsdx::media_bytes(package, record) {
+                media.insert(id.clone(), bytes);
+            }
+        }
+        let mut scene = scene_from_document_with_media(document, self.page_index, &media).map_err(|error| error.to_string())?;
+        // An empty template page has no content bounds; show the actual page
+        // rectangle instead of a 1x1 white square.
+        // Likewise a page with shapes shows the WHOLE page (a shape that sticks out of it widens the view), not the bounding box of its
+        // shapes: creating the first shape must not shrink the canvas to that shape.
+        {
+            // the sheet's PageWidth / PageHeight are in drawing units; the scene's shapes are already scaled to paper (page.scale, e.g. 1:50)
+            let paper = document.pages.get(self.page_index).map_or(1.0, |page| page.scale).max(1e-6);
+            let (page_w, page_h) = ((self.page_width_in * paper * DPI).max(1.0), (self.page_height_in * paper * DPI).max(1.0));
+            let (min_x, min_y) = if scene.items.is_empty() { (0.0, 0.0) } else { (scene.min_x.min(0.0), scene.min_y.min(0.0)) };
+            let (max_x, max_y) = if scene.items.is_empty() { (page_w, page_h) } else { ((scene.min_x + scene.width).max(page_w), (scene.min_y + scene.height).max(page_h)) };
+            scene.min_x = min_x;
+            scene.min_y = min_y;
+            scene.width = max_x - min_x;
+            scene.height = max_y - min_y;
+        }
+        Ok(scene)
+    }
+
     fn build_page(&mut self, ctx: &egui::Context, reset_view: bool) {
         let _timer = Timer::new("build_page (whole)", 0.0);
         self.sites_cache.clear();
@@ -5174,49 +5264,26 @@ impl LayoutCraftApp {
         }
         self.size_pos.key = None;
         self.theme_cache = None;
+        (self.theme_preview, self.theme_resting) = (None, None);
         *self.routes_cache.borrow_mut() = None;
         let (Some(package), Some(document)) = (self.engine.package.as_ref(), self.engine.document.as_ref())
         else {
             return;
         };
-        let mut page_width_in = 8.5;
         if let Ok(pages) = package.pages() {
             if let Some(page) = pages.get(self.page_index) {
                 self.page_height_in = page.height.unwrap_or(11.0);
-                page_width_in = page.width.unwrap_or(8.5);
-                self.page_width_in = page_width_in;
-            }
-        }
-        let mut media: BTreeMap<String, Vec<u8>> = BTreeMap::new();
-        for (id, record) in &document.media {
-            // media_bytes converts what the renderer cannot draw itself (BMP to PNG, EMF / WMF to SVG): the raw part bytes of a stencil picture are an EMF
-            if let Some(bytes) = layoutcraft_vsdx::media_bytes(package, record) {
-                media.insert(id.clone(), bytes);
+                self.page_width_in = page.width.unwrap_or(8.5);
             }
         }
         let scene_timer = Timer::new("  scene_from_document", 0.0);
-        let mut scene = match scene_from_document_with_media(document, self.page_index, &media) {
+        let scene = match self.page_scene(document) {
             Ok(scene) => scene,
             Err(error) => {
                 self.status = format!("Could not build page scene: {error}");
                 return;
             }
         };
-        // An empty template page has no content bounds; show the actual page
-        // rectangle instead of a 1x1 white square.
-        // Likewise a page with shapes shows the WHOLE page (a shape that sticks out of it widens the view), not the bounding box of its
-        // shapes: creating the first shape must not shrink the canvas to that shape.
-        {
-            // the sheet's PageWidth / PageHeight are in drawing units; the scene's shapes are already scaled to paper (page.scale, e.g. 1:50)
-            let paper = document.pages.get(self.page_index).map_or(1.0, |page| page.scale).max(1e-6);
-            let (page_w, page_h) = ((page_width_in * paper * DPI).max(1.0), (self.page_height_in * paper * DPI).max(1.0));
-            let (min_x, min_y) = if scene.items.is_empty() { (0.0, 0.0) } else { (scene.min_x.min(0.0), scene.min_y.min(0.0)) };
-            let (max_x, max_y) = if scene.items.is_empty() { (page_w, page_h) } else { ((scene.min_x + scene.width).max(page_w), (scene.min_y + scene.height).max(page_h)) };
-            scene.min_x = min_x;
-            scene.min_y = min_y;
-            scene.width = max_x - min_x;
-            scene.height = max_y - min_y;
-        }
         drop(scene_timer);
         let keep_view = !reset_view;
         self.font_warnings = scene_font_substitutions(&scene);
@@ -9139,11 +9206,13 @@ impl eframe::App for LayoutCraftApp {
         }
 
         // the full-screen view shows the drawing and the status bar only
+        self.theme_hover = None;
         if !self.full_screen {
             egui::Panel::top("ribbon").show(ui, |ui| {
                 self.draw_ribbon(ui, &mut action);
             });
         }
+        self.settle_theme_preview(&ctx);
 
         if self.pending_open.is_some() {
             egui::Panel::top("pending").show(ui, |ui| {
@@ -9549,7 +9618,9 @@ impl eframe::App for LayoutCraftApp {
                 let painter = ui.painter_at(viewport);
                 let colours = appearance::chrome(ui.visuals().dark_mode);
                 painter.rect_filled(viewport, 0.0, colours.canvas);
-                let Some(texture_id) = self.texture.as_ref().map(|texture| texture.id()) else {
+                // a theme that is only being looked at takes the page picture's place
+                let shown = self.theme_preview.as_ref().map(|preview| &preview.texture).or(self.texture.as_ref());
+                let Some(texture_id) = shown.map(|texture| texture.id()) else {
                     painter.text(
                         viewport.center(),
                         egui::Align2::CENTER_CENTER,
@@ -9580,7 +9651,7 @@ impl eframe::App for LayoutCraftApp {
                     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
                     egui::Color32::WHITE,
                 );
-                if let Some(detail) = &self.detail {
+                if let Some(detail) = self.detail.as_ref().filter(|_| self.theme_preview.is_none()) {
                     let view = self.view_scale();
                     let r = detail.region;
                     let rect = egui::Rect::from_min_size(
