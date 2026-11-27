@@ -3852,6 +3852,24 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert_eq!(sorted(driver.app.all_selected()), sorted(chosen), "{}", driver.app.status);
     }
 
+    /// Undo can take a selected shape away: it leaves the selection, so the next command works on what is there.
+    #[test]
+    fn undo_drops_shapes_that_are_gone_from_the_selection() {
+        let (mut driver, ids) = Driver::new();
+        let third = driver.app.engine.draw(0, 0, 4.0, 1.0, 5.0, 2.0).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        driver.key(Key::A, CTRL);
+        assert!(driver.app.all_selected().contains(&third));
+        driver.key(Key::Z, CTRL);
+        assert!(driver.app.doc_shape(&third).is_none(), "undone: {}", driver.app.status);
+        let mut selected = driver.app.all_selected();
+        selected.sort();
+        assert_eq!(selected, ids, "{}", driver.app.status);
+        driver.key(Key::Delete, Modifiers::NONE);
+        assert!(driver.app.engine.document().unwrap().pages[0].shapes.is_empty(), "{}", driver.app.status);
+    }
+
     #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
@@ -6310,6 +6328,12 @@ impl LayoutCraftApp {
         self.drag = None;
         self.preview = None;
         self.build_page(ctx, false);
+        // an undo or redo can take selected shapes away: those that are gone leave the selection
+        let mut kept = self.all_selected();
+        kept.retain(|id| self.doc_shape(id).is_some() || self.is_connector(id));
+        let mut kept = kept.into_iter();
+        self.selected = kept.next();
+        self.extra_selected = kept.collect();
     }
 
     fn has_changes(&self) -> bool {
