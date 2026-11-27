@@ -349,12 +349,12 @@ impl Engine {
     pub fn edit(&mut self, page: usize, op: i32, id: &str, a: f64, b: f64, c: f64, d: f64, flag: i32) -> Result<(), String> {
         let mut id = id.to_string();
         let mut op = op;
-        // deleting a container or a list takes what it holds with it
-        if matches!(op, 4 | 6) {
+        // moving or deleting a container or a list takes what it holds with it (2 and 4 take one shape, 5 and 6 several)
+        if matches!(op, 2 | 4 | 5 | 6) {
             let named: Vec<String> = id.split('\n').filter(|one| !one.is_empty()).map(str::to_string).collect();
             let all = self.with_contents(page, &named);
             if all.len() > named.len() {
-                (op, id) = (6, all.join("\n"));
+                (op, id) = (if matches!(op, 2 | 5) { 5 } else { 6 }, all.join("\n"));
             }
         }
         let package = self.package.as_ref().ok_or("no document")?;
@@ -380,7 +380,12 @@ impl Engine {
             // several. Both write one patch and re-import once.
             5 => {
                 let mut all = Vec::new();
+                // a shape inside another one that moves goes along with it and is not moved twice
+                let mut below = Vec::new();
                 for one in id.split('\n').filter(|one| !one.is_empty()) {
+                    below.extend(editor.subtree_ids(one).map_err(|e| e.to_string())?.into_iter().filter(|inside| inside != one));
+                }
+                for one in id.split('\n').filter(|one| !one.is_empty() && !below.iter().any(|inside| inside == one)) {
                     all.extend(editor.move_member(one, (a, b), false).map_err(|e| e.to_string())?);
                 }
                 Ok::<_, layoutcraft_vsdx::Error>(all)
@@ -607,6 +612,7 @@ impl Engine {
 impl Engine {
     /// The new routes of the connectors glued to the shapes `ids` of `page` when they move by `delta` (JSON `[{"id","route":[[x,y]..]}]`). The page's editor is kept between calls while the document does not change.
     pub fn preview_move(&mut self, page: usize, ids: &[String], delta: (f64, f64)) -> Result<String, String> {
+        let ids = &self.with_contents(page, ids);
         let print = fingerprint(&self.bytes);
         let fresh = !matches!(&self.preview, Some((p, f, _, _)) if *p == page && *f == print);
         if fresh {
