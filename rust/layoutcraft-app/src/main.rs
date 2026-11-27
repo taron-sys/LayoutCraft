@@ -1202,6 +1202,15 @@ mod data_row_tests {
     }
 }
 
+/// The inspector's Name field: for which (page, shape, undo depth) the name was read, the text in the field and the name
+/// the file has (empty when the shape only has its automatic name).
+#[derive(Default)]
+struct NameField {
+    key: Option<(usize, String, usize)>,
+    text: String,
+    read: String,
+}
+
 /// The frame of a shape of the page as the Size and Position fields show it: pin (inches, y up), size, the pin inside the
 /// box, and the angle (radians, counter-clockwise).
 #[derive(Clone, Copy, Debug)]
@@ -3226,6 +3235,35 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_shape_can_be_named_in_the_inspector() {
+        let (mut driver, ids) = Driver::new();
+        let name = |driver: &Driver, id: &str| serde_json::from_str::<serde_json::Value>(&driver.app.engine.shape_names_json(0).unwrap()).unwrap()[id].as_str().unwrap_or("").to_string();
+        let enter = |driver: &mut Driver, id: &str, typed: &str, end: Key| {
+            driver.app.selected = Some(id.to_string());
+            driver.frames(3);
+            // the field stands right of its label
+            let label = *driver.texts("Name").first().expect("the Name field");
+            driver.click(pos2(label.right() + 40.0, label.center().y), Modifiers::NONE);
+            driver.frames(2);
+            driver.key(Key::A, CTRL);
+            driver.write(typed);
+            driver.key(end, Modifiers::NONE);
+            driver.frames(2);
+        };
+        enter(&mut driver, &ids[0], "Router", Key::Enter);
+        assert_eq!(name(&driver, &ids[0]), "Router", "{}", driver.app.status);
+        // Esc leaves the name and the selection alone
+        let depth = driver.app.engine.undo_depth();
+        enter(&mut driver, &ids[0], "Switch", Key::Escape);
+        assert_eq!((name(&driver, &ids[0]).as_str(), driver.app.engine.undo_depth()), ("Router", depth));
+        assert_eq!(driver.app.selected, Some(ids[0].clone()));
+        // a taken name is made unique, and the status says what it became
+        enter(&mut driver, &ids[1], "Router", Key::Enter);
+        let second = name(&driver, &ids[1]);
+        assert!(second != "Router" && second.starts_with("Router") && driver.app.status.contains(&second), "{second} {}", driver.app.status);
+    }
+
+    #[test]
     fn escape_still_closes_the_text_editor() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4048,6 +4086,7 @@ struct LayoutCraftApp {
     ruler_unit: (f64, &'static str),
     /// The Size and Position fields of the inspector.
     size_pos: SizePos,
+    name_field: NameField,
     /// The Layers window is open.
     layers_open: bool,
     /// The full-screen view is on.
@@ -4216,6 +4255,7 @@ impl LayoutCraftApp {
             show_rulers: true,
             ruler_unit: (1.0, "in"),
             size_pos: SizePos::default(),
+            name_field: NameField::default(),
             layers_open: false,
             full_screen: false,
             data_pane: None,
@@ -7362,6 +7402,39 @@ impl LayoutCraftApp {
 
     /// The Size and Position fields of the selected shape. A field is applied when it is left (or Enter is pressed) with
     /// a new content.
+    /// The shape's name. It is written when the field is left (or Enter is pressed) with another content; Esc gives the old
+    /// name back. An empty field returns the shape to its automatic name.
+    fn shape_name_controls(&mut self, ui: &mut egui::Ui, id: &str, action: &mut Option<Action>) {
+        let key = (self.page_index, id.to_string(), self.engine.undo_depth());
+        if self.name_field.key.as_ref() != Some(&key) {
+            let names = self.engine.shape_names_json(self.page_index).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).unwrap_or_default();
+            self.name_field.read = names[id].as_str().unwrap_or("").to_string();
+            self.name_field.text = self.name_field.read.clone();
+            self.name_field.key = Some(key);
+        }
+        ui.horizontal(|ui| {
+            let label = ui.label("Name");
+            let edit = ui.add(egui::TextEdit::singleline(&mut self.name_field.text).hint_text("automatic").desired_width(150.0)).labelled_by(label.id);
+            match field_left(ui, &edit) {
+                Some(Left::Revert) => self.name_field.text = self.name_field.read.clone(),
+                Some(Left::Apply) if self.name_field.text.trim() != self.name_field.read => *action = Some(Action::ShapeName(id.to_string(), self.name_field.text.trim().to_string())),
+                _ => {}
+            }
+        });
+    }
+
+    fn set_shape_name(&mut self, ctx: &egui::Context, id: &str, wanted: &str) {
+        let page = self.page_index;
+        let result = self.engine.page_op(40, page, 0, &format!("{id}|{wanted}")).map(|_| ());
+        // read the field again, also after a refused name
+        self.name_field.key = None;
+        let selected = self.selected.clone();
+        // a name another shape has is made unique by the engine: say what the shape is called now
+        let given = self.engine.shape_names_json(page).ok().and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok()).and_then(|names| names[id].as_str().map(str::to_string)).unwrap_or_default();
+        let done = if given.is_empty() { "The shape has its automatic name again".to_string() } else { format!("The shape is named {given}") };
+        self.finish_edit(ctx, result, &done, selected);
+    }
+
     fn size_pos_controls(&mut self, ui: &mut egui::Ui, id: &str, action: &mut Option<Action>) {
         let key = (self.page_index, id.to_string());
         if self.size_pos.key.as_ref() != Some(&key) {
@@ -8262,6 +8335,7 @@ impl eframe::App for LayoutCraftApp {
                                 ui.label("Rotated: move only, resize disabled");
                             }
                         }
+                        self.shape_name_controls(ui, &selected, &mut action);
                         self.size_pos_controls(ui, &selected, &mut action);
                         ui.horizontal(|ui| {
                             if ui.button("Edit text").clicked() {
@@ -9785,6 +9859,7 @@ impl eframe::App for LayoutCraftApp {
                 self.wheel_zooms = on;
                 self.status = if on { "The mouse wheel zooms." } else { "The mouse wheel scrolls; Ctrl+wheel zooms." }.to_string();
             }
+            Some(Action::ShapeName(ref id, ref wanted)) => self.set_shape_name(&ctx, id, wanted),
             Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
                 self.zoom = zoom_for_percent(f64::from(percent), self.raster_scale);
@@ -9828,6 +9903,8 @@ enum Action {
     /// Show the page at this percentage of actual size.
     ZoomTo(u32),
     ZoomDialog,
+    /// Name the shape (its ID, the wanted name; empty for the automatic one).
+    ShapeName(String, String),
     /// Whether a plain mouse wheel zooms.
     WheelZooms(bool),
     /// Ask for another colour for "fill" or "line".

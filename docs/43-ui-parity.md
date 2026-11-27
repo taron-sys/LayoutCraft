@@ -286,7 +286,7 @@ these are row counts, not a count of every Visio button.
 |---|---|---|---|---|---|---|
 | Shape Design: Show ShapeSheet (shape, page, document) | S14 | paneSheet | partial | partial | Read only, shapes only; sits in View, not Developer | P2 |
 | Shape Design: Geometry (Freeform, Arc, Pencil) | S14 | drawTools | missing | present | | P3 |
-| Shape Design: Shape Name | S14 | - | missing | missing | | P3 |
+| Shape Design: Shape Name | S14 | - | present | present | Desktop: the Name field of the inspector | P3 |
 | Shape Design: Behavior, Protection | S14 | - | missing | missing | | P3 |
 | Shape Design: Operations (Trim and the other operations) | S18 | opUnion ... opTrim | partial | present | Desktop has them in Home > Arrange; there is no Developer tab | P2 |
 | Stencil: new stencil | S14 | - | missing | missing | Needs stencil writer | P3 |
