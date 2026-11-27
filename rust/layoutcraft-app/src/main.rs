@@ -3162,6 +3162,19 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert_eq!(points(&mut driver).len(), added.len(), "choosing adds nothing");
         driver.key(Key::Delete, Modifiers::NONE);
         assert_eq!(points(&mut driver).len(), before.len(), "{}", driver.app.status);
+        // a point added again and dragged somewhere else keeps its number
+        driver.click(at, Modifiers::NONE);
+        let depth = driver.app.engine.undo_depth();
+        let place = pos2(rect.left() + rect.width() * 0.7, rect.top() + rect.height() * 0.8);
+        let to = driver.app.scene_to_screen(place, driver.app.image_rect(driver.app.last_viewport));
+        driver.drag(at, to);
+        let moved = points(&mut driver);
+        assert_eq!((moved.len(), driver.app.engine.undo_depth()), (before.len() + 1, depth + 1), "{}", driver.app.status);
+        assert!(moved.iter().any(|point| point.0 == new.0 && point.1.distance(place) < 1.5), "{moved:?} {place:?}");
+        // a drag that begins away from every point moves nothing
+        let empty = driver.app.scene_to_screen(pos2(rect.center().x, rect.top() + rect.height() * 0.55), driver.app.image_rect(driver.app.last_viewport));
+        driver.drag(empty, at);
+        assert_eq!((points(&mut driver), driver.app.engine.undo_depth()), (moved, depth + 1), "{}", driver.app.status);
         driver.key(Key::Escape, Modifiers::NONE);
         assert!(driver.app.tool == super::Tool::Select);
         // a turned shape is refused, and said so
@@ -3173,6 +3186,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         driver.click(middle + vec2(7.0, 11.0), Modifiers::NONE);
         assert_eq!(driver.app.engine.undo_depth(), depth);
         assert!(driver.app.status.contains("turned"), "{}", driver.app.status);
+        assert!(driver.app.moving_point.is_none());
     }
 
     #[test]
@@ -4046,6 +4060,8 @@ struct LayoutCraftApp {
     connect_arrows: bool,
     /// The connection point the Connection Point tool has chosen.
     chosen_point: Option<connpoints::ChosenPoint>,
+    /// The connection point being dragged.
+    moving_point: Option<connpoints::ChosenPoint>,
     /// The list of shapes shown beside the connect arrow under the pointer.
     arrow_picker: Option<connectors::ArrowPicker>,
     arrow_shape: Option<String>,
@@ -4152,6 +4168,7 @@ impl LayoutCraftApp {
             show_guides: true,
             connect_arrows: true,
             chosen_point: None,
+            moving_point: None,
             arrow_picker: None,
             arrow_shape: None,
             line_ends_read: None,

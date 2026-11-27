@@ -162,7 +162,7 @@ these are row counts, not a count of every Visio button.
 | Tools: Text (Ctrl+2) | S9, S1 | insertTextBox | present | present | | P1 |
 | Tools: Text Block (Ctrl+Shift+4) | S5, S1 | - | missing | missing | Moves the text block inside a shape | P2 |
 | Tools: Connector (Ctrl+3) | S6, S1 | connectTool | present | present | Drag shape to shape; glue to connection point or whole shape | P0 |
-| Tools: Connection Point (Ctrl+Shift+1) | S1 | connPointTool | partial | present | Desktop: a click adds a point, a click on one chooses it and Delete removes it; no moving of points, no adding on turned or flipped shapes | P1 |
+| Tools: Connection Point (Ctrl+Shift+1) | S1 | connPointTool | partial | present | Desktop: a click adds a point, a click on one chooses it and Delete removes it, a drag moves it; no placing on turned or flipped shapes | P1 |
 | Tools: Rectangle (Ctrl+8), Ellipse (Ctrl+9), Line (Ctrl+6), Arc (Ctrl+7), Freeform (Ctrl+5), Pencil (Ctrl+4) | S1 | drawTools | partial | present | Desktop: rectangle, rounded rectangle, ellipse, diamond, triangle, line and text box; no arc, freeform or pencil | P0 |
 | Tools: Crop (Ctrl+Shift+2) | S1 | - | missing | missing | Picture crop | P3 |
 | Tools: Pan (hand) | none in S11 | handTool | present | present | LayoutCraft addition; Visio's pan is wheel, Ctrl+Shift drag, Pan & Zoom (S11) | P3 |
