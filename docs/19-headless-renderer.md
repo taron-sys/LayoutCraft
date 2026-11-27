@@ -47,6 +47,29 @@ Connectors carry resolved world points, waypoints, arrows and labels.
   145 x 6 against 163 x 32): one was inspected, and its text label is missing
   from our rendering. That is a separate gap. Ink can also sit a few pixels
   differently inside a page of equal size.
+- Line ends 36-41 and 43-45 (issue #68) were not drawn at all; the gallery stopped at 35.
+  Their shapes come from pages rendered by Visio 16.0.14332 through a COM probe: one level
+  1 pt line per page at `EndArrowSize` 6 and 2, `Page.Export` as PNG at 300 dpi, the ink measured
+  in units of the arrow size. 36 and 37 are 32 and 33 with the filled circle of 35, 38 is 34 with
+  a filled circle, 39 and 40 are two filled and two hollow triangles one unit long and one wide,
+  41 is a hollow circle at the tip, 43 two open chevrons, 44 a chevron and a bar, 45 two chevrons
+  and a bar. (Visio's own SVG export is no reference here: it writes 35-38 with the geometry of
+  31-34.) Then, pages of three level 1 pt lines 5 in long, 2 in apart, at sizes 0, 1, 2 and at 3,
+  4, 6, `Page.Export` at 96 dpi, Visio against `render_vsdx`, height in pixels:
+
+  | Line end | Sizes 0, 1, 2 | Sizes 3, 4, 6 |
+  |---|---|---|
+  | none | 385 / 385 | 385 / 385 |
+  | 36, 37 | 391 / 391 | 410 / 410 |
+  | 38 | 394 / 394 | 420 / 420 |
+  | 39 | 392 / 392 | 415 / 415 |
+  | 40, 43, 44, 45 | 393 / 393 | 416 / 416 |
+  | 41 | 391 / 391 | 409 / 409 |
+
+  Widths are equal (481), except 36 and 37 at the larger sizes (483 against 481), as for 35
+  already. Under the circle ends (35-38, 41) the line still runs to the tip, where Visio stops it at
+  the circle; that is a separate gap. Connectors still import only kinds 1-35 as gallery ends
+  (`gallery_line_end`), so a connector with one of the later kinds keeps its old arrowhead.
 - The SVG keeps an exact `viewBox` and uses integer `width`/`height`; `resvg`
   rasterizes at 1× or a requested scale.
 

@@ -2021,7 +2021,7 @@ pub(crate) fn part_arrow_extent(part: &crate::scene::ScenePart) -> Vec<(f64, f64
                 let (bx, by, half) = (tip.0 - ux * side, tip.1 - uy * side, side / 2.0);
                 points.extend([tip, (bx - uy * half, by + ux * half), (bx + uy * half, by - ux * half)]);
             }
-            1..=35 => gallery_end_extent(&mut points, kind, index, tip, (ux, uy), weight_pt, part.stroke_width),
+            1..=41 | 43..=45 => gallery_end_extent(&mut points, kind, index, tip, (ux, uy), weight_pt, part.stroke_width),
             42 => {
                 let radius = dot_diameter_px(index, weight_pt) / 2.0;
                 push_padded(&mut points, (tip.0 - ux * radius, tip.1 - uy * radius), radius);
@@ -2074,8 +2074,9 @@ enum ArrowItem {
     Circle(f64, f64, ArrowStyle),
 }
 
-/// Visio's line-end gallery (EndArrow/BeginArrow 1-35) in units of the arrow size, tip at the origin,
-/// +x pointing along the line, +y to its right; measured from Visio 16.
+/// Visio's line-end gallery (EndArrow/BeginArrow 1-45 but the dot, 42, which has its own rule) in units of the arrow
+/// size, tip at the origin, +x pointing along the line, +y to its right; 1-35 measured from Visio 16, 36-45 from pages
+/// rendered by Visio 2021 (docs/19-headless-renderer.md).
 fn arrow_items(kind: u32) -> Option<&'static [ArrowItem]> {
     use ArrowItem::{Circle, Path};
     use ArrowStyle::{Fill, Hollow, Stroke};
@@ -2117,11 +2118,25 @@ fn arrow_items(kind: u32) -> Option<&'static [ArrowItem]> {
         ],
         34 => &[Path("M-0.9,0L-2,-0.57L-3.1,0L-2,0.57Z", Hollow), Circle(-0.44, 0.38, Hollow)],
         35 => &[Path("M-1.17,-0.4L-1.17,0.4", Stroke), Circle(-0.47, 0.42, Fill)],
+        // 36-38 are 32-34 with the circle filled as in 35
+        36 => &[Path("M-1.58,-0.4L-1.58,0.4M-1.20,-0.4L-1.20,0.4", Stroke), Circle(-0.47, 0.42, Fill)],
+        37 => &[
+            Path("M-1.96,-0.4L-1.96,0.4M-1.57,-0.4L-1.57,0.4M-1.14,-0.4L-1.14,0.4", Stroke),
+            Circle(-0.47, 0.42, Fill),
+        ],
+        38 => &[Path("M-0.9,0L-2,-0.57L-3.1,0L-2,0.57Z", Hollow), Circle(-0.44, 0.38, Fill)],
+        39 => &[Path("M0,0L-1,-0.5L-1,0.5ZM-1,0L-2,-0.5L-2,0.5Z", Fill)],
+        // the second triangle is drawn first so that the first one's outline lies over it where they meet
+        40 => &[Path("M-1,0L-2,-0.5L-2,0.5Z", Hollow), Path("M0,0L-1,-0.5L-1,0.5Z", Hollow)],
+        41 => &[Circle(-0.42, 0.38, Hollow)],
+        43 => &[Path("M-1,-0.5L0,0L-1,0.5M-2,-0.5L-1,0L-2,0.5", Stroke)],
+        44 => &[Path("M-1,-0.5L0,0L-1,0.5M-1.55,-0.4L-1.55,0.4", Stroke)],
+        45 => &[Path("M-1,-0.5L0,0L-1,0.5M-2,-0.5L-1,0L-2,0.5M-2.55,-0.4L-2.55,0.4", Stroke)],
         _ => return None,
     })
 }
 
-/// One gallery line end (kind 1-35, size index `index`) with its tip at `tip`, pointing along the unit vector `dir`.
+/// One gallery line end (kind 1-41 or 43-45, size index `index`) with its tip at `tip`, pointing along the unit vector `dir`.
 #[allow(clippy::too_many_arguments)]
 fn draw_gallery_end(out: &mut String, kind: u32, index: usize, tip: (f64, f64), dir: (f64, f64), weight_pt: f64, stroke_width: f64, fill: &str) {
     let Some(items) = arrow_items(kind) else { return };
@@ -2181,7 +2196,7 @@ fn render_part_arrows(out: &mut String, part: &crate::scene::ScenePart) {
                     fill
                 ));
             }
-            1..=35 => draw_gallery_end(out, kind, index, tip, (ux, uy), weight_pt, part.stroke_width, &fill),
+            1..=41 | 43..=45 => draw_gallery_end(out, kind, index, tip, (ux, uy), weight_pt, part.stroke_width, &fill),
             42 => {
                 let diameter = dot_diameter_px(index, weight_pt);
                 out.push_str(&format!(
