@@ -983,6 +983,31 @@ fn theme_swatches(ui: &mut egui::Ui, colours: &serde_json::Value) {
     }
 }
 
+/// A ribbon command with its icon over its name, as high as a group.
+fn large_button(ui: &mut egui::Ui, icon: &egui::TextureHandle, label: &str, enabled: bool, selected: bool) -> egui::Response {
+    ui.add_enabled_ui(enabled, |ui| {
+        // names of more than one word may take two lines
+        let mut job = egui::text::LayoutJob::simple(label.to_string(), egui::TextStyle::Button.resolve(ui.style()), egui::Color32::PLACEHOLDER, 74.0);
+        job.halign = egui::Align::Center;
+        let galley = ui.painter().layout_job(job);
+        let width = (galley.size().x + 12.0).max(46.0);
+        let (rect, response) = ui.allocate_exact_size(egui::vec2(width, ribbon::ITEMS_HEIGHT), egui::Sense::click());
+        response.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, selected, label));
+        let visuals = ui.style().interact_selectable(&response, selected);
+        if selected || response.hovered() || response.has_focus() {
+            ui.painter().rect(rect, visuals.corner_radius, visuals.weak_bg_fill, visuals.bg_stroke, egui::StrokeKind::Inside);
+        }
+        let image = egui::Rect::from_center_size(egui::pos2(rect.center().x, rect.top() + 17.0), egui::vec2(28.0, 28.0));
+        let tint = if enabled { egui::Color32::WHITE } else { egui::Color32::from_white_alpha(110) };
+        ui.painter().image(icon.id(), image, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), tint);
+        // centred lines are laid out around x = 0
+        let at = egui::pos2(rect.center().x, rect.top() + 33.0);
+        ui.painter().galley(at, galley, visuals.text_color());
+        response
+    })
+    .inner
+}
+
 /// The `Engine::page_op` number that applies a theme (or, with `variant`, a colour variant) to every page or to one page.
 fn theme_op(variant: bool, all_pages: bool) -> i32 {
     match (variant, all_pages) {
@@ -2371,7 +2396,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
             self.drawn
                 .iter()
                 .filter_map(|clipped| match &clipped.shape {
-                    egui::Shape::Text(shown) if shown.galley.text() == wanted => Some(egui::Rect::from_min_size(shown.pos, shown.galley.size())),
+                    egui::Shape::Text(shown) if shown.galley.text() == wanted => Some(shown.galley.rect.translate(shown.pos.to_vec2())),
                     _ => None,
                 })
                 .collect()
@@ -3496,6 +3521,22 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         driver.frames(6);
         assert_eq!(driver.app.engine.undo_depth(), before.1 + 1, "{}", driver.app.status);
         assert!(driver.app.theme_preview.is_none());
+    }
+
+    #[test]
+    fn the_main_command_of_a_group_is_large_and_the_group_names_stand_on_one_line() {
+        let (mut driver, _) = Driver::new();
+        let names = ["Clipboard", "Tools", "Editing"];
+        let tops: Vec<f32> = names.iter().map(|name| driver.texts(name).last().unwrap_or_else(|| panic!("{name}")).top()).collect();
+        assert!(tops.iter().all(|top| (top - tops[0]).abs() < 1.0), "{tops:?}");
+        // Paste is large: its name stands lower than the name of the small command beside it, and clicking its icon works
+        let paste = driver.texts("Paste")[0];
+        let copy = driver.texts("Copy").first().copied();
+        assert!(copy.is_none_or(|copy| paste.top() > copy.top() + 10.0), "{paste:?} {copy:?}");
+        driver.app.status.clear();
+        driver.click(pos2(paste.center().x, paste.top() - 14.0), Modifiers::NONE);
+        driver.frames(3);
+        assert!(!driver.app.status.is_empty(), "a click on the picture reaches the command");
     }
 
     #[test]
@@ -4787,6 +4828,8 @@ struct LayoutCraftApp {
     ribbon_collapsed: bool,
     ribbon_peek: bool,
     ribbon_compact: bool,
+    /// The command being drawn is the large one of its group.
+    ribbon_large: bool,
     /// Installed font families for the picker (listed on first use) and the picker's search text.
     font_list: Option<Vec<String>>,
     font_filter: String,
@@ -4985,6 +5028,7 @@ impl LayoutCraftApp {
             ribbon_collapsed: false,
             ribbon_peek: false,
             ribbon_compact: false,
+            ribbon_large: false,
             font_list: None,
             font_filter: String::new(),
             font_warnings: Vec::new(),
@@ -6848,11 +6892,15 @@ impl LayoutCraftApp {
                     }
                 }
                 let group_ui = ui.vertical(|ui| {
+                    let large: Vec<bool> = cells.iter().map(|cell| matches!(cell, Cell::Command(id) if ribbon::is_large(id))).collect();
                     let items = ui.horizontal_top(|ui| {
-                        for column in 0..ribbon::grid_columns(cells.len()) {
+                        // every group is as high as its tallest, so the names under them stand on one line
+                        ui.set_min_height(ribbon::ITEMS_HEIGHT);
+                        ui.spacing_mut().interact_size.y = (ribbon::ITEMS_HEIGHT - ui.spacing().item_spacing.y) / 2.0;
+                        for column in ribbon::columns(&large) {
                             ui.vertical(|ui| {
-                                for row in 0..2 {
-                                    let Some(cell) = cells.get(ribbon::grid_index(column, row)) else { continue };
+                                for index in column {
+                                    let cell = &cells[index];
                                     match cell {
                                         Cell::Select => {
                                             let selecting = self.tool == Tool::Select;
@@ -6860,7 +6908,13 @@ impl LayoutCraftApp {
                                                 self.tool = Tool::Select;
                                             }
                                         }
-                                        Cell::Command(id) => ui.horizontal(|ui| self.ribbon_button(ui, ctx, id, action)).inner,
+                                        Cell::Command(id) => {
+                                            ui.horizontal(|ui| {
+                                                self.ribbon_large = large[index];
+                                                self.ribbon_button(ui, ctx, id, action);
+                                                self.ribbon_large = false;
+                                            });
+                                        }
                                         // the two galleries stand in the ribbon as pictures, with the list of names after them
                                         Cell::Menu(_, ids) if matches!(ids.as_slice(), [id] if id == "themeGallery" || id == "variantGallery") => {
                                             ui.horizontal(|ui| {
@@ -7004,8 +7058,16 @@ impl LayoutCraftApp {
             return;
         }
         if id == "pageTools" {
-            for page_id in ["pageAdd", "pageDup", "pageRename", "pageDel", "pageLeft", "pageRight"] {
-                self.ribbon_button(ui, ctx, page_id, action);
+            // the new page large, the other page commands two to a column beside it
+            self.ribbon_large = true;
+            self.ribbon_button(ui, ctx, "pageAdd", action);
+            self.ribbon_large = false;
+            for pair in [["pageDup", "pageRename"], ["pageDel", "pageLeft"], ["pageRight", ""]] {
+                ui.vertical(|ui| {
+                    for page_id in pair.into_iter().filter(|page_id| !page_id.is_empty()) {
+                        ui.horizontal(|ui| self.ribbon_button(ui, ctx, page_id, action));
+                    }
+                });
             }
             return;
         }
@@ -7034,7 +7096,9 @@ impl LayoutCraftApp {
             || (native == Some(ribbon::Native::ShowGuides) && self.show_guides)
             || (native == Some(ribbon::Native::ConnectArrows) && self.connect_arrows);
         let compact = self.ribbon_compact;
+        let large = std::mem::take(&mut self.ribbon_large);
         let response = match icon.and_then(|name| self.icon_texture(ctx, &name)) {
+            Some(texture) if large => large_button(ui, &texture, &label, enabled, selected),
             Some(texture) => {
                 let image = egui::Image::new(egui::load::SizedTexture::new(texture.id(), egui::vec2(18.0, 18.0)));
                 let button = if compact { egui::Button::image(image) } else { egui::Button::image_and_text(image, label.clone()) };

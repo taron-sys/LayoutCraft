@@ -68,19 +68,25 @@ pub fn is_compact(width: f32) -> bool {
     width < COMPACT_BELOW
 }
 
-/// The number of columns of a group of `items` cells laid out in two rows.
-pub fn grid_columns(items: usize) -> usize {
-    items.div_ceil(2)
+/// The height of a group's commands: a large button, or two small ones above each other.
+pub const ITEMS_HEIGHT: f32 = 62.0;
+
+/// The commands shown large (icon over name, the full height of the group): the main command of a group.
+pub fn is_large(id: &str) -> bool {
+    matches!(id, "paste" | "pageSetup" | "pageAdd" | "changeShapeBtn" | "insertHyperlink" | "insertTextBox" | "dataBtn" | "checkDiagram" | "newComment" | "reportBtn" | "fullScreen" | "newBtn" | "exportBtn" | "docPropsBtn")
 }
 
-/// The cell index of (column, row) in a group laid out column after column over two rows.
-pub fn grid_index(column: usize, row: usize) -> usize {
-    column * 2 + row
-}
-
-/// The (row, column) of item `index`: the first item top left, the second under it, the third top of the next column ...
-pub fn grid_cell(index: usize) -> (usize, usize) {
-    (index % 2, index / 2)
+/// The columns of a group, as lists of cell indices: a large cell has a column to itself, small cells go two to a column,
+/// the first on top. The order of the cells is kept.
+pub fn columns(large: &[bool]) -> Vec<Vec<usize>> {
+    let mut columns: Vec<Vec<usize>> = Vec::new();
+    for (index, is_large) in large.iter().enumerate() {
+        match columns.last_mut() {
+            Some(column) if !is_large && column.len() == 1 && !large[column[0]] => column.push(index),
+            _ => columns.push(vec![index]),
+        }
+    }
+    columns
 }
 
 /// What the native app does for a web command id (the ids of `ribbon.js`).
@@ -378,13 +384,13 @@ pub fn label(id: &str) -> String {
 #[cfg(test)]
 mod tests {
     #[test]
-    fn a_group_fills_two_rows_column_after_column() {
-        assert_eq!((0..5).map(grid_cell).collect::<Vec<_>>(), [(0, 0), (1, 0), (0, 1), (1, 1), (0, 2)]);
-        assert_eq!([0, 1, 2, 3, 4, 7].map(grid_columns), [0, 1, 1, 2, 2, 4]);
-        for index in 0..9 {
-            let (row, column) = grid_cell(index);
-            assert_eq!(grid_index(column, row), index);
-        }
+    fn small_commands_stack_in_pairs_and_a_large_one_has_its_column() {
+        assert_eq!(columns(&[false; 5]), [vec![0, 1], vec![2, 3], vec![4]]);
+        assert_eq!(columns(&[true, false, false, false]), [vec![0], vec![1, 2], vec![3]]);
+        // a half-filled column stays half-filled when a large command follows, and nothing joins the large one
+        assert_eq!(columns(&[false, true, false]), [vec![0], vec![1], vec![2]]);
+        assert_eq!(columns(&[true, true]), [vec![0], vec![1]]);
+        assert!(columns(&[]).is_empty());
     }
 
     #[test]
