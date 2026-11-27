@@ -63,3 +63,77 @@ fn a_drawing_without_membership_has_no_containers() {
     let (engine, _) = drawing(|_| Vec::new());
     assert!(page(&engine).containers.is_empty() && page(&engine).shapes.iter().all(|shape| shape.containers.is_empty()));
 }
+
+/// The frame holding the first two shapes (the second one also stated from its own end), the fourth shape outside.
+fn framed() -> (Engine, Vec<String>) {
+    drawing(|ids| {
+        vec![
+            (0, format!("SUM(DEPENDSON(1,{},{}))", sheet(&ids[1]), sheet(&ids[2]))),
+            (1, format!("SUM(DEPENDSON(4,{}))", sheet(&ids[0]))),
+            (2, format!("SUM(DEPENDSON(4,{}))", sheet(&ids[0]))),
+        ]
+    })
+}
+
+fn present(engine: &Engine) -> Vec<String> {
+    page(engine).shapes.iter().filter_map(|shape| shape.visio_id.clone()).collect()
+}
+
+fn xml(engine: &Engine) -> String {
+    let package = engine.package.as_ref().unwrap();
+    package.text(&package.pages().unwrap()[0].part).unwrap().to_string()
+}
+
+#[test]
+fn deleting_a_member_takes_its_reference_out_of_the_container() {
+    let (mut engine, ids) = framed();
+    engine.edit(0, 4, &ids[1], 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+    assert!(!xml(&engine).contains(&sheet(&ids[1])), "no cell names the deleted shape");
+    assert_eq!(page(&engine).containers[0]["members"], serde_json::json!([ids[2]]));
+    // the last member: the term stays, empty, and the container has no record
+    engine.edit(0, 4, &ids[2], 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+    assert!(page(&engine).containers.is_empty() && xml(&engine).contains("DEPENDSON(1)"));
+    assert!(present(&engine).contains(&ids[0]), "the container stays");
+}
+
+#[test]
+fn deleting_a_container_deletes_what_it_holds_in_one_step() {
+    let (mut engine, ids) = framed();
+    let before = (present(&engine), engine.undo_depth());
+    engine.edit(0, 4, &ids[0], 0.0, 0.0, 0.0, 0.0, 0).unwrap();
+    assert_eq!(present(&engine), [ids[3].clone()]);
+    assert_eq!(engine.undo_depth(), before.1 + 1);
+    engine.undo().unwrap();
+    assert_eq!(present(&engine), before.0);
+    assert_eq!(page(&engine).containers.len(), 1);
+}
+
+#[test]
+fn a_pasted_container_brings_its_members_and_holds_the_copies() {
+    let (mut engine, ids) = framed();
+    assert_eq!(engine.copy(0, &[ids[0].clone()]).unwrap(), 3);
+    let made = engine.paste(0, 0.5, -0.5).unwrap();
+    assert_eq!(made.len(), 3);
+    let page = page(&engine);
+    assert_eq!(page.containers.len(), 2, "{:?}", page.containers);
+    let copy = page.containers.iter().find(|record| record["visioId"].as_str() == Some(made[0].as_str())).expect("the copy is a container");
+    assert_eq!(copy["members"], serde_json::json!(made[1..]));
+    let original = page.containers.iter().find(|record| record["visioId"].as_str() == Some(ids[0].as_str())).unwrap();
+    assert_eq!(original["members"], serde_json::json!([ids[1], ids[2]]), "the originals are unchanged");
+}
+
+#[test]
+fn a_member_copied_alone_is_not_in_the_container() {
+    let (mut engine, ids) = framed();
+    engine.copy(0, &[ids[1].clone()]).unwrap();
+    let made = engine.paste(0, 0.5, -0.5).unwrap();
+    assert!(of(page(&engine), &made[0]).containers.is_empty(), "{:?}", page(&engine).containers);
+    assert_eq!(page(&engine).containers[0]["members"], serde_json::json!([ids[1], ids[2]]));
+}
+
+#[test]
+fn nested_containers_go_with_the_outer_one() {
+    let (engine, ids) = drawing(|ids| vec![(0, format!("SUM(DEPENDSON(1,{}))", sheet(&ids[1]))), (1, format!("SUM(DEPENDSON(1,{}))", sheet(&ids[2])))]);
+    assert_eq!(engine.with_contents(0, &[ids[0].clone()]), ids[..3]);
+    assert_eq!(engine.with_contents(0, &[ids[3].clone(), ids[3].clone()]), [ids[3].clone()]);
+}

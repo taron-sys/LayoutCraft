@@ -111,8 +111,9 @@ reference to a shape the page does not have is left out. The page gets `containe
 related }]` (`kind` is `list` for a record with items); members get `shape.containers` / `shape.listOf` (connectors
 `containers`). A shape can belong to several containers (a CFF task is in the pool list, a lane and a phase).
 
-Editing does not use this yet: moving, deleting or copying a container does not carry its members, and membership is not
-written back (the browser editor that did was removed, `docs/42-javascript-removal.md`).
+Deleting a container or list deletes what it holds, and copying one copies what it holds, the copies naming each other;
+a deleted shape's references leave the other shapes' cells ([45](45-containers.md)). Moving a container does not carry its
+members yet, and moving a shape in or out does not change membership.
 
 ## Geometry
 

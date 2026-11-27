@@ -54,6 +54,45 @@ pub(crate) fn parse_relationships(formula: &str) -> Vec<(u32, Vec<String>)> {
     terms
 }
 
+/// `xml` (a page, or one shape) with the references that `keep` refuses taken out of its `Relationships` cells; the empty
+/// term stays, as Visio leaves it (`docs/45-containers.md`). `None` when nothing was taken out.
+pub(crate) fn without_references(xml: &str, keep: impl Fn(&str) -> bool) -> Option<String> {
+    const REF: &str = ",Sheet.";
+    const END: &str = "!SheetRef()";
+    let mut out = String::with_capacity(xml.len());
+    let (mut done, mut from, mut changed) = (0usize, 0usize, false);
+    while let Some(found) = xml[from..].find("Relationships") {
+        let at = from + found;
+        from = at + "Relationships".len();
+        // only the cell of that name: its element, up to the end of the tag
+        if !(xml[..at].ends_with("N='") || xml[..at].ends_with("N=\"")) {
+            continue;
+        }
+        let end = xml[at..].find('>').map_or(xml.len(), |n| at + n);
+        let mut cell = String::with_capacity(end - at);
+        let mut rest = &xml[at..end];
+        while let Some(next) = rest.find(REF) {
+            let after = &rest[next + REF.len()..];
+            let digits = after.len() - after.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+            if digits > 0 && after[digits..].starts_with(END) && !keep(&after[..digits]) {
+                cell.push_str(&rest[..next]);
+                rest = &after[digits + END.len()..];
+                changed = true;
+            } else {
+                cell.push_str(&rest[..next + REF.len()]);
+                rest = after;
+            }
+        }
+        cell.push_str(rest);
+        out.push_str(&xml[done..at]);
+        out.push_str(&cell);
+        done = end;
+        from = end;
+    }
+    out.push_str(&xml[done..]);
+    changed.then_some(out)
+}
+
 #[derive(Default)]
 struct Record {
     list: bool,
@@ -130,7 +169,18 @@ pub(crate) fn apply(resolved: &[ResolvedShape], shapes: &mut [Shape], connectors
 
 #[cfg(test)]
 mod tests {
-    use super::parse_relationships;
+    use super::{parse_relationships, without_references};
+
+    #[test]
+    fn only_the_refused_references_leave_the_relationships_cells() {
+        let xml = "<Shape ID='1'><Cell N='Relationships' V='0' F='SUM(DEPENDSON(1,Sheet.7!SheetRef(),Sheet.70!SheetRef()),DEPENDSON(4,Sheet.7!SheetRef()))'/><Cell N='Width' F='SUM(1,Sheet.7!SheetRef())'/></Shape>";
+        let pruned = without_references(xml, |id| id != "7").unwrap();
+        assert!(pruned.contains("F='SUM(DEPENDSON(1,Sheet.70!SheetRef()),DEPENDSON(4))'"), "{pruned}");
+        assert!(pruned.contains("N='Width' F='SUM(1,Sheet.7!SheetRef())'"), "another cell is left alone");
+        assert!(without_references(xml, |_| true).is_none());
+        let double = xml.replace('\'', "\"");
+        assert!(without_references(&double, |id| id != "70").is_some_and(|out| !out.contains("Sheet.70!")));
+    }
 
     #[test]
     fn each_term_keeps_its_kind_and_sheets_and_other_text_is_passed_over() {
