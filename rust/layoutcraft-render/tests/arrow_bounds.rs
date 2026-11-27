@@ -35,6 +35,23 @@ fn an_arrowhead_of_a_line_shape_is_inside_the_picture() {
     }
 }
 
+/// The gallery runs to 45 (issue #68): each of the line ends after 35 is drawn and is inside the picture, as the ones before.
+#[test]
+fn line_ends_after_35_are_drawn_and_inside_the_picture() {
+    let svg = |page: serde_json::Value| {
+        let document: Document = serde_json::from_value(serde_json::json!({ "pages": [page] })).unwrap();
+        to_svg(&scene_from_document(&document, 0).unwrap())
+    };
+    let bare = svg(line_shape(None, 0.0));
+    let (bare_top, bare_bottom) = picture_height(line_shape(None, 0.0));
+    for kind in (36..=41).chain(43..=45) {
+        let drawn = svg(line_shape(Some(kind), 0.0));
+        assert!(drawn.len() > bare.len() + 40 && drawn.contains("<g transform=\"translate("), "kind {kind} has no line end: {drawn}");
+        let (top, bottom) = picture_height(line_shape(Some(kind), 0.0));
+        assert!(top < bare_top - 2.0 && bottom > bare_bottom + 2.0, "kind {kind}: {top}..{bottom} against {bare_top}..{bare_bottom}");
+    }
+}
+
 #[test]
 fn an_arrowhead_of_a_connector_is_inside_the_picture() {
     let page = |arrow: &str| {
