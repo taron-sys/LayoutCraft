@@ -3928,6 +3928,30 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_insert_tab_puts_the_selection_in_a_new_container() {
+        let (mut driver, ids) = Driver::new();
+        let tab = driver.texts("Insert")[0];
+        driver.click(tab.center(), Modifiers::NONE);
+        driver.frames(3);
+        let press = |driver: &mut Driver| {
+            let at = driver.texts("Container")[0];
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let depth = driver.app.engine.undo_depth();
+        press(&mut driver);
+        assert_eq!(driver.app.engine.undo_depth(), depth, "nothing selected: {}", driver.app.status);
+        driver.app.selected = Some(ids[0].clone());
+        driver.app.extra_selected = vec![ids[1].clone()];
+        driver.frames(3);
+        press(&mut driver);
+        let made = driver.app.selected.clone().expect("the container is selected");
+        assert!(!ids.contains(&made) && driver.app.extra_selected.is_empty(), "{}", driver.app.status);
+        assert_eq!(driver.app.engine.container_members(0, &made).map(|members| members.len()), Some(2));
+        assert_eq!(driver.app.engine.undo_depth(), depth + 1);
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -6088,6 +6112,22 @@ impl LayoutCraftApp {
         self.status = format!("{} shape(s) of the container selected", self.all_selected().len());
     }
 
+    /// A new container round the selection (a picked part stands for its group); it becomes the selection.
+    fn insert_container(&mut self, ctx: &egui::Context) {
+        if self.selected.is_none() {
+            self.status = "Select the shapes to put in a container first.".to_string();
+            return;
+        }
+        let ids = self.whole(&self.all_selected());
+        match self.engine.insert_container(self.page_index, &ids) {
+            Ok(id) => {
+                self.extra_selected.clear();
+                self.finish_edit(ctx, Ok(()), "Put the shapes in a new container", Some(id));
+            }
+            Err(error) => self.status = format!("Could not make a container: {error}"),
+        }
+    }
+
     fn disband_container(&mut self, ctx: &egui::Context) {
         let Some((id, _)) = self.selected_container() else {
             self.status = "Select a container first.".to_string();
@@ -7964,6 +8004,7 @@ impl LayoutCraftApp {
             N::ShapeFormulas => Action::ShapeFormulas,
             N::Styles => Action::Styles,
             N::SizePosition => Action::SizePosition,
+            N::InsertContainer => Action::InsertContainer,
             N::FullScreen => Action::FullScreen,
             N::ShapeData => Action::ShapeData,
             N::Find => Action::Find,
@@ -11616,6 +11657,7 @@ impl LayoutCraftApp {
             Some(Action::StyleSettings) => self.go_to_style_settings(),
             Some(Action::SelectContents) => self.select_contents(),
             Some(Action::DisbandContainer) => self.disband_container(&ctx),
+            Some(Action::InsertContainer) => self.insert_container(&ctx),
             Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
                 self.zoom = zoom_for_percent(f64::from(percent), self.raster_scale);
@@ -11665,6 +11707,8 @@ enum Action {
     SelectContents,
     /// Remove the selected container and keep its contents.
     DisbandContainer,
+    /// Put a new container round the selected shapes.
+    InsertContainer,
     /// Make the shown page a background page: it leaves the tabs.
     PageToBackground,
     /// Show or hide the Styles window.

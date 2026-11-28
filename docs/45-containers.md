@@ -45,6 +45,10 @@ container to fit what is dropped, lists. The desktop app frames the container a 
 status bar. A container's right-click menu offers Select contents and Disband container (the container
 goes, its contents stay and stop being members).
 
+Insert > Container puts a new container, in LayoutCraft's own plain look, behind the selected shapes: a margin of 3 mm, a
+heading above, `msvStructureType`, the margin, resize and lock cells, and membership on both ends. Reading it back in
+LayoutCraft is tested; that Visio accepts it as a container has **not** been verified yet.
+
 ## Not established
 
 - Moving: moving a selection that holds only the container (a page selection or the window's selection) did **not** move the

@@ -1059,6 +1059,27 @@ impl Engine {
         self.commit(bytes)
     }
 
+    /// Put a new container round the shapes `ids` of `page` (those that are page-level shapes), ONE undo step; returns its
+    /// ID. It lies behind them and is headed "Container".
+    pub fn insert_container(&mut self, page: usize, ids: &[String]) -> Result<String, String> {
+        use layoutcraft_vsdx::containers::{create, HEADING, MARGIN};
+        let boxes = self.boxes(page);
+        let held: Vec<String> = ids
+            .iter()
+            .filter(|id| self.document.as_ref().and_then(|d| d.pages.get(page)).is_some_and(|p| p.shapes.iter().any(|shape| shape.visio_id.as_deref() == Some(id.as_str()) && shape.group.is_none())) || self.document.as_ref().and_then(|d| d.pages.get(page)).is_some_and(|p| p.groups.iter().any(|group| group["visioId"].as_str() == Some(id.as_str()) && group["parentId"].is_null())))
+            .cloned()
+            .collect();
+        let around = held.iter().filter_map(|id| boxes.get(id)).copied().reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3))).ok_or("select the shapes to put in a container")?;
+        let package = self.package.as_ref().ok_or("no document")?;
+        let height = package.pages().map_err(|e| e.to_string())?.get(page).ok_or("no such page")?.height.unwrap_or(11.0);
+        // scene pixels (96 to the inch, y down) to page inches (y up)
+        let (left, right) = (around.0 / 96.0 - MARGIN, around.2 / 96.0 + MARGIN);
+        let (bottom, top) = (height - around.3 / 96.0 - MARGIN, height - around.1 / 96.0 + MARGIN + HEADING);
+        let (bytes, id) = create(package, page, &held, left, bottom, right - left, top - bottom, "Container").map_err(|e| e.to_string())?;
+        self.commit(bytes)?;
+        Ok(id)
+    }
+
     /// For a drawn member of a group that has no shape of its own on the page (a group, or a container, with neither geometry
     /// nor text): the ID of that whole group, which a host acts on when the member is picked. `None` for every other shape.
     pub fn group_of_part(&self, page: usize, id: &str) -> Option<String> {

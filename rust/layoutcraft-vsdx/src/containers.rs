@@ -9,6 +9,7 @@ use layoutcraft_model::{Connector, Shape};
 use serde_json::{json, Value};
 
 use crate::shapes::ResolvedShape;
+use crate::{Error, Package, Result};
 
 const MEMBERS: u32 = 1;
 const ITEMS: u32 = 2;
@@ -155,6 +156,58 @@ pub fn page_membership(page_xml: &str) -> (BTreeMap<String, String>, BTreeMap<St
         }
     }
     (formulas, declared)
+}
+
+/// The room a new container leaves round what it holds, and above it for its heading, in inches.
+pub const MARGIN: f64 = 0.118_110_236_220_472;
+pub const HEADING: f64 = 0.3;
+
+/// Put a new container round shapes of page `page_index`, behind them, in LayoutCraft's own plain look: the box (`left`,
+/// `bottom`, `width`, `height`, page inches, y up) with its heading at the top. The container and `members` name each
+/// other as Visio writes it (`docs/45-containers.md`). Returns the new package and the container's ID.
+pub fn create(package: &Package, page_index: usize, members: &[String], left: f64, bottom: f64, width: f64, height: f64, heading: &str) -> Result<(Vec<u8>, String)> {
+    let part = package.pages()?.get(page_index).ok_or_else(|| Error(format!("page {page_index} is out of range")))?.part.clone();
+    let id = crate::writer::next_shape_id(package, page_index)?;
+    let (mut formulas, _) = page_membership(&package.text(&part)?);
+    let mut own = None;
+    for member in members.iter().rev() {
+        own = Some(with_membership(own.as_deref(), MEMBERS, member, true));
+    }
+    let own = own.ok_or_else(|| Error("a new container needs a shape to hold".to_string()))?;
+    let outline = crate::draw::polygon(&[(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)], width, height);
+    let shape = crate::draw::closed_shape_xml(id, &format!("Container.{id}"), left, bottom, width, height, false, None, &outline, "", None)
+        .replace("V='#ffffff'", "V='#f1f4f8'")
+        .replace("<Cell N='LineColor' V='#000000'/>", "<Cell N='LineColor' V='#4a5a70'/>");
+    let user = |name: &str, value: &str, unit: &str| format!("<Row N='{name}'><Cell N='Value' V='{value}'{unit}/></Row>");
+    let cells = format!(
+        "<Cell N='VerticalAlign' V='0'/><Cell N='Relationships' V='0' F='{own}'/><Section N='User'>{}{}{}{}{}</Section>",
+        user("msvStructureType", "Container", " U='STR'"),
+        user("msvShapeCategories", "ContainerStyleDefaults", " U='STR'"),
+        user("msvSDContainerMargin", &MARGIN.to_string(), " U='MM'"),
+        user("msvSDContainerResize", "1", ""),
+        user("msvSDContainerLocked", "0", " U='BOOL'"),
+    );
+    let escaped = heading.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    // the cells go before the first section, the text last
+    let at = shape.find("<Section ").ok_or_else(|| Error("the container shape has no section".to_string()))?;
+    let end = shape.rfind("</Shape>").ok_or_else(|| Error("the container shape is not closed".to_string()))?;
+    let shape = format!("{}{cells}{}<Text>{escaped}</Text></Shape>", &shape[..at], &shape[at..end]);
+    let mut xml = package.text(&part)?.to_string();
+    // first among the shapes: behind everything it holds
+    let open = xml.find("<Shapes>").map(|n| n + "<Shapes>".len()).ok_or_else(|| Error("page has no root Shapes element".to_string()))?;
+    xml.insert_str(open, &shape);
+    let mut extras = BTreeMap::new();
+    extras.insert(part, xml.into_bytes());
+    let with_shape = Package::from_bytes(&crate::writer::write_package(package, extras)?)?;
+    let container = id.to_string();
+    let patches: Vec<crate::writer::ShapeCellPatch> = members
+        .iter()
+        .map(|member| {
+            let formula = with_membership(formulas.remove(member).as_deref(), CONTAINED_IN, &container, true);
+            crate::writer::ShapeCellPatch::new(member.clone()).set_with_formula("Relationships", "0", formula)
+        })
+        .collect();
+    Ok((crate::writer::patch_page_cells(&with_shape, page_index, &patches)?, container))
 }
 
 #[derive(Default)]
