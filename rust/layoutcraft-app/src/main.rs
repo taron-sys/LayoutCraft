@@ -3952,6 +3952,44 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_containers_membership_can_be_locked_and_unlocked_from_its_menu() {
+        let (mut driver, ids) = Driver::new();
+        let made = driver.app.engine.insert_container(0, &ids).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        let image = driver.app.image_rect(driver.app.last_viewport);
+        // an empty spot of the container, in its heading
+        let at = driver.app.doc_shape(&made).map(|shape| driver.app.scene_to_screen(pos2((shape.x + shape.w - 8.0) as f32, (shape.y + 8.0) as f32), image)).unwrap();
+        let choose = |driver: &mut Driver, entry: &str| {
+            driver.run(vec![Event::PointerMoved(at)]);
+            for pressed in [true, false] {
+                driver.run(vec![Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: Modifiers::NONE }]);
+            }
+            driver.frames(3);
+            let found = *driver.texts(entry).first().unwrap_or_else(|| panic!("nothing says {entry:?}: {}", driver.app.status));
+            driver.click(found.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let leaves = |driver: &mut Driver| {
+            driver.app.engine.edit(0, 2, &ids[0], 0.0, 4.0, 0.0, 0.0, 0).unwrap();
+            let left = !driver.app.engine.container_members(0, &made).unwrap_or_default().contains(&ids[0]);
+            driver.app.engine.undo().unwrap();
+            driver.app.build_page(&driver.ctx.clone(), false);
+            driver.frames(2);
+            left
+        };
+        assert_eq!(driver.app.engine.container_lock(0, &made), Some(false));
+        assert!(leaves(&mut driver));
+        choose(&mut driver, "Lock container membership");
+        assert_eq!(driver.app.engine.container_lock(0, &made), Some(true), "{}", driver.app.status);
+        assert!(!leaves(&mut driver), "a locked container keeps its members");
+        choose(&mut driver, "Unlock container membership");
+        assert_eq!(driver.app.engine.container_lock(0, &made), Some(false), "{}", driver.app.status);
+        assert_eq!(driver.app.engine.container_lock(0, &ids[0]), None);
+        assert!(driver.app.engine.set_container_lock(0, &ids[0], true).is_err());
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -6126,6 +6164,16 @@ impl LayoutCraftApp {
             }
             Err(error) => self.status = format!("Could not make a container: {error}"),
         }
+    }
+
+    fn lock_container(&mut self, ctx: &egui::Context, locked: bool) {
+        let Some((id, _)) = self.selected_container() else {
+            self.status = "Select a container first.".to_string();
+            return;
+        };
+        let result = self.engine.set_container_lock(self.page_index, &id, locked);
+        let selected = self.selected.clone();
+        self.finish_edit(ctx, result, if locked { "Locked the container: its members stay as they are" } else { "Unlocked the container" }, selected);
     }
 
     fn disband_container(&mut self, ctx: &egui::Context) {
@@ -10483,6 +10531,7 @@ impl eframe::App for LayoutCraftApp {
                 }
                 let has_selection = self.selected.is_some();
                 let is_container = self.selected_container().is_some();
+                let lock = self.selected_container().and_then(|(id, _)| self.engine.container_lock(self.page_index, &id));
                 let can_paste = self.engine.clipboard_count() > 0;
                 if !magnifier {
                     response.context_menu(|ui| {
@@ -10502,6 +10551,10 @@ impl eframe::App for LayoutCraftApp {
                                 ui.separator();
                                 pick(ui, "Select contents", true, Action::SelectContents);
                                 pick(ui, "Disband container", true, Action::DisbandContainer);
+                                // a container with settings of its own can be locked; the entry says what it will do
+                                if let Some(locked) = lock {
+                                    pick(ui, if locked { "Unlock container membership" } else { "Lock container membership" }, true, Action::LockContainer(!locked));
+                                }
                             }
                             ui.separator();
                             pick(ui, "Group", true, Action::Arrange(ArrangeCmd::Group));
@@ -11658,6 +11711,7 @@ impl LayoutCraftApp {
             Some(Action::SelectContents) => self.select_contents(),
             Some(Action::DisbandContainer) => self.disband_container(&ctx),
             Some(Action::InsertContainer) => self.insert_container(&ctx),
+            Some(Action::LockContainer(locked)) => self.lock_container(&ctx, locked),
             Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
                 self.zoom = zoom_for_percent(f64::from(percent), self.raster_scale);
@@ -11709,6 +11763,8 @@ enum Action {
     DisbandContainer,
     /// Put a new container round the selected shapes.
     InsertContainer,
+    /// Lock or unlock the membership of the selected container.
+    LockContainer(bool),
     /// Make the shown page a background page: it leaves the tabs.
     PageToBackground,
     /// Show or hide the Styles window.

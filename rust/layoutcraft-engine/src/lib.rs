@@ -1080,6 +1080,24 @@ impl Engine {
         Ok(id)
     }
 
+    /// Whether the container `id` of `page` says so itself (it has the cells of a container, not only members), and if so
+    /// whether its membership is locked.
+    pub fn container_lock(&self, page: usize, id: &str) -> Option<bool> {
+        let package = self.package.as_ref()?;
+        let part = package.pages().ok()?.get(page)?.part.clone();
+        layoutcraft_vsdx::containers::page_membership(&package.text(&part).ok()?).1.get(id).copied()
+    }
+
+    /// Lock or unlock the membership of the container `id` of `page` (ONE undo step): while it is locked, moving shapes
+    /// neither adds them to it nor takes its members out.
+    pub fn set_container_lock(&mut self, page: usize, id: &str, locked: bool) -> Result<(), String> {
+        self.container_lock(page, id).ok_or_else(|| format!("shape {id} has no container settings of its own"))?;
+        let package = self.package.as_ref().ok_or("no document")?;
+        let patch = layoutcraft_vsdx::writer::ShapeCellPatch::new(id).row_cell("User", "", "msvSDContainerLocked", "Value", if locked { "1" } else { "0" });
+        let bytes = patch_page_cells(package, page, &[patch]).map_err(|e| e.to_string())?;
+        self.commit(bytes)
+    }
+
     /// For a drawn member of a group that has no shape of its own on the page (a group, or a container, with neither geometry
     /// nor text): the ID of that whole group, which a host acts on when the member is picked. `None` for every other shape.
     pub fn group_of_part(&self, page: usize, id: &str) -> Option<String> {

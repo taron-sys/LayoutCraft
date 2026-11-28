@@ -47,7 +47,8 @@ goes, its contents stay and stop being members).
 
 Insert > Container puts a new container, in LayoutCraft's own plain look, behind the selected shapes: a margin of 3 mm, a
 heading above, `msvStructureType`, the margin, resize and lock cells, and membership on both ends. Reading it back in
-LayoutCraft is tested; that Visio accepts it as a container has **not** been verified yet.
+LayoutCraft is tested; that Visio accepts it as a container has **not** been verified yet. A container's right-click menu also locks
+and unlocks its membership (`msvSDContainerLocked`).
 
 ## Not established
 
