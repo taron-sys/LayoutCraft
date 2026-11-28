@@ -3838,6 +3838,35 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_blank_page_of_a_chosen_size_starts_from_the_file_page_after_asking_about_changes() {
+        let (mut driver, _ids) = Driver::new();
+        let open = |driver: &mut Driver, label: &str| {
+            let at = *driver.texts(label).first().unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let page = |driver: &Driver| {
+            (driver.app.engine.document().unwrap().pages[0].shapes.len(), driver.app.texture_size.x, driver.app.texture_size.y)
+        };
+        let before = page(&driver);
+        driver.app.dirty = true;
+        open(&mut driver, "File");
+        open(&mut driver, "A4 portrait");
+        assert_eq!(page(&driver), before, "unsaved changes are asked about first");
+        driver.app.dirty = false;
+        driver.app.pending_open = None;
+        driver.frames(2);
+        open(&mut driver, "File");
+        open(&mut driver, "A4 portrait");
+        let tall = page(&driver);
+        assert!(tall.0 == 0 && tall.2 > tall.1, "{tall:?}");
+        open(&mut driver, "File");
+        open(&mut driver, "A4 landscape");
+        let wide = page(&driver);
+        assert!(wide.1 > wide.2 && (wide.1 - tall.2).abs() < 2.0, "{wide:?} {tall:?}");
+    }
+
+    #[test]
     fn a_click_on_a_part_of_a_group_without_a_body_acts_on_the_whole_group() {
         let (mut driver, ids) = Driver::new();
         driver.app.engine.group_op(0, 0, &ids.join("\n")).unwrap();
@@ -5300,8 +5329,8 @@ struct ShapeMetrics {
 
 #[derive(Clone)]
 enum PendingOpen {
-    /// A new empty drawing.
-    New,
+    /// A new empty drawing of this page width and height (inches), in millimetres or not.
+    New(f64, f64, bool),
     Reload,
     Load(String),
 }
@@ -5517,6 +5546,8 @@ struct LayoutCraftApp {
     open_stencil_shown: Option<usize>,
     /// The masters placed last, newest first, as (stencil, master, name); kept while the app runs.
     recent_masters: Vec<(usize, String, String)>,
+    /// The recently opened drawings shown on the File page, with when each was last changed (read once per visit).
+    recent_dates: Vec<(std::path::PathBuf, String)>,
     /// The Shape Formulas window, while it is open.
     sheet_pane: Option<SheetPane>,
     /// The last press was on the canvas (or all shapes were selected by key); a Tab to apply to the shapes.
@@ -5714,6 +5745,7 @@ impl LayoutCraftApp {
             shapes_minimised: false,
             open_stencil_shown: None,
             recent_masters: Vec::new(),
+            recent_dates: Vec::new(),
             sheet_pane: None,
             canvas_keys: false,
             tab_cycle: None,
@@ -5871,7 +5903,11 @@ impl LayoutCraftApp {
 
     /// A new empty drawing (one page, 11 x 8.5 in), as the web's New.
     fn new_drawing(&mut self, ctx: &egui::Context) {
-        if let Err(error) = self.engine.new_blank(11.0, 8.5, false, "Page-1") {
+        self.new_drawing_sized(ctx, 11.0, 8.5, false);
+    }
+
+    fn new_drawing_sized(&mut self, ctx: &egui::Context, width: f64, height: f64, metric: bool) {
+        if let Err(error) = self.engine.new_blank(width, height, metric, "Page-1") {
             self.status = format!("Could not create a drawing: {error}");
             return;
         }
@@ -7458,7 +7494,7 @@ impl LayoutCraftApp {
             return;
         };
         match pending {
-            PendingOpen::New => self.new_drawing(ctx),
+            PendingOpen::New(width, height, metric) => self.new_drawing_sized(ctx, width, height, metric),
             PendingOpen::Reload => self.reload(ctx),
             PendingOpen::Load(path) => self.load(ctx, Path::new(&path)),
         }
@@ -11986,9 +12022,16 @@ impl LayoutCraftApp {
             Some(Action::Arrange(command)) => self.arrange(&ctx, command),
             Some(Action::NewDrawing) => {
                 if self.dirty {
-                    self.pending_open = Some(PendingOpen::New);
+                    self.pending_open = Some(PendingOpen::New(11.0, 8.5, false));
                 } else {
                     self.new_drawing(&ctx);
+                }
+            }
+            Some(Action::NewSized(width, height, metric)) => {
+                if self.dirty {
+                    self.pending_open = Some(PendingOpen::New(width, height, metric));
+                } else {
+                    self.new_drawing_sized(&ctx, width, height, metric);
                 }
             }
             Some(Action::DocProps) => self.doc_props_open = true,
@@ -12205,6 +12248,8 @@ enum Action {
     /// Put the selected shape on (`true`) or take it off (`false`) the layer with this index.
     LayerShape(usize, bool),
     NewDrawing,
+    /// A new empty drawing of this page width and height (inches), in millimetres or not.
+    NewSized(f64, f64, bool),
     DocProps,
     HelpShortcuts,
     HelpAbout,
