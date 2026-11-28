@@ -37,6 +37,12 @@ A shape that lost its last container, or a container that lost its last member, 
 | Disband | the container goes; the members stay, with `DEPENDSON(4)` |
 | Container dropped around a container | the outer one lists the inner container and the inner one's members; each of those members names both (outer first) |
 
+## What LayoutCraft does with it
+
+A move (one shape or several) that takes a shape wholly into a container adds it, and one that takes a member from inside
+to not wholly inside removes it, as part of the same undo step; locked containers are left alone. Not done: growing a
+container to fit what is dropped, marking the container while dragging, lists.
+
 ## Not established
 
 - Moving: moving a selection that holds only the container (a page selection or the window's selection) did **not** move the

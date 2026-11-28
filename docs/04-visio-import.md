@@ -113,7 +113,7 @@ related }]` (`kind` is `list` for a record with items); members get `shape.conta
 
 Deleting a container or list deletes what it holds, and copying one copies what it holds, the copies naming each other;
 a deleted shape's references leave the other shapes' cells ([45](45-containers.md)). Moving a container or list moves what it holds with it;
-moving a shape in or out does not change membership yet.
+a shape moved wholly into a container joins it, and a member moved so that it no longer lies inside leaves it.
 
 ## Geometry
 

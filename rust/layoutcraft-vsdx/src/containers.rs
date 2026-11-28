@@ -93,6 +93,70 @@ pub(crate) fn without_references(xml: &str, keep: impl Fn(&str) -> bool) -> Opti
     changed.then_some(out)
 }
 
+/// `formula` (a `Relationships` formula, or `None` for a shape that has none) with sheet `id` put into, or taken out of, the
+/// term of `kind`: 1 on a container for a member, 4 on a member for its container. A new reference goes first, an emptied
+/// term stays, as Visio writes them (`docs/45-containers.md`).
+pub fn with_membership(formula: Option<&str>, kind: u32, id: &str, present: bool) -> String {
+    let reference = format!("Sheet.{id}!SheetRef()");
+    let current = formula.filter(|text| text.contains("DEPENDSON(")).unwrap_or("");
+    let term = [format!("DEPENDSON({kind},"), format!("DEPENDSON({kind})")].iter().find_map(|head| current.find(head.as_str()));
+    let Some(start) = term else {
+        if !present {
+            return current.to_string();
+        }
+        let new = format!("DEPENDSON({kind},{reference})");
+        return match current.strip_prefix("SUM(") {
+            Some(rest) => format!("SUM({new},{rest}"),
+            None => format!("SUM({new})"),
+        };
+    };
+    // the term ends at the bracket that closes it: `SheetRef()` opens and closes its own
+    let open = start + "DEPENDSON(".len();
+    let mut depth = 0usize;
+    let end = current[open..]
+        .char_indices()
+        .find(|(_, c)| match c {
+            '(' => {
+                depth += 1;
+                false
+            }
+            ')' if depth == 0 => true,
+            ')' => {
+                depth -= 1;
+                false
+            }
+            _ => false,
+        })
+        .map_or(current.len(), |(index, _)| open + index);
+    let mut parts: Vec<&str> = current[open..end].split(',').map(str::trim).filter(|part| !part.is_empty()).collect();
+    parts.retain(|part| *part != reference);
+    if present {
+        parts.insert(1.min(parts.len()), &reference);
+    }
+    format!("{}{}{}", &current[..open], parts.join(","), &current[end..])
+}
+
+/// What a page's XML says of its shapes for containment: the `Relationships` formula of each shape that has one, and the
+/// shapes that call themselves containers, each with whether it is locked against changes of membership.
+pub fn page_membership(page_xml: &str) -> (BTreeMap<String, String>, BTreeMap<String, bool>) {
+    let (mut formulas, mut declared) = (BTreeMap::new(), BTreeMap::new());
+    let Ok(tree) = roxmltree::Document::parse(page_xml) else { return (formulas, declared) };
+    for shape in tree.descendants().filter(|node| node.tag_name().name() == "Shape") {
+        let Some(id) = shape.attribute("ID") else { continue };
+        let cell = |node: roxmltree::Node<'_, '_>, name: &str| node.children().find(|c| c.tag_name().name() == "Cell" && c.attribute("N") == Some(name)).and_then(|c| c.attribute("V").map(str::to_string));
+        if let Some(formula) = shape.children().find(|c| c.tag_name().name() == "Cell" && c.attribute("N") == Some("Relationships")).and_then(|c| c.attribute("F")) {
+            formulas.insert(id.to_string(), formula.to_string());
+        }
+        let rows: Vec<_> = shape.children().filter(|c| c.tag_name().name() == "Section" && c.attribute("N") == Some("User")).flat_map(|section| section.children()).collect();
+        let value = |name: &str| rows.iter().find(|row| row.attribute("N") == Some(name)).and_then(|row| cell(*row, "Value"));
+        if value("msvStructureType").is_some_and(|kind| kind.trim_matches('"') == "Container") {
+            let locked = value("msvSDContainerLocked").is_some_and(|v| !matches!(v.as_str(), "0" | "FALSE"));
+            declared.insert(id.to_string(), locked);
+        }
+    }
+    (formulas, declared)
+}
+
 #[derive(Default)]
 struct Record {
     list: bool,
@@ -169,7 +233,37 @@ pub(crate) fn apply(resolved: &[ResolvedShape], shapes: &mut [Shape], connectors
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_relationships, without_references};
+    use super::{parse_relationships, with_membership, without_references};
+
+    #[test]
+    fn a_membership_is_added_first_and_removed_from_its_term_only() {
+        let one = with_membership(None, 4, "1", true);
+        assert_eq!(one, "SUM(DEPENDSON(4,Sheet.1!SheetRef()))");
+        assert_eq!(with_membership(Some("FALSE"), 4, "1", true), one);
+        let two = with_membership(Some(&one), 4, "9", true);
+        assert_eq!(parse_relationships(&two), [(4, vec!["9".to_string(), "1".to_string()])]);
+        assert_eq!(with_membership(Some(&two), 4, "9", true), two, "named once");
+        let both = with_membership(Some(&two), 1, "7", true);
+        assert_eq!(parse_relationships(&both).len(), 2);
+        let gone = with_membership(Some(&with_membership(Some(&both), 4, "1", false)), 4, "9", false);
+        assert!(gone.contains("DEPENDSON(4)") && gone.contains("Sheet.7!"), "{gone}");
+        assert_eq!(with_membership(Some(&one), 1, "5", false), one);
+    }
+
+    #[test]
+    fn a_page_says_which_shapes_call_themselves_containers_and_which_are_locked() {
+        let row = |name: &str, value: &str| format!("<Row N='{name}'><Cell N='Value' V='{value}'/></Row>");
+        let shape = |id: u32, rows: String| format!("<Shape ID='{id}'><Section N='User'>{rows}</Section></Shape>");
+        let xml = format!(
+            "<PageContents><Shapes>{}{}{}<Shape ID='4'><Cell N='Relationships' V='0' F='SUM(DEPENDSON(4,Sheet.1!SheetRef()))'/></Shape></Shapes></PageContents>",
+            shape(1, row("msvStructureType", "Container")),
+            shape(2, row("msvStructureType", "Container") + &row("msvSDContainerLocked", "1")),
+            shape(3, row("msvStructureType", "List")),
+        );
+        let (formulas, declared) = super::page_membership(&xml);
+        assert_eq!(declared.into_iter().collect::<Vec<_>>(), [("1".to_string(), false), ("2".to_string(), true)]);
+        assert_eq!(formulas.keys().collect::<Vec<_>>(), ["4"]);
+    }
 
     #[test]
     fn only_the_refused_references_leave_the_relationships_cells() {
