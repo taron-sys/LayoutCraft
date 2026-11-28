@@ -228,3 +228,35 @@ fn a_shape_only_partly_over_a_container_does_not_join_and_the_containers_own_mov
     engine.edit(0, 2, &ids[0], 20.0, 0.0, 0.0, 0.0, 0).unwrap();
     assert_eq!(members(&engine), both, "the frame takes its members and gains nothing it passes");
 }
+
+#[test]
+fn a_new_container_holds_the_shapes_lies_behind_them_and_moves_them() {
+    let (mut engine, ids) = drawing(|_| Vec::new());
+    let held = [ids[1].clone(), ids[2].clone()];
+    let depth = engine.undo_depth();
+    let made = engine.insert_container(0, &held).unwrap();
+    assert_eq!(engine.undo_depth(), depth + 1);
+    assert_eq!(engine.container_members(0, &made).map(|mut m| { m.sort(); m }), Some(held.to_vec()));
+    let shown = page(&engine);
+    let frame = of(shown, &made);
+    assert_eq!(frame.label, "Container");
+    for id in &held {
+        let member = of(shown, id);
+        assert_eq!(member.containers, [made.clone()]);
+        assert!(member.x > frame.x && member.y > frame.y && member.x + member.w < frame.x + frame.w && member.y + member.h < frame.y + frame.h, "inside");
+        assert!(member.z > frame.z, "in front of the container");
+    }
+    // room for the heading above the topmost member
+    assert!(of(shown, &held[0]).y - frame.y > 20.0);
+    let before = places(&engine);
+    engine.edit(0, 2, &made, 1.0, -1.0, 0.0, 0.0, 0).unwrap();
+    assert_eq!(went(&before, &engine, &held[0]), went(&before, &engine, &made));
+    // written to the file: it reads back the same
+    let mut again = Engine::new();
+    again.open(engine.export().unwrap().to_vec()).unwrap();
+    assert_eq!(again.container_members(0, &made).map(|m| m.len()), Some(2));
+    engine.undo().unwrap();
+    engine.undo().unwrap();
+    assert!(page(&engine).containers.is_empty() && !present(&engine).contains(&made));
+    assert!(engine.insert_container(0, &[]).is_err() && engine.insert_container(0, &["999".to_string()]).is_err());
+}

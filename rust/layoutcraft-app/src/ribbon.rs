@@ -74,6 +74,10 @@ impl Ribbon {
                 }
             }
         }
+        if let Some(insert) = ribbon.tabs.iter_mut().find(|tab| tab.name == "Insert") {
+            let at = insert.groups.iter().position(|group| group.name == "Links").unwrap_or(insert.groups.len());
+            insert.groups.insert(at, Group { name: "Diagram Parts".to_string(), items: vec![Item::Command { id: "insertContainer".to_string() }] });
+        }
         let show = ribbon.tabs.iter_mut().find(|tab| tab.name == "View").and_then(|tab| tab.groups.iter_mut().find(|group| group.name == "Show"));
         if let Some(show) = show {
             show.items.push(Item::Command { id: "paneInspector".to_string() });
@@ -165,6 +169,8 @@ pub fn columns(large: &[bool]) -> Vec<Vec<usize>> {
 pub enum Native {
     /// show or hide the right-hand panel
     Inspector,
+    /// a new container round the selected shapes
+    InsertContainer,
     Undo,
     Redo,
     SaveAs,
@@ -348,6 +354,7 @@ pub fn native(id: &str) -> Option<Native> {
         "showComments" => Native::Comments,
         "newComment" => Native::Comments,
         "paneInspector" => Native::Inspector,
+        "insertContainer" => Native::InsertContainer,
         _ => return None,
     })
 }
@@ -370,6 +377,7 @@ pub fn label(id: &str) -> String {
         "exportBtn" => "Export...",
         "paneShapes" => "Shapes",
         "paneInspector" => "Inspector",
+        "insertContainer" => "Container",
         "stylesBtn" => "Styles",
         "copyImgBtn" => "Copy as Picture",
         "paneSheet" => "Shape Formulas",
@@ -569,8 +577,9 @@ mod tests {
         let mut expected = commands(Ribbon::load());
         // what the app does not have is left out
         expected.retain(|command| is_built(command.split_once(' ').unwrap().1));
-        // the desktop's own addition
+        // the desktop's own additions
         expected.insert("View paneInspector".to_string());
+        expected.insert("Insert insertContainer".to_string());
         assert_eq!(commands(Ribbon::for_desktop()), expected);
         let design = Ribbon::for_desktop().tabs.into_iter().find(|tab| tab.name == "Design").unwrap();
         assert!(!design.groups.iter().any(|group| group.name == "Borders & Titles"), "it is a menu of Backgrounds now");

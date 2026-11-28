@@ -1036,6 +1036,68 @@ impl Engine {
         Ok(count)
     }
 
+    /// What the container `id` of `page` holds directly, members first listed first; `None` when it is not a container with
+    /// members.
+    pub fn container_members(&self, page: usize, id: &str) -> Option<Vec<String>> {
+        let records = &self.document.as_ref()?.pages.get(page)?.containers;
+        let record = records.iter().find(|record| record["visioId"].as_str() == Some(id) && record["kind"].as_str() == Some("container"))?;
+        Some(record["members"].as_array()?.iter().filter_map(|member| member.as_str().map(str::to_string)).collect())
+    }
+
+    /// Take the container `id` of `page` away and keep what it holds, ONE undo step: the members stay where they are and no
+    /// longer name it (as Visio's Disband leaves them, `docs/45-containers.md`).
+    pub fn disband_container(&mut self, page: usize, id: &str) -> Result<(), String> {
+        self.container_members(page, id).ok_or_else(|| format!("shape {id} is not a container"))?;
+        let package = self.package.as_ref().ok_or("no document")?;
+        let editor = GroupEditor::open(package, page).map_err(|e| e.to_string())?;
+        let gone = editor.subtree_ids(id).map_err(|e| e.to_string())?;
+        let part = package.pages().map_err(|e| e.to_string())?[page].part.clone();
+        let connects = package.connects(&part).map_err(|e| e.to_string())?;
+        // connectors glued to the container keep their ends where they are
+        let patches = editor.detach_patches(&gone, &connects);
+        let bytes = patch_page(package, page, &patches, &[], &[id.to_string()]).map_err(|e| e.to_string())?;
+        self.commit(bytes)
+    }
+
+    /// Put a new container round the shapes `ids` of `page` (those that are page-level shapes), ONE undo step; returns its
+    /// ID. It lies behind them and is headed "Container".
+    pub fn insert_container(&mut self, page: usize, ids: &[String]) -> Result<String, String> {
+        use layoutcraft_vsdx::containers::{create, HEADING, MARGIN};
+        let boxes = self.boxes(page);
+        let held: Vec<String> = ids
+            .iter()
+            .filter(|id| self.document.as_ref().and_then(|d| d.pages.get(page)).is_some_and(|p| p.shapes.iter().any(|shape| shape.visio_id.as_deref() == Some(id.as_str()) && shape.group.is_none())) || self.document.as_ref().and_then(|d| d.pages.get(page)).is_some_and(|p| p.groups.iter().any(|group| group["visioId"].as_str() == Some(id.as_str()) && group["parentId"].is_null())))
+            .cloned()
+            .collect();
+        let around = held.iter().filter_map(|id| boxes.get(id)).copied().reduce(|a, b| (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3))).ok_or("select the shapes to put in a container")?;
+        let package = self.package.as_ref().ok_or("no document")?;
+        let height = package.pages().map_err(|e| e.to_string())?.get(page).ok_or("no such page")?.height.unwrap_or(11.0);
+        // scene pixels (96 to the inch, y down) to page inches (y up)
+        let (left, right) = (around.0 / 96.0 - MARGIN, around.2 / 96.0 + MARGIN);
+        let (bottom, top) = (height - around.3 / 96.0 - MARGIN, height - around.1 / 96.0 + MARGIN + HEADING);
+        let (bytes, id) = create(package, page, &held, left, bottom, right - left, top - bottom, "Container").map_err(|e| e.to_string())?;
+        self.commit(bytes)?;
+        Ok(id)
+    }
+
+    /// Whether the container `id` of `page` says so itself (it has the cells of a container, not only members), and if so
+    /// whether its membership is locked.
+    pub fn container_lock(&self, page: usize, id: &str) -> Option<bool> {
+        let package = self.package.as_ref()?;
+        let part = package.pages().ok()?.get(page)?.part.clone();
+        layoutcraft_vsdx::containers::page_membership(&package.text(&part).ok()?).1.get(id).copied()
+    }
+
+    /// Lock or unlock the membership of the container `id` of `page` (ONE undo step): while it is locked, moving shapes
+    /// neither adds them to it nor takes its members out.
+    pub fn set_container_lock(&mut self, page: usize, id: &str, locked: bool) -> Result<(), String> {
+        self.container_lock(page, id).ok_or_else(|| format!("shape {id} has no container settings of its own"))?;
+        let package = self.package.as_ref().ok_or("no document")?;
+        let patch = layoutcraft_vsdx::writer::ShapeCellPatch::new(id).row_cell("User", "", "msvSDContainerLocked", "Value", if locked { "1" } else { "0" });
+        let bytes = patch_page_cells(package, page, &[patch]).map_err(|e| e.to_string())?;
+        self.commit(bytes)
+    }
+
     /// For a drawn member of a group that has no shape of its own on the page (a group, or a container, with neither geometry
     /// nor text): the ID of that whole group, which a host acts on when the member is picked. `None` for every other shape.
     pub fn group_of_part(&self, page: usize, id: &str) -> Option<String> {
