@@ -111,6 +111,31 @@ pub fn is_built(id: &str) -> bool {
         )
 }
 
+/// The built commands whose name or group holds every word of `query`, as (tab, group, command id), each command once;
+/// those whose name starts with the query come first.
+pub fn search(ribbon: &Ribbon, query: &str) -> Vec<(String, String, String)> {
+    let query = query.trim().to_lowercase();
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let mut found: Vec<(bool, String, String, String)> = Vec::new();
+    for tab in &ribbon.tabs {
+        for group in &tab.groups {
+            let ids = group.items.iter().flat_map(|item| match item {
+                Item::Command { id } => std::slice::from_ref(id),
+                Item::Menu { ids, .. } => ids.as_slice(),
+            });
+            for id in ids {
+                let name = label(id).to_lowercase();
+                let text = format!("{name} {}", group.name.to_lowercase());
+                if !words.is_empty() && is_built(id) && words.iter().all(|word| text.contains(word)) && !found.iter().any(|(.., other)| other == id) {
+                    found.push((!name.starts_with(&query), tab.name.clone(), group.name.clone(), id.clone()));
+                }
+            }
+        }
+    }
+    found.sort_by_key(|(later, ..)| *later);
+    found.into_iter().map(|(_, tab, group, id)| (tab, group, id)).collect()
+}
+
 /// The commands that switch something on or off, drawn as check boxes.
 pub fn is_check(id: &str) -> bool {
     matches!(id, "paneInspector" | "showRulers" | "showGrid" | "showGuides" | "snapGrid" | "snapShapes" | "snapGuides" | "autoConnectToggle")

@@ -304,7 +304,7 @@ these are row counts, not a count of every Visio button.
 |---|---|---|---|---|---|---|
 | Help pane (F1) | S1 | helpShortcuts | partial | partial | Ctrl+F1 is collapse in LC; desktop F1 opens the shortcut list (no help pane) | P1 |
 | About | unverified | helpAbout | present | present | | P2 |
-| Tell me / search box for commands | S27 (a search bar is new in 2024) | - | missing | missing | Command search | P2 |
+| Tell me / search box for commands | S27 (a search bar is new in 2024) | Desktop: a box in the tab row (Alt+Q) lists matching commands to use | - | Desktop only; Enter does not run the first match | Command search | P2 |
 
 ### 3.13 Contextual tabs
 

@@ -4112,6 +4112,33 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_command_found_by_searching_runs_and_closes_the_list() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        let search = |driver: &mut Driver, text: &str| {
+            driver.run(vec![Event::Key { key: egui::Key::Q, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::ALT }]);
+            driver.frames(3);
+            driver.run(vec![Event::Text(text.to_string())]);
+            driver.frames(3);
+        };
+        assert!(driver.texts("Container").is_empty(), "the command is on another tab");
+        search(&mut driver, "contain");
+        assert_eq!(driver.app.command_search, "contain");
+        let found = *driver.texts("Container").first().expect("the match is listed");
+        driver.click(found.center(), Modifiers::NONE);
+        driver.frames(3);
+        let made = driver.app.selected.clone().expect("the container is selected");
+        assert!(driver.app.engine.container_members(0, &made).is_some(), "{}", driver.app.status);
+        assert!(driver.app.command_search.is_empty() && driver.texts("Container").is_empty());
+        search(&mut driver, "no such thing");
+        assert_eq!(driver.texts("No command matches.").len(), 1);
+        driver.key(egui::Key::Escape, Modifiers::NONE);
+        driver.frames(3);
+        assert!(driver.app.command_search.is_empty());
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -5405,6 +5432,8 @@ struct LayoutCraftApp {
     tab_before_file: usize,
     ribbon_collapsed: bool,
     ribbon_peek: bool,
+    /// What is typed in the command search box of the tab row.
+    command_search: String,
     ribbon_compact: bool,
     /// The command being drawn is the large one of its group.
     ribbon_large: bool,
@@ -5612,6 +5641,7 @@ impl LayoutCraftApp {
             tab_before_file: 1,
             ribbon_collapsed: false,
             ribbon_peek: false,
+            command_search: String::new(),
             ribbon_compact: false,
             ribbon_large: false,
             ribbon_unfolded: false,
@@ -7592,6 +7622,7 @@ impl LayoutCraftApp {
         let name = window_title(self.loaded_path.as_deref(), self.engine.export().is_some(), self.dirty);
         let space = egui::Rect::from_center_size(egui::pos2(ui.max_rect().center().x, buttons.center().y), egui::vec2((width - 2.0 * (buttons.width() + 24.0)).max(80.0), buttons.height()));
         ui.put(space, egui::Label::new(name).truncate());
+        let mut search_field = None;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
             for index in 0..self.ribbon.tabs.len() {
@@ -7612,8 +7643,17 @@ impl LayoutCraftApp {
                     self.ribbon_collapsed = !self.ribbon_collapsed;
                     self.ribbon_peek = false;
                 }
+                let field = ui.add(egui::TextEdit::singleline(&mut self.command_search).hint_text("Search commands (Alt+Q)").desired_width(170.0));
+                name_control(ui, &field, "Search commands");
+                if ui.input_mut(|input| input.consume_key(egui::Modifiers::ALT, egui::Key::Q)) {
+                    field.request_focus();
+                }
+                search_field = Some(field.rect);
             });
         });
+        if let Some(field) = search_field {
+            self.draw_command_search(&ctx, field, action);
+        }
         let tab = self.ribbon.tabs[self.ribbon_tab.min(self.ribbon.tabs.len() - 1)].clone();
         if !self.ribbon_collapsed {
             egui::ScrollArea::horizontal().id_salt("ribbon-scroll").show(ui, |ui| self.draw_ribbon_groups(ui, &ctx, &tab, action));
@@ -7633,6 +7673,42 @@ impl LayoutCraftApp {
             }
         }
         ui.add_space(2.0);
+    }
+
+    /// The list under the search box: each command that matches, as the control the ribbon itself draws for it, so that
+    /// it does the same thing and is greyed out in the same cases. Using one, Escape, or a click elsewhere closes it.
+    fn draw_command_search(&mut self, ctx: &egui::Context, field: egui::Rect, action: &mut Option<Action>) {
+        if self.command_search.trim().is_empty() {
+            return;
+        }
+        let found = ribbon::search(&self.ribbon, &self.command_search);
+        let area = egui::Area::new(egui::Id::new("command-search")).order(egui::Order::Foreground).pivot(egui::Align2::RIGHT_TOP).fixed_pos(field.right_bottom() + egui::vec2(0.0, 2.0)).show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_width(320.0);
+                if found.is_empty() {
+                    ui.label("No command matches.");
+                }
+                let compact = std::mem::replace(&mut self.ribbon_compact, false);
+                for (tab, group, id) in found.iter().take(8) {
+                    ui.push_id(id, |ui| {
+                        ui.horizontal(|ui| {
+                            self.ribbon_button(ui, ctx, id, action);
+                            ui.weak(format!("{tab} \u{203a} {group}"));
+                        });
+                    });
+                }
+                self.ribbon_compact = compact;
+                if found.len() > 8 {
+                    ui.weak(format!("{} more: type more of the name.", found.len() - 8));
+                }
+            });
+        });
+        let rect = area.response.rect;
+        // a drop-down opened from the list may reach past it
+        let outside = !egui::Popup::is_any_open(ctx) && ctx.input(|input| input.pointer.any_pressed() && input.pointer.interact_pos().is_some_and(|at| !rect.contains(at) && !field.contains(at)));
+        if action.is_some() || outside || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.command_search.clear();
+        }
     }
 
     /// The groups of one tab side by side, each with its items in a grid of two rows (column after column, like the web's `grid-auto-flow: column`
