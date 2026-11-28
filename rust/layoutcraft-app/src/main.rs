@@ -2197,6 +2197,9 @@ mod sheet_tests {
     }
 }
 
+/// How many of the shapes placed last the Shapes panel keeps in reach.
+const RECENT_MASTERS: usize = 6;
+
 /// A click on the header of stencil `clicked` in the Shapes panel, where only one stencil is open at a time: it opens
 /// (closing the other), or closes when it was the open one.
 fn stencil_clicked(open: Option<usize>, clicked: usize) -> Option<usize> {
@@ -4161,6 +4164,34 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_placed_shape_is_kept_under_recently_used() {
+        let (mut driver, _ids) = Driver::new();
+        driver.app.stencils.clear();
+        driver.app.recent_masters.clear();
+        driver.app.open_builtin_stencil();
+        driver.frames(4);
+        assert!(driver.texts("Recently used").is_empty());
+        let names: Vec<String> = driver.app.stencils[0].masters.iter().take(2).map(|(_, name)| name.clone()).collect();
+        let place = |driver: &mut Driver, name: &str, across: f32| {
+            // the lowest line with the name is the one in the stencil's own list
+            let cell = driver.texts(name).into_iter().max_by(|a, b| a.top().total_cmp(&b.top())).expect("the shape is listed");
+            driver.click(cell.center(), Modifiers::NONE);
+            driver.frames(3);
+            let image = driver.app.image_rect(driver.app.last_viewport);
+            driver.click(pos2(image.left() + image.width() * across, image.bottom() - image.height() * 0.15), Modifiers::NONE);
+            driver.frames(3);
+        };
+        place(&mut driver, &names[0], 0.3);
+        place(&mut driver, &names[1], 0.7);
+        let kept = |driver: &Driver| driver.app.recent_masters.iter().map(|(.., name)| name.clone()).collect::<Vec<_>>();
+        assert_eq!(kept(&driver), [names[1].clone(), names[0].clone()], "{}", driver.app.status);
+        assert_eq!((driver.texts("Recently used").len(), driver.texts(&names[0]).len()), (1, 2));
+        // using one again moves it to the front, once
+        place(&mut driver, &names[0], 0.5);
+        assert_eq!(kept(&driver), [names[0].clone(), names[1].clone()]);
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -5484,6 +5515,8 @@ struct LayoutCraftApp {
     shapes_minimised: bool,
     /// The one stencil of the Shapes panel that is open (its engine slot).
     open_stencil_shown: Option<usize>,
+    /// The masters placed last, newest first, as (stencil, master, name); kept while the app runs.
+    recent_masters: Vec<(usize, String, String)>,
     /// The Shape Formulas window, while it is open.
     sheet_pane: Option<SheetPane>,
     /// The last press was on the canvas (or all shapes were selected by key); a Tab to apply to the shapes.
@@ -5680,6 +5713,7 @@ impl LayoutCraftApp {
             magnify_from: None,
             shapes_minimised: false,
             open_stencil_shown: None,
+            recent_masters: Vec::new(),
             sheet_pane: None,
             canvas_keys: false,
             tab_cycle: None,
@@ -8521,6 +8555,15 @@ impl LayoutCraftApp {
         };
     }
 
+    /// A master has been put on a page: it heads the recently used shapes, which hold the last few.
+    fn remember_master(&mut self, index: usize, master: &str) {
+        let name = self.stencils.iter().find(|stencil| stencil.index == index).and_then(|stencil| stencil.masters.iter().find(|(id, _)| id == master)).map(|(_, name)| name.clone());
+        let Some(name) = name else { return };
+        self.recent_masters.retain(|(other, id, _)| (*other, id.as_str()) != (index, master));
+        self.recent_masters.insert(0, (index, master.to_string(), name));
+        self.recent_masters.truncate(RECENT_MASTERS);
+    }
+
     /// The thumbnail of a master as a texture (36 px was the ribbon; 56 px here), rendered once when the cell is first shown.
     fn stencil_thumb_texture(&mut self, ctx: &egui::Context, index: usize, master: &str) -> Option<egui::TextureHandle> {
         let key = (index, master.to_string());
@@ -10585,24 +10628,32 @@ impl eframe::App for LayoutCraftApp {
                 }
                 let searching = !self.shape_search.trim().is_empty();
                 egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-                    for si in 0..self.stencils.len() {
-                        let (name, index) = (self.stencils[si].name.clone(), self.stencils[si].index);
-                        // a search shows the matches of every stencil, otherwise the shapes of the chosen one
-                        if !searching && self.open_stencil_shown != Some(index) {
+                    // lists of (heading, shapes): the recently used ones, then the chosen stencil; a search instead shows the
+                    // matches of every stencil under its name
+                    let mut lists: Vec<(Option<String>, Vec<(usize, String, String)>)> = Vec::new();
+                    if !searching && !self.recent_masters.is_empty() {
+                        lists.push((Some("Recently used".to_string()), self.recent_masters.clone()));
+                    }
+                    for stencil in &self.stencils {
+                        if !searching && self.open_stencil_shown != Some(stencil.index) {
                             continue;
                         }
-                        let masters: Vec<(String, String)> = self.stencils[si].masters.iter().filter(|(_, mname)| master_matches(mname, &self.shape_search)).cloned().collect();
-                        if masters.is_empty() {
-                            continue;
+                        let masters: Vec<(usize, String, String)> = stencil.masters.iter().filter(|(_, mname)| master_matches(mname, &self.shape_search)).map(|(id, mname)| (stencil.index, id.clone(), mname.clone())).collect();
+                        if !masters.is_empty() {
+                            let heading = (searching || !lists.is_empty()).then(|| stencil.name.clone());
+                            lists.push((heading, masters));
                         }
-                        if searching {
-                            ui.weak(name);
+                    }
+                    for (heading, masters) in lists {
+                        if let Some(heading) = heading {
+                            ui.weak(heading);
                         }
                         ui.horizontal_wrapped(|ui| {
                             ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
                             let columns = if ui.available_width() >= 200.0 { 2.0 } else { 1.0 };
                             let width = ((ui.available_width() - 4.0 * (columns - 1.0)) / columns).floor() - 1.0;
-                            for (id, mname) in &masters {
+                            for (index, id, mname) in &masters {
+                                let index = *index;
                                 let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 40.0), egui::Sense::click_and_drag());
                                 name_control(ui, &response, mname);
                                 if ui.is_rect_visible(rect) {
@@ -10663,6 +10714,7 @@ impl eframe::App for LayoutCraftApp {
                 let index = self.stencils[si].index;
                 self.engine.stencil_close(index);
                 self.stencils.remove(si);
+                self.recent_masters.retain(|(other, ..)| *other != index);
                 self.remember_stencils();
                 self.stencil_textures.retain(|(i, _), _| *i != index);
             }
@@ -10953,7 +11005,10 @@ impl eframe::App for LayoutCraftApp {
                         let page = self.page_index;
                         let (x, y) = (at.x as f64 / DPI, self.page_height_in - at.y as f64 / DPI);
                         match self.engine.stencil_drop(page, index, &master, x, y) {
-                            Ok(id) => self.finish_edit(&ctx, Ok(()), &format!("Placed \"{name}\""), Some(id)),
+                            Ok(id) => {
+                                self.finish_edit(&ctx, Ok(()), &format!("Placed \"{name}\""), Some(id));
+                                self.remember_master(index, &master);
+                            }
                             Err(error) => self.status = format!("Could not place \"{name}\": {error}"),
                         }
                         self.armed_master = None;
@@ -10969,7 +11024,10 @@ impl eframe::App for LayoutCraftApp {
                                 let page = self.page_index;
                                 let (x, y) = (at.x as f64 / DPI, self.page_height_in - at.y as f64 / DPI);
                                 match self.engine.stencil_drop(page, index, &master, x, y) {
-                                    Ok(id) => self.finish_edit(&ctx, Ok(()), &format!("Placed \"{name}\""), Some(id)),
+                                    Ok(id) => {
+                                        self.finish_edit(&ctx, Ok(()), &format!("Placed \"{name}\""), Some(id));
+                                        self.remember_master(index, &master);
+                                    }
                                     Err(error) => self.status = format!("Could not place \"{name}\": {error}"),
                                 }
                                 dropped_now = true;

@@ -163,6 +163,9 @@ impl LayoutCraftApp {
                 self.arrow_shape = None;
                 self.arrow_picker = None;
                 self.finish_edit(ctx, Ok(()), &format!("Placed a shape {} and connected it", direction_words(direction)), Some(made));
+                if let Some((stencil, master)) = pick {
+                    self.remember_master(stencil, master);
+                }
             }
             Err(error) => self.status = format!("Could not add a connected shape: {error}"),
         }
