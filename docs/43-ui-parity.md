@@ -175,7 +175,7 @@ these are row counts, not a count of every Visio button.
 | Shape Styles: quick style gallery | S9 | p:fillColor (menu) | missing | partial | | P1 |
 | Shape Styles: Fill (colour, no fill, more colours) | S9 | p:fillColor | present | present | Desktop: swatches, none and More colours (a typed code or a picker) on the ribbon, and the inspector's Style panel | P0 |
 | Shape Styles: Line (colour, weight, dashes, arrows) | S9 | p:lineColor | present | present | Desktop: colour swatches and the Line ends menu (arrowheads and sizes) on the ribbon; weight and dash pattern in the inspector | P0 |
-| Shape Styles: Effects (shadow, reflection, glow, soft edges, bevel, 3-D rotation) | S9 | p:shadow | partial | partial | Shadow only (on / off) | P2 |
+| Shape Styles: Effects (shadow, reflection, glow, soft edges, bevel, 3-D rotation) | S9 | p:shadow | partial | partial | Shadow, glow, soft edges and reflection on / off (one preset each; no settings) | P2 |
 | Arrange: Align Left / Center / Right / Top / Middle / Bottom | S13 | arrL arrCx arrRt arrT arrM arrB | present | present | Aligns to the first selected; Visio aligns to the primary shape (S13) | P0 |
 | Arrange: Auto Align | S13 | - | missing | missing | Straightens connector lines | P3 |
 | Arrange: Position > Auto Align & Space, Auto Space, Spacing Options | S13, S28 | - | missing | missing | | P2 |

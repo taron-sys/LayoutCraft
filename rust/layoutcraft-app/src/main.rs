@@ -828,6 +828,19 @@ fn shadow_style(on: bool) -> String {
     serde_json::json!({ "shadow": on }).to_string()
 }
 
+/// The style that switches an effect on as `on` writes it, or off (a size of nothing, or no reflection).
+fn effect_style(on: serde_json::Value, wanted: bool) -> serde_json::Value {
+    if wanted {
+        return on;
+    }
+    let off = on.as_object().into_iter().flatten().filter_map(|(key, value)| match value {
+        serde_json::Value::Number(_) => Some((key.clone(), serde_json::json!(0))),
+        serde_json::Value::Bool(_) => Some((key.clone(), serde_json::json!(false))),
+        _ => None,
+    });
+    serde_json::Value::Object(off.collect())
+}
+
 #[cfg(test)]
 mod shadow_tests {
     use super::shadow_style;
@@ -3987,6 +4000,37 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert_eq!(driver.app.engine.container_lock(0, &made), Some(false), "{}", driver.app.status);
         assert_eq!(driver.app.engine.container_lock(0, &ids[0]), None);
         assert!(driver.app.engine.set_container_lock(0, &ids[0], true).is_err());
+    }
+
+    #[test]
+    fn glow_soft_edges_and_reflection_are_switched_on_and_off_from_the_styles_menu() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        let press = |driver: &mut Driver, label: &str| {
+            if driver.texts(label).is_empty() {
+                let group = *driver.texts("Styles \u{25be}").first().expect("the Shape Styles group");
+                driver.click(group.center(), Modifiers::NONE);
+                driver.frames(3);
+            }
+            let at = *driver.texts(label).first().unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let has = |driver: &Driver| {
+            let shape = driver.app.doc_shape(&ids[0]).unwrap();
+            [shape.glow.is_some(), shape.soft_edge.is_some(), shape.reflection.is_some()]
+        };
+        assert_eq!(has(&driver), [false; 3]);
+        for (index, name) in ["Glow", "Soft edges", "Reflection"].into_iter().enumerate() {
+            press(&mut driver, name);
+            let mut wanted = [false; 3];
+            wanted[index] = true;
+            assert_eq!(has(&driver), wanted, "{name} on: {}", driver.app.status);
+            press(&mut driver, name);
+            assert_eq!(has(&driver), [false; 3], "{name} off: {}", driver.app.status);
+        }
+        assert!(driver.app.doc_shape(&ids[1]).unwrap().glow.is_none(), "only the selected shape");
     }
 
     #[test]
@@ -7847,6 +7891,18 @@ impl LayoutCraftApp {
                 let on = primary.as_ref().is_some_and(|shape| shape.shadow.is_some());
                 if ui.add_enabled(enabled, egui::Button::new("Shadow").selected(on)).on_hover_text("Shadow of the selected shapes").clicked() {
                     *action = Some(Action::StyleSelected(shadow_style(!on)));
+                }
+                // the other effects, each a check box that shows what the shape has
+                let has = |pick: fn(&Shape) -> bool| primary.as_ref().is_some_and(pick);
+                for (name, tip, on, style) in [
+                    ("Glow", "A soft coloured edge round the selected shapes", has(|shape| shape.glow.is_some()), serde_json::json!({ "glowPx": 8, "glowColor": "#5b9bd5" })),
+                    ("Soft edges", "Edges that fade out", has(|shape| shape.soft_edge.is_some()), serde_json::json!({ "softEdgesPx": 4 })),
+                    ("Reflection", "A mirror image under the selected shapes", has(|shape| shape.reflection.is_some()), serde_json::json!({ "reflection": true })),
+                ] {
+                    let mut ticked = on;
+                    if ui.add_enabled(enabled, egui::Checkbox::new(&mut ticked, name)).on_hover_text(tip).changed() {
+                        *action = Some(Action::StyleSelected(effect_style(style, ticked).to_string()));
+                    }
                 }
             }
             "p:fontFamily" => {
