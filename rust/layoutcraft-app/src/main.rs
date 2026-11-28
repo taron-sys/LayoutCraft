@@ -605,6 +605,11 @@ fn all_struck(engine: &Engine, page: usize, ids: &[String]) -> bool {
 
 /// Whether the character cell `cell` is 1 over the whole text of every one of the shapes that has text.
 fn all_set(engine: &Engine, page: usize, ids: &[String], cell: &str) -> bool {
+    all_state(engine, page, ids, cell, |value| value == "1")
+}
+
+/// Whether the character cell `cell` passes `is` over the whole text of every one of the shapes that has text.
+fn all_state(engine: &Engine, page: usize, ids: &[String], cell: &str, is: impl Fn(&str) -> bool) -> bool {
     let targets = text_targets(engine, page, ids);
     !targets.is_empty()
         && targets.iter().all(|(owner, length)| {
@@ -612,9 +617,12 @@ fn all_set(engine: &Engine, page: usize, ids: &[String], cell: &str) -> bool {
                 .text_state_json(page, owner, 0, *length)
                 .ok()
                 .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-                .is_some_and(|state| state["char"][cell].as_str() == Some("1"))
+                .is_some_and(|state| state["char"][cell].as_str().is_some_and(&is))
         })
 }
+
+/// The bit of the `Style` cell that draws small capitals.
+const SMALL_CAPITALS: u64 = 8;
 
 #[cfg(test)]
 mod text_format_tests {
@@ -4034,6 +4042,37 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn raised_lowered_and_small_capital_text_are_switched_from_the_font_group() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.width = 1920.0;
+        driver.frames(4);
+        let press = |driver: &mut Driver, label: &str| {
+            let at = *driver.texts(label).first().unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let state = |driver: &Driver, cell: &str| {
+            let text = driver.app.engine.text_state_json(0, &ids[0], 0, 5).unwrap();
+            serde_json::from_str::<serde_json::Value>(&text).unwrap()["char"][cell].as_str().unwrap_or("").to_string()
+        };
+        press(&mut driver, "x\u{b2}");
+        assert_eq!(state(&driver, "Pos"), "1", "{}", driver.app.status);
+        // lowering takes the place of raising, and a second press brings the text back to the line
+        press(&mut driver, "x\u{2082}");
+        assert_eq!(state(&driver, "Pos"), "2");
+        press(&mut driver, "x\u{2082}");
+        assert_eq!(state(&driver, "Pos"), "0");
+        // the small-capitals bit of the style cell (8), whether or not the cell was there before
+        let small = |driver: &Driver| state(driver, "Style").parse::<u32>().unwrap_or(0) & 8 != 0;
+        assert!(!small(&driver));
+        press(&mut driver, "aA");
+        assert!(small(&driver), "{}", driver.app.status);
+        press(&mut driver, "aA");
+        assert!(!small(&driver));
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4053,7 +4092,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         let depth = driver.app.engine.undo_depth();
         press(&mut driver, "Caps");
         assert!(drawn(&driver).contains("LABEL"), "{}", driver.app.status);
-        assert_eq!((driver.app.engine.undo_depth(), driver.app.selection_text_flags()), (depth + 1, [false, true]));
+        assert_eq!((driver.app.engine.undo_depth(), driver.app.selection_text_flags()), (depth + 1, [false, true, false, false, false]));
         press(&mut driver, "Caps");
         assert!(!drawn(&driver).contains("LABEL") && drawn(&driver).contains("label"), "{}", driver.app.status);
     }
@@ -5405,7 +5444,7 @@ struct LayoutCraftApp {
     /// The Find window, while it is open.
     find: Option<Find>,
     /// (selected ids, whether all their text is struck through) for the Strike button.
-    struck_cache: Option<(String, [bool; 2])>,
+    struck_cache: Option<(String, [bool; 5])>,
     page_setup_open: bool,
     check_open: bool,
     shapes_open: bool,
@@ -7821,7 +7860,7 @@ impl LayoutCraftApp {
                 }
             }
             "p:strike" => {
-                let [struck, capitals] = self.selection_text_flags();
+                let [struck, capitals, raised, lowered, small] = self.selection_text_flags();
                 let on = enabled && struck;
                 let button = ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(if short { "S" } else { "Strike" }).strikethrough()).selected(on).min_size(egui::vec2(24.0, 0.0)));
                 name_control(ui, &button, "Strikethrough");
@@ -7833,6 +7872,18 @@ impl LayoutCraftApp {
                 name_control(ui, &button, "All capitals");
                 if button.on_hover_text("All capitals for the whole text").clicked() {
                     *action = Some(Action::FormatText(serde_json::json!({ "cells": { "Case": if on { "0" } else { "1" } } })));
+                }
+                // raised and lowered text (one or the other), and small capitals
+                for (long, brief, name, on, spec) in [
+                    ("Superscript", "x\u{b2}", "Superscript", raised, serde_json::json!({ "cells": { "Pos": if raised && enabled { "0" } else { "1" } } })),
+                    ("Subscript", "x\u{2082}", "Subscript", lowered, serde_json::json!({ "cells": { "Pos": if lowered && enabled { "0" } else { "2" } } })),
+                    ("Small caps", "aA", "Small capitals", small, if small && enabled { serde_json::json!({ "clear": SMALL_CAPITALS }) } else { serde_json::json!({ "set": SMALL_CAPITALS }) }),
+                ] {
+                    let button = ui.add_enabled(enabled, egui::Button::new(if short { brief } else { long }).selected(enabled && on).min_size(egui::vec2(24.0, 0.0)));
+                    name_control(ui, &button, name);
+                    if button.on_hover_text(format!("{name}, for the whole text")).clicked() {
+                        *action = Some(Action::FormatText(spec));
+                    }
                 }
                 // in the ribbon: a letter over a bar of the colour the text has now
                 let colour = primary.as_ref().and_then(|shape| shape.text_color.as_deref()).and_then(typed_colour);
@@ -8019,13 +8070,20 @@ impl LayoutCraftApp {
 
     /// Whether the whole text of the selection is struck through, and whether it is in all capitals; remembered until the
     /// page is rebuilt or the selection changes (it reads the file's XML).
-    fn selection_text_flags(&mut self) -> [bool; 2] {
+    fn selection_text_flags(&mut self) -> [bool; 5] {
         let ids = self.all_selected();
         let key = ids.join("\n");
         match &self.struck_cache {
             Some((known, flags)) if *known == key => *flags,
             _ => {
-                let flags = [all_struck(&self.engine, self.page_index, &ids), all_set(&self.engine, self.page_index, &ids, "Case")];
+                let (engine, page) = (&self.engine, self.page_index);
+                let flags = [
+                    all_struck(engine, page, &ids),
+                    all_set(engine, page, &ids, "Case"),
+                    all_state(engine, page, &ids, "Pos", |value| value == "1"),
+                    all_state(engine, page, &ids, "Pos", |value| value == "2"),
+                    all_state(engine, page, &ids, "Style", |value| value.parse::<u64>().is_ok_and(|bits| bits & SMALL_CAPITALS != 0)),
+                ];
                 self.struck_cache = Some((key, flags));
                 flags
             }
