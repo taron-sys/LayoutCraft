@@ -78,6 +78,10 @@ impl Ribbon {
             let at = insert.groups.iter().position(|group| group.name == "Links").unwrap_or(insert.groups.len());
             insert.groups.insert(at, Group { name: "Diagram Parts".to_string(), items: vec![Item::Command { id: "insertContainer".to_string() }] });
         }
+        let editing = ribbon.tabs.iter_mut().find(|tab| tab.name == "Home").and_then(|tab| tab.groups.iter_mut().find(|group| group.name == "Editing"));
+        if let Some(editing) = editing {
+            editing.items.push(Item::Command { id: "selectMenu".to_string() });
+        }
         let show = ribbon.tabs.iter_mut().find(|tab| tab.name == "View").and_then(|tab| tab.groups.iter_mut().find(|group| group.name == "Show"));
         if let Some(show) = show {
             show.items.push(Item::Command { id: "paneInspector".to_string() });
@@ -103,7 +107,7 @@ pub fn is_built(id: &str) -> bool {
     native(id).is_some()
         || matches!(
             id,
-            "drawTools" | "gridStep" | "themeGallery" | "variantGallery" | "paletteSel" | "zl" | "designOrientation" | "designSize" | "pageTools" | "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor" | "p:shadow"
+            "drawTools" | "selectMenu" | "gridStep" | "themeGallery" | "variantGallery" | "paletteSel" | "zl" | "designOrientation" | "designSize" | "pageTools" | "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor" | "p:shadow"
         )
 }
 
@@ -580,6 +584,7 @@ mod tests {
         // the desktop's own additions
         expected.insert("View paneInspector".to_string());
         expected.insert("Insert insertContainer".to_string());
+        expected.insert("Home selectMenu".to_string());
         assert_eq!(commands(Ribbon::for_desktop()), expected);
         let design = Ribbon::for_desktop().tabs.into_iter().find(|tab| tab.name == "Design").unwrap();
         assert!(!design.groups.iter().any(|group| group.name == "Borders & Titles"), "it is a menu of Backgrounds now");

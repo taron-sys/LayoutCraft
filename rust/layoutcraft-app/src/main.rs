@@ -1064,6 +1064,15 @@ fn ribbon_tab(ui: &mut egui::Ui, name: &str, chosen: bool) -> egui::Response {
 /// The frame drawn round a container that a dragged shape would join: dark enough against the white page.
 const CONTAINER_MARK: egui::Color32 = egui::Color32::from_rgb(0, 110, 60);
 
+/// What Home > Select picks.
+#[derive(Clone, Copy)]
+enum Kind {
+    All,
+    Shapes,
+    Connectors,
+    Containers,
+}
+
 /// A ribbon command with its icon over its name, as high as a group.
 fn large_button(ui: &mut egui::Ui, icon: &egui::TextureHandle, label: &str, enabled: bool, selected: bool) -> egui::Response {
     ui.add_enabled_ui(enabled, |ui| {
@@ -4070,6 +4079,36 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         assert!(small(&driver), "{}", driver.app.status);
         press(&mut driver, "aA");
         assert!(!small(&driver));
+    }
+
+    #[test]
+    fn the_select_menu_picks_all_shapes_connectors_or_containers() {
+        let (mut driver, ids) = Driver::new();
+        let third = driver.app.engine.draw(0, 0, 1.0, 0.5, 2.0, 1.5).unwrap();
+        let line = driver.app.engine.add_connector(0, &ids[0], None, &ids[1], None).unwrap();
+        let made = driver.app.engine.insert_container(0, std::slice::from_ref(&third)).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.width = 1920.0;
+        driver.frames(4);
+        let choose = |driver: &mut Driver, entry: &str| {
+            for label in ["Select \u{25be}", entry] {
+                let at = *driver.texts(label).first().unwrap_or_else(|| panic!("nothing says {label:?}"));
+                driver.click(at.center(), Modifiers::NONE);
+                driver.frames(3);
+            }
+            let mut chosen = driver.app.all_selected();
+            chosen.sort();
+            chosen
+        };
+        let sorted = |ids: &[&String]| {
+            let mut out: Vec<String> = ids.iter().map(|id| (*id).clone()).collect();
+            out.sort();
+            out
+        };
+        assert_eq!(choose(&mut driver, "All connectors"), sorted(&[&line]));
+        assert_eq!(choose(&mut driver, "All containers"), sorted(&[&made]));
+        assert_eq!(choose(&mut driver, "All shapes"), sorted(&[&ids[0], &ids[1], &third, &made]));
+        assert_eq!(choose(&mut driver, "Select all"), sorted(&[&ids[0], &ids[1], &third, &made, &line]));
     }
 
     #[test]
@@ -7438,6 +7477,44 @@ impl LayoutCraftApp {
     }
 
     /// Ctrl+A: every page-level shape (not a group member), the first one primary.
+    /// Select > one kind: the shapes (a group without a shape of its own through one of its members), the connectors, or
+    /// the containers of the page; "Select all" takes shapes and connectors.
+    fn select_kind(&mut self, kind: Kind) {
+        let Some(page) = self.engine.document.as_ref().and_then(|document| document.pages.get(self.page_index)) else {
+            return;
+        };
+        let mut shapes: Vec<String> = Vec::new();
+        let mut groups: Vec<String> = Vec::new();
+        for shape in &page.shapes {
+            let Some(id) = shape.visio_id.as_deref() else { continue };
+            // what an edit of this shape would act on: the shape itself, or its whole group
+            let acts_on = self.engine.group_of_part(self.page_index, id);
+            if shape.group.is_some() && acts_on.is_none() {
+                continue;
+            }
+            let owner = acts_on.unwrap_or_else(|| id.to_string());
+            if !groups.contains(&owner) {
+                groups.push(owner);
+                shapes.push(id.to_string());
+            }
+        }
+        let connectors: Vec<String> = page.connectors.iter().filter_map(|connector| connector.visio_id.clone()).collect();
+        let ids: Vec<String> = match kind {
+            Kind::All => shapes.into_iter().chain(connectors).collect(),
+            Kind::Shapes => shapes,
+            Kind::Connectors => connectors,
+            Kind::Containers => shapes.into_iter().zip(groups).filter(|(_, owner)| self.engine.container_members(self.page_index, owner).is_some()).map(|(id, _)| id).collect(),
+        };
+        let mut ids = ids.into_iter();
+        self.selected = ids.next();
+        self.extra_selected = ids.collect();
+        self.status = match self.all_selected().len() {
+            0 => "There is nothing of that kind on this page.".to_string(),
+            count => format!("{count} object(s) selected"),
+        };
+        self.canvas_keys = true;
+    }
+
     fn select_all(&mut self) {
         let Some(scene) = self.scene.as_ref() else {
             return;
@@ -7694,6 +7771,21 @@ impl LayoutCraftApp {
                     self.tool = if selected { Tool::Select } else { Tool::Draw(kind as i32) };
                 }
             }
+            return;
+        }
+        if id == "selectMenu" {
+            ui.add_enabled_ui(self.texture.is_some(), |ui| {
+                ui.menu_button("Select \u{25be}", |ui| {
+                    for (label, kind) in [("Select all", Kind::All), ("All shapes", Kind::Shapes), ("All connectors", Kind::Connectors), ("All containers", Kind::Containers)] {
+                        if ui.button(label).clicked() {
+                            *action = Some(Action::SelectKind(kind));
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Select objects on this page");
+            });
             return;
         }
         if id == "gridStep" {
@@ -11825,6 +11917,7 @@ impl LayoutCraftApp {
             Some(Action::SelectContents) => self.select_contents(),
             Some(Action::DisbandContainer) => self.disband_container(&ctx),
             Some(Action::InsertContainer) => self.insert_container(&ctx),
+            Some(Action::SelectKind(kind)) => self.select_kind(kind),
             Some(Action::LockContainer(locked)) => self.lock_container(&ctx, locked),
             Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
@@ -11877,6 +11970,8 @@ enum Action {
     DisbandContainer,
     /// Put a new container round the selected shapes.
     InsertContainer,
+    /// Select every object of one kind on the page.
+    SelectKind(Kind),
     /// Lock or unlock the membership of the selected container.
     LockContainer(bool),
     /// Make the shown page a background page: it leaves the tabs.
