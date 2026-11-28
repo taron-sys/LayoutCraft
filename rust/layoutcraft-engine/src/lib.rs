@@ -922,6 +922,15 @@ impl Engine {
         Ok(count)
     }
 
+    /// For a drawn member of a group that has no shape of its own on the page (a group, or a container, with neither geometry
+    /// nor text): the ID of that whole group, which a host acts on when the member is picked. `None` for every other shape.
+    pub fn group_of_part(&self, page: usize, id: &str) -> Option<String> {
+        let shapes = &self.document.as_ref()?.pages.get(page)?.shapes;
+        let part = shapes.iter().find(|shape| shape.visio_id.as_deref() == Some(id))?;
+        let root = part.group.as_ref()?.get("rootId")?.as_str()?;
+        (root != id && !shapes.iter().any(|shape| shape.visio_id.as_deref() == Some(root))).then(|| root.to_string())
+    }
+
     /// `ids` followed by everything the containers and lists among them hold, nested ones included, each once.
     pub fn with_contents(&self, page: usize, ids: &[String]) -> Vec<String> {
         let mut all: Vec<String> = Vec::new();

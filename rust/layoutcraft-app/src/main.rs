@@ -3802,6 +3802,42 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_click_on_a_part_of_a_group_without_a_body_acts_on_the_whole_group() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.engine.group_op(0, 0, &ids.join("\n")).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        let group = driver.app.engine.group_of_part(0, &ids[0]).expect("a group with no shape of its own");
+        assert_eq!(driver.app.engine.group_of_part(0, &ids[1]).as_deref(), Some(group.as_str()));
+        assert!(driver.app.engine.group_of_part(0, &group).is_none() && driver.app.engine.group_of_part(0, "999").is_none());
+        let places = |driver: &Driver| ids.iter().map(|id| driver.at(id)).collect::<Vec<_>>();
+        let start = places(&driver);
+        let moved = |now: &[(f64, f64)], from: &[(f64, f64)]| {
+            let first = (now[0].0 - from[0].0, now[0].1 - from[0].1);
+            assert!((now[1].0 - from[1].0 - first.0).abs() < 0.5 && (now[1].1 - from[1].1 - first.1).abs() < 0.5, "both by the same way: {from:?} {now:?}");
+            first
+        };
+        // drag one part
+        let image = driver.app.image_rect(driver.app.last_viewport);
+        let shape = driver.app.doc_shape(&ids[0]).unwrap();
+        let from = driver.app.scene_to_screen(pos2((shape.x + shape.w / 2.0) as f32, (shape.y + shape.h / 2.0) as f32), image);
+        driver.drag(from, from + vec2(0.0, -80.0));
+        driver.frames(3);
+        let dragged = places(&driver);
+        assert!(moved(&dragged, &start).1 < -1.0, "{}", driver.app.status);
+        // an arrow key
+        driver.key(Key::ArrowRight, Modifiers::NONE);
+        driver.frames(2);
+        assert!(moved(&places(&driver), &dragged).0 > 0.0, "{}", driver.app.status);
+        // delete takes all of it, in one step
+        let depth = driver.app.engine.undo_depth();
+        driver.key(Key::Delete, Modifiers::NONE);
+        driver.frames(2);
+        assert!(driver.app.engine.document().unwrap().pages[0].shapes.is_empty(), "{}", driver.app.status);
+        assert_eq!(driver.app.engine.undo_depth(), depth + 1);
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -5929,6 +5965,23 @@ impl LayoutCraftApp {
         }
     }
 
+    /// Whether the shape can be moved or deleted: a page-level shape, or a part that stands for its whole group.
+    fn can_act_on(&self, id: &str) -> bool {
+        self.doc_shape(id).is_some_and(|shape| shape.group.is_none()) || self.engine.group_of_part(self.page_index, id).is_some()
+    }
+
+    /// The IDs an edit of `ids` works on: a part stands for its whole group, named once.
+    fn whole(&self, ids: &[String]) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for id in ids {
+            let id = self.engine.group_of_part(self.page_index, id).unwrap_or_else(|| id.clone());
+            if !out.contains(&id) {
+                out.push(id);
+            }
+        }
+        out
+    }
+
     fn pick_shape(&self, scene_pointer: egui::Pos2) -> Option<String> {
         let id = self.pick_shape_raw(scene_pointer)?;
         Some(self.group_root(&id))
@@ -6001,6 +6054,12 @@ impl LayoutCraftApp {
         let shape = self.scene_shape(id)?;
         let own = Self::selection_scene_rect(shape);
         let frame = Self::shape_scene_rect(shape);
+        // a member of a group that has no shape of its own stands for the whole group
+        if let Some(root) = self.engine.group_of_part(self.page_index, id) {
+            let all = self.engine.document.as_ref()?.pages.get(self.page_index)?.shapes.iter();
+            let members = all.filter(|member| member.group.as_ref().and_then(|group| group.get("rootId")).and_then(|value| value.as_str()) == Some(root.as_str()));
+            return Some(members.filter_map(|member| self.scene_shape(member.visio_id.as_deref()?)).map(Self::selection_scene_rect).fold(own, egui::Rect::union));
+        }
         if shape.rot.abs() > 1e-6 || frame.height() >= HAIRLINE_FRAME {
             return Some(own);
         }
@@ -6441,7 +6500,7 @@ impl LayoutCraftApp {
             let Some(shape) = self.doc_shape(&id) else {
                 return;
             };
-            if shape.group.is_some() {
+            if shape.group.is_some() && !self.can_act_on(&id) {
                 self.status =
                     "Grouped shapes are read-only in this slice; move the whole group later."
                         .to_string();
@@ -6534,7 +6593,7 @@ impl LayoutCraftApp {
             let delta = rect.min - start.min;
             if (delta - self.last_live_delta).length() > 1.0 {
                 self.last_live_delta = delta;
-                let ids = self.all_selected();
+                let ids = self.whole(&self.all_selected());
                 let page = self.page_index;
                 if let Ok(json) = self.engine.preview_move(page, &ids, (f64::from(delta.x) / DPI, -f64::from(delta.y) / DPI)) {
                     self.live_routes = routes_from_preview(&json, self.page_height_in);
@@ -6715,11 +6774,15 @@ impl LayoutCraftApp {
                 let (dx, dy) = ((rect.min.x - old.min.x) as f64 / DPI, -((rect.min.y - old.min.y) as f64) / DPI);
                 let page = self.page_index;
                 let edit_timer = Timer::new("  engine.edit (move)", 0.0);
-                let everyone = self.all_selected();
-                let result = if everyone.len() > 1 && everyone.iter().any(|id| id == visio_id) {
+                let mut everyone = self.all_selected();
+                if !everyone.iter().any(|id| id == visio_id) {
+                    everyone = vec![visio_id.to_string()];
+                }
+                let everyone = self.whole(&everyone);
+                let result = if everyone.len() > 1 {
                     self.engine.edit(page, 5, &everyone.join("\n"), dx, dy, 0.0, 0.0, 0)
                 } else {
-                    self.engine.edit(page, 2, visio_id, dx, dy, 0.0, 0.0, 0)
+                    self.engine.edit(page, 2, &everyone[0], dx, dy, 0.0, 0.0, 0)
                 };
                 drop(edit_timer);
                 if let Err(error) = result {
@@ -7047,10 +7110,11 @@ impl LayoutCraftApp {
         if ids.is_empty() {
             return;
         }
-        if ids.iter().any(|id| self.doc_shape(id).is_some_and(|shape| shape.group.is_some())) {
+        if ids.iter().any(|id| self.doc_shape(id).is_some() && !self.can_act_on(id)) {
             self.status = "A member of a group cannot be deleted alone: select the group.".to_string();
             return;
         }
+        let ids = self.whole(&ids);
         let page = self.page_index;
         // op 6 deletes several shapes as ONE undo step (the web's deleteShapes); op 4 is the single-shape form
         let result = if ids.len() == 1 { self.engine.edit(page, 4, &ids[0], 0.0, 0.0, 0.0, 0.0, 0) } else { self.engine.edit(page, 6, &ids.join("\n"), 0.0, 0.0, 0.0, 0.0, 0) };
@@ -7083,9 +7147,10 @@ impl LayoutCraftApp {
     /// An arrow key: move the selection by (dx, dy) inches (y up), one undo step; the web's `moveMembers`.
     fn nudge_selected(&mut self, ctx: &egui::Context, dx: f64, dy: f64) {
         let ids = self.all_selected();
-        if ids.is_empty() || ids.iter().any(|id| self.doc_shape(id).is_none_or(|shape| shape.group.is_some())) {
+        if ids.is_empty() || ids.iter().any(|id| !self.can_act_on(id)) {
             return;
         }
+        let ids = self.whole(&ids);
         let page = self.page_index;
         let result = if ids.len() == 1 { self.engine.edit(page, 2, &ids[0], dx, dy, 0.0, 0.0, 0) } else { self.engine.edit(page, 5, &ids.join("\n"), dx, dy, 0.0, 0.0, 0) };
         self.finish_edit(ctx, result, "Moved", self.selected.clone());
@@ -9304,7 +9369,8 @@ impl LayoutCraftApp {
             return;
         };
         let page = self.page_index;
-        match self.engine.copy(page, std::slice::from_ref(&id)) {
+        let whole = self.whole(std::slice::from_ref(&id));
+        match self.engine.copy(page, &whole) {
             Ok(count) => {
                 self.paste_count = 0;
                 self.status = format!("Copied {count} shape(s); Paste or Ctrl+V puts them on the page.");
