@@ -605,6 +605,11 @@ fn all_struck(engine: &Engine, page: usize, ids: &[String]) -> bool {
 
 /// Whether the character cell `cell` is 1 over the whole text of every one of the shapes that has text.
 fn all_set(engine: &Engine, page: usize, ids: &[String], cell: &str) -> bool {
+    all_state(engine, page, ids, cell, |value| value == "1")
+}
+
+/// Whether the character cell `cell` passes `is` over the whole text of every one of the shapes that has text.
+fn all_state(engine: &Engine, page: usize, ids: &[String], cell: &str, is: impl Fn(&str) -> bool) -> bool {
     let targets = text_targets(engine, page, ids);
     !targets.is_empty()
         && targets.iter().all(|(owner, length)| {
@@ -612,9 +617,12 @@ fn all_set(engine: &Engine, page: usize, ids: &[String], cell: &str) -> bool {
                 .text_state_json(page, owner, 0, *length)
                 .ok()
                 .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-                .is_some_and(|state| state["char"][cell].as_str() == Some("1"))
+                .is_some_and(|state| state["char"][cell].as_str().is_some_and(&is))
         })
 }
+
+/// The bit of the `Style` cell that draws small capitals.
+const SMALL_CAPITALS: u64 = 8;
 
 #[cfg(test)]
 mod text_format_tests {
@@ -826,6 +834,19 @@ mod replace_tests {
 /// The `Engine::edit` op 10 style that switches the shadow on or off.
 fn shadow_style(on: bool) -> String {
     serde_json::json!({ "shadow": on }).to_string()
+}
+
+/// The style that switches an effect on as `on` writes it, or off (a size of nothing, or no reflection).
+fn effect_style(on: serde_json::Value, wanted: bool) -> serde_json::Value {
+    if wanted {
+        return on;
+    }
+    let off = on.as_object().into_iter().flatten().filter_map(|(key, value)| match value {
+        serde_json::Value::Number(_) => Some((key.clone(), serde_json::json!(0))),
+        serde_json::Value::Bool(_) => Some((key.clone(), serde_json::json!(false))),
+        _ => None,
+    });
+    serde_json::Value::Object(off.collect())
 }
 
 #[cfg(test)]
@@ -1042,6 +1063,15 @@ fn ribbon_tab(ui: &mut egui::Ui, name: &str, chosen: bool) -> egui::Response {
 
 /// The frame drawn round a container that a dragged shape would join: dark enough against the white page.
 const CONTAINER_MARK: egui::Color32 = egui::Color32::from_rgb(0, 110, 60);
+
+/// What Home > Select picks.
+#[derive(Clone, Copy)]
+enum Kind {
+    All,
+    Shapes,
+    Connectors,
+    Containers,
+}
 
 /// A ribbon command with its icon over its name, as high as a group.
 fn large_button(ui: &mut egui::Ui, icon: &egui::TextureHandle, label: &str, enabled: bool, selected: bool) -> egui::Response {
@@ -2166,6 +2196,9 @@ mod sheet_tests {
         assert!(sheet_groups("nonsense").is_empty());
     }
 }
+
+/// How many of the shapes placed last the Shapes panel keeps in reach.
+const RECENT_MASTERS: usize = 6;
 
 /// A click on the header of stencil `clicked` in the Shapes panel, where only one stencil is open at a time: it opens
 /// (closing the other), or closes when it was the open one.
@@ -3805,6 +3838,35 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_blank_page_of_a_chosen_size_starts_from_the_file_page_after_asking_about_changes() {
+        let (mut driver, _ids) = Driver::new();
+        let open = |driver: &mut Driver, label: &str| {
+            let at = *driver.texts(label).first().unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let page = |driver: &Driver| {
+            (driver.app.engine.document().unwrap().pages[0].shapes.len(), driver.app.texture_size.x, driver.app.texture_size.y)
+        };
+        let before = page(&driver);
+        driver.app.dirty = true;
+        open(&mut driver, "File");
+        open(&mut driver, "A4 portrait");
+        assert_eq!(page(&driver), before, "unsaved changes are asked about first");
+        driver.app.dirty = false;
+        driver.app.pending_open = None;
+        driver.frames(2);
+        open(&mut driver, "File");
+        open(&mut driver, "A4 portrait");
+        let tall = page(&driver);
+        assert!(tall.0 == 0 && tall.2 > tall.1, "{tall:?}");
+        open(&mut driver, "File");
+        open(&mut driver, "A4 landscape");
+        let wide = page(&driver);
+        assert!(wide.1 > wide.2 && (wide.1 - tall.2).abs() < 2.0, "{wide:?} {tall:?}");
+    }
+
+    #[test]
     fn a_click_on_a_part_of_a_group_without_a_body_acts_on_the_whole_group() {
         let (mut driver, ids) = Driver::new();
         driver.app.engine.group_op(0, 0, &ids.join("\n")).unwrap();
@@ -3990,6 +4052,194 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn glow_soft_edges_and_reflection_are_switched_on_and_off_from_the_styles_menu() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        let press = |driver: &mut Driver, label: &str| {
+            if driver.texts(label).is_empty() {
+                let group = *driver.texts("Styles \u{25be}").first().expect("the Shape Styles group");
+                driver.click(group.center(), Modifiers::NONE);
+                driver.frames(3);
+            }
+            let at = *driver.texts(label).first().unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let has = |driver: &Driver| {
+            let shape = driver.app.doc_shape(&ids[0]).unwrap();
+            [shape.glow.is_some(), shape.soft_edge.is_some(), shape.reflection.is_some()]
+        };
+        assert_eq!(has(&driver), [false; 3]);
+        for (index, name) in ["Glow", "Soft edges", "Reflection"].into_iter().enumerate() {
+            press(&mut driver, name);
+            let mut wanted = [false; 3];
+            wanted[index] = true;
+            assert_eq!(has(&driver), wanted, "{name} on: {}", driver.app.status);
+            press(&mut driver, name);
+            assert_eq!(has(&driver), [false; 3], "{name} off: {}", driver.app.status);
+        }
+        assert!(driver.app.doc_shape(&ids[1]).unwrap().glow.is_none(), "only the selected shape");
+    }
+
+    #[test]
+    fn raised_lowered_and_small_capital_text_are_switched_from_the_font_group() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.width = 1920.0;
+        driver.frames(4);
+        let press = |driver: &mut Driver, label: &str| {
+            let at = *driver.texts(label).first().unwrap_or_else(|| panic!("nothing says {label:?}"));
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        let state = |driver: &Driver, cell: &str| {
+            let text = driver.app.engine.text_state_json(0, &ids[0], 0, 5).unwrap();
+            serde_json::from_str::<serde_json::Value>(&text).unwrap()["char"][cell].as_str().unwrap_or("").to_string()
+        };
+        press(&mut driver, "x\u{b2}");
+        assert_eq!(state(&driver, "Pos"), "1", "{}", driver.app.status);
+        // lowering takes the place of raising, and a second press brings the text back to the line
+        press(&mut driver, "x\u{2082}");
+        assert_eq!(state(&driver, "Pos"), "2");
+        press(&mut driver, "x\u{2082}");
+        assert_eq!(state(&driver, "Pos"), "0");
+        // the small-capitals bit of the style cell (8), whether or not the cell was there before
+        let small = |driver: &Driver| state(driver, "Style").parse::<u32>().unwrap_or(0) & 8 != 0;
+        assert!(!small(&driver));
+        press(&mut driver, "aA");
+        assert!(small(&driver), "{}", driver.app.status);
+        press(&mut driver, "aA");
+        assert!(!small(&driver));
+    }
+
+    #[test]
+    fn the_select_menu_picks_all_shapes_connectors_or_containers() {
+        let (mut driver, ids) = Driver::new();
+        let third = driver.app.engine.draw(0, 0, 1.0, 0.5, 2.0, 1.5).unwrap();
+        let line = driver.app.engine.add_connector(0, &ids[0], None, &ids[1], None).unwrap();
+        let made = driver.app.engine.insert_container(0, std::slice::from_ref(&third)).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.width = 1920.0;
+        driver.frames(4);
+        let choose = |driver: &mut Driver, entry: &str| {
+            for label in ["Select \u{25be}", entry] {
+                let at = *driver.texts(label).first().unwrap_or_else(|| panic!("nothing says {label:?}"));
+                driver.click(at.center(), Modifiers::NONE);
+                driver.frames(3);
+            }
+            let mut chosen = driver.app.all_selected();
+            chosen.sort();
+            chosen
+        };
+        let sorted = |ids: &[&String]| {
+            let mut out: Vec<String> = ids.iter().map(|id| (*id).clone()).collect();
+            out.sort();
+            out
+        };
+        assert_eq!(choose(&mut driver, "All connectors"), sorted(&[&line]));
+        assert_eq!(choose(&mut driver, "All containers"), sorted(&[&made]));
+        assert_eq!(choose(&mut driver, "All shapes"), sorted(&[&ids[0], &ids[1], &third, &made]));
+        assert_eq!(choose(&mut driver, "Select all"), sorted(&[&ids[0], &ids[1], &third, &made, &line]));
+    }
+
+    #[test]
+    fn a_command_found_by_searching_runs_and_closes_the_list() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.selected = Some(ids[0].clone());
+        driver.frames(3);
+        let search = |driver: &mut Driver, text: &str| {
+            driver.run(vec![Event::Key { key: egui::Key::Q, physical_key: None, pressed: true, repeat: false, modifiers: Modifiers::ALT }]);
+            driver.frames(3);
+            driver.run(vec![Event::Text(text.to_string())]);
+            driver.frames(3);
+        };
+        assert!(driver.texts("Container").is_empty(), "the command is on another tab");
+        search(&mut driver, "contain");
+        assert_eq!(driver.app.command_search, "contain");
+        let found = *driver.texts("Container").first().expect("the match is listed");
+        driver.click(found.center(), Modifiers::NONE);
+        driver.frames(3);
+        let made = driver.app.selected.clone().expect("the container is selected");
+        assert!(driver.app.engine.container_members(0, &made).is_some(), "{}", driver.app.status);
+        assert!(driver.app.command_search.is_empty() && driver.texts("Container").is_empty());
+        search(&mut driver, "no such thing");
+        assert_eq!(driver.texts("No command matches.").len(), 1);
+        driver.key(egui::Key::Escape, Modifiers::NONE);
+        driver.frames(3);
+        assert!(driver.app.command_search.is_empty());
+    }
+
+    #[test]
+    fn the_shapes_panel_lists_the_stencils_over_the_shapes_of_the_chosen_one() {
+        let (mut driver, _ids) = Driver::new();
+        driver.app.stencils.clear();
+        driver.app.open_builtin_stencil();
+        driver.frames(4);
+        let master = driver.app.stencils[0].masters[0].1.clone();
+        let row = *driver.texts("Basic shapes").first().expect("the stencil has its line");
+        let shape = *driver.texts(&master).first().expect("its shapes are listed");
+        assert!(shape.top() > row.bottom(), "the shapes are under the list of stencils");
+        assert_eq!(driver.texts("More shapes \u{25b8}").len(), 1);
+        // the chosen line closes its shapes, and opens them again
+        for shown in [false, true] {
+            driver.click(row.center(), Modifiers::NONE);
+            driver.frames(3);
+            assert_eq!(!driver.texts(&master).is_empty(), shown);
+        }
+        driver.click(shape.center(), Modifiers::NONE);
+        driver.frames(3);
+        assert!(driver.app.armed_master.as_ref().is_some_and(|(.., name)| *name == master), "{}", driver.app.status);
+    }
+
+    #[test]
+    fn a_placed_shape_is_kept_under_recently_used() {
+        let (mut driver, _ids) = Driver::new();
+        driver.app.stencils.clear();
+        driver.app.recent_masters.clear();
+        driver.app.open_builtin_stencil();
+        driver.frames(4);
+        assert!(driver.texts("Recently used").is_empty());
+        let names: Vec<String> = driver.app.stencils[0].masters.iter().take(2).map(|(_, name)| name.clone()).collect();
+        let place = |driver: &mut Driver, name: &str, across: f32| {
+            // the lowest line with the name is the one in the stencil's own list
+            let cell = driver.texts(name).into_iter().max_by(|a, b| a.top().total_cmp(&b.top())).expect("the shape is listed");
+            driver.click(cell.center(), Modifiers::NONE);
+            driver.frames(3);
+            let image = driver.app.image_rect(driver.app.last_viewport);
+            driver.click(pos2(image.left() + image.width() * across, image.bottom() - image.height() * 0.15), Modifiers::NONE);
+            driver.frames(3);
+        };
+        place(&mut driver, &names[0], 0.3);
+        place(&mut driver, &names[1], 0.7);
+        let kept = |driver: &Driver| driver.app.recent_masters.iter().map(|(.., name)| name.clone()).collect::<Vec<_>>();
+        assert_eq!(kept(&driver), [names[1].clone(), names[0].clone()], "{}", driver.app.status);
+        assert_eq!((driver.texts("Recently used").len(), driver.texts(&names[0]).len()), (1, 2));
+        // using one again moves it to the front, once
+        place(&mut driver, &names[0], 0.5);
+        assert_eq!(kept(&driver), [names[0].clone(), names[1].clone()]);
+    }
+
+    #[test]
+    fn a_narrow_window_leaves_out_names_only_on_the_crowded_tabs() {
+        let (mut driver, _ids) = Driver::new();
+        driver.width = 1300.0;
+        driver.frames(4);
+        let open = |driver: &mut Driver, tab: &str| {
+            let at = driver.texts(tab)[0];
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        open(&mut driver, "Help");
+        assert_eq!(driver.texts("Keyboard shortcuts").len(), 1);
+        open(&mut driver, "View");
+        assert!(driver.texts("Zoom In").is_empty());
+        driver.width = 1920.0;
+        driver.frames(4);
+        assert_eq!(driver.texts("Zoom In").len(), 1);
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -4009,7 +4259,7 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
         let depth = driver.app.engine.undo_depth();
         press(&mut driver, "Caps");
         assert!(drawn(&driver).contains("LABEL"), "{}", driver.app.status);
-        assert_eq!((driver.app.engine.undo_depth(), driver.app.selection_text_flags()), (depth + 1, [false, true]));
+        assert_eq!((driver.app.engine.undo_depth(), driver.app.selection_text_flags()), (depth + 1, [false, true, false, false, false]));
         press(&mut driver, "Caps");
         assert!(!drawn(&driver).contains("LABEL") && drawn(&driver).contains("label"), "{}", driver.app.status);
     }
@@ -5098,8 +5348,8 @@ struct ShapeMetrics {
 
 #[derive(Clone)]
 enum PendingOpen {
-    /// A new empty drawing.
-    New,
+    /// A new empty drawing of this page width and height (inches), in millimetres or not.
+    New(f64, f64, bool),
     Reload,
     Load(String),
 }
@@ -5283,6 +5533,8 @@ struct LayoutCraftApp {
     tab_before_file: usize,
     ribbon_collapsed: bool,
     ribbon_peek: bool,
+    /// What is typed in the command search box of the tab row.
+    command_search: String,
     ribbon_compact: bool,
     /// The command being drawn is the large one of its group.
     ribbon_large: bool,
@@ -5311,6 +5563,10 @@ struct LayoutCraftApp {
     shapes_minimised: bool,
     /// The one stencil of the Shapes panel that is open (its engine slot).
     open_stencil_shown: Option<usize>,
+    /// The masters placed last, newest first, as (stencil, master, name); kept while the app runs.
+    recent_masters: Vec<(usize, String, String)>,
+    /// The recently opened drawings shown on the File page, with when each was last changed (read once per visit).
+    recent_dates: Vec<(std::path::PathBuf, String)>,
     /// The Shape Formulas window, while it is open.
     sheet_pane: Option<SheetPane>,
     /// The last press was on the canvas (or all shapes were selected by key); a Tab to apply to the shapes.
@@ -5361,7 +5617,7 @@ struct LayoutCraftApp {
     /// The Find window, while it is open.
     find: Option<Find>,
     /// (selected ids, whether all their text is struck through) for the Strike button.
-    struck_cache: Option<(String, [bool; 2])>,
+    struck_cache: Option<(String, [bool; 5])>,
     page_setup_open: bool,
     check_open: bool,
     shapes_open: bool,
@@ -5490,6 +5746,7 @@ impl LayoutCraftApp {
             tab_before_file: 1,
             ribbon_collapsed: false,
             ribbon_peek: false,
+            command_search: String::new(),
             ribbon_compact: false,
             ribbon_large: false,
             ribbon_unfolded: false,
@@ -5506,6 +5763,8 @@ impl LayoutCraftApp {
             magnify_from: None,
             shapes_minimised: false,
             open_stencil_shown: None,
+            recent_masters: Vec::new(),
+            recent_dates: Vec::new(),
             sheet_pane: None,
             canvas_keys: false,
             tab_cycle: None,
@@ -5654,8 +5913,8 @@ impl LayoutCraftApp {
             .map_or(0, |document| document.pages.len());
         self.status = if is_scene {
             format!("Imported {} as a new drawing; use Save as to keep it", path.display())
-        } else if let Some(conversion) = &self.engine.conversion {
-            format!("{} - {pages} page(s). {}", path.display(), conversion.message())
+        } else if let Some(notice) = self.engine.open_notice() {
+            format!("{} - {pages} page(s). {notice}", path.display())
         } else {
             format!("{} - {pages} page(s)", path.display())
         };
@@ -5663,7 +5922,11 @@ impl LayoutCraftApp {
 
     /// A new empty drawing (one page, 11 x 8.5 in), as the web's New.
     fn new_drawing(&mut self, ctx: &egui::Context) {
-        if let Err(error) = self.engine.new_blank(11.0, 8.5, false, "Page-1") {
+        self.new_drawing_sized(ctx, 11.0, 8.5, false);
+    }
+
+    fn new_drawing_sized(&mut self, ctx: &egui::Context, width: f64, height: f64, metric: bool) {
+        if let Err(error) = self.engine.new_blank(width, height, metric, "Page-1") {
             self.status = format!("Could not create a drawing: {error}");
             return;
         }
@@ -7250,7 +7513,7 @@ impl LayoutCraftApp {
             return;
         };
         match pending {
-            PendingOpen::New => self.new_drawing(ctx),
+            PendingOpen::New(width, height, metric) => self.new_drawing_sized(ctx, width, height, metric),
             PendingOpen::Reload => self.reload(ctx),
             PendingOpen::Load(path) => self.load(ctx, Path::new(&path)),
         }
@@ -7355,6 +7618,44 @@ impl LayoutCraftApp {
     }
 
     /// Ctrl+A: every page-level shape (not a group member), the first one primary.
+    /// Select > one kind: the shapes (a group without a shape of its own through one of its members), the connectors, or
+    /// the containers of the page; "Select all" takes shapes and connectors.
+    fn select_kind(&mut self, kind: Kind) {
+        let Some(page) = self.engine.document.as_ref().and_then(|document| document.pages.get(self.page_index)) else {
+            return;
+        };
+        let mut shapes: Vec<String> = Vec::new();
+        let mut groups: Vec<String> = Vec::new();
+        for shape in &page.shapes {
+            let Some(id) = shape.visio_id.as_deref() else { continue };
+            // what an edit of this shape would act on: the shape itself, or its whole group
+            let acts_on = self.engine.group_of_part(self.page_index, id);
+            if shape.group.is_some() && acts_on.is_none() {
+                continue;
+            }
+            let owner = acts_on.unwrap_or_else(|| id.to_string());
+            if !groups.contains(&owner) {
+                groups.push(owner);
+                shapes.push(id.to_string());
+            }
+        }
+        let connectors: Vec<String> = page.connectors.iter().filter_map(|connector| connector.visio_id.clone()).collect();
+        let ids: Vec<String> = match kind {
+            Kind::All => shapes.into_iter().chain(connectors).collect(),
+            Kind::Shapes => shapes,
+            Kind::Connectors => connectors,
+            Kind::Containers => shapes.into_iter().zip(groups).filter(|(_, owner)| self.engine.container_members(self.page_index, owner).is_some()).map(|(id, _)| id).collect(),
+        };
+        let mut ids = ids.into_iter();
+        self.selected = ids.next();
+        self.extra_selected = ids.collect();
+        self.status = match self.all_selected().len() {
+            0 => "There is nothing of that kind on this page.".to_string(),
+            count => format!("{count} object(s) selected"),
+        };
+        self.canvas_keys = true;
+    }
+
     fn select_all(&mut self) {
         let Some(scene) = self.scene.as_ref() else {
             return;
@@ -7411,10 +7712,12 @@ impl LayoutCraftApp {
     /// live, the others are greyed out with a tooltip.
     fn draw_ribbon(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
         let ctx = ui.ctx().clone();
-        // like the web: below 1750 px the buttons that have an icon and a text show only the icon
+        // in a narrow window the buttons that have an icon and a text show only the icon, on the two tabs that would not
+        // fit otherwise (Home and View); the others have room for their names at any width
         let width = ctx.content_rect().width();
-        let home = self.ribbon.tabs.get(self.ribbon_tab).is_some_and(|tab| tab.name == "Home");
-        self.ribbon_compact = ribbon::is_compact(width) || (home && width < ribbon::UNFOLDED_COMPACT_BELOW);
+        let tab_name = self.ribbon.tabs.get(self.ribbon_tab).map_or("", |tab| tab.name.as_str());
+        let (home, crowded) = (tab_name == "Home", matches!(tab_name, "Home" | "View"));
+        self.ribbon_compact = (crowded && ribbon::is_compact(width)) || (home && width < ribbon::UNFOLDED_COMPACT_BELOW);
         // Ctrl+F1 collapses / expands the ribbon (web/keyboard.js)
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F1)) {
             self.ribbon_collapsed = !self.ribbon_collapsed;
@@ -7432,6 +7735,7 @@ impl LayoutCraftApp {
         let name = window_title(self.loaded_path.as_deref(), self.engine.export().is_some(), self.dirty);
         let space = egui::Rect::from_center_size(egui::pos2(ui.max_rect().center().x, buttons.center().y), egui::vec2((width - 2.0 * (buttons.width() + 24.0)).max(80.0), buttons.height()));
         ui.put(space, egui::Label::new(name).truncate());
+        let mut search_field = None;
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
             for index in 0..self.ribbon.tabs.len() {
@@ -7452,8 +7756,17 @@ impl LayoutCraftApp {
                     self.ribbon_collapsed = !self.ribbon_collapsed;
                     self.ribbon_peek = false;
                 }
+                let field = ui.add(egui::TextEdit::singleline(&mut self.command_search).hint_text("Search commands (Alt+Q)").desired_width(170.0));
+                name_control(ui, &field, "Search commands");
+                if ui.input_mut(|input| input.consume_key(egui::Modifiers::ALT, egui::Key::Q)) {
+                    field.request_focus();
+                }
+                search_field = Some(field.rect);
             });
         });
+        if let Some(field) = search_field {
+            self.draw_command_search(&ctx, field, action);
+        }
         let tab = self.ribbon.tabs[self.ribbon_tab.min(self.ribbon.tabs.len() - 1)].clone();
         if !self.ribbon_collapsed {
             egui::ScrollArea::horizontal().id_salt("ribbon-scroll").show(ui, |ui| self.draw_ribbon_groups(ui, &ctx, &tab, action));
@@ -7473,6 +7786,42 @@ impl LayoutCraftApp {
             }
         }
         ui.add_space(2.0);
+    }
+
+    /// The list under the search box: each command that matches, as the control the ribbon itself draws for it, so that
+    /// it does the same thing and is greyed out in the same cases. Using one, Escape, or a click elsewhere closes it.
+    fn draw_command_search(&mut self, ctx: &egui::Context, field: egui::Rect, action: &mut Option<Action>) {
+        if self.command_search.trim().is_empty() {
+            return;
+        }
+        let found = ribbon::search(&self.ribbon, &self.command_search);
+        let area = egui::Area::new(egui::Id::new("command-search")).order(egui::Order::Foreground).pivot(egui::Align2::RIGHT_TOP).fixed_pos(field.right_bottom() + egui::vec2(0.0, 2.0)).show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_width(320.0);
+                if found.is_empty() {
+                    ui.label("No command matches.");
+                }
+                let compact = std::mem::replace(&mut self.ribbon_compact, false);
+                for (tab, group, id) in found.iter().take(8) {
+                    ui.push_id(id, |ui| {
+                        ui.horizontal(|ui| {
+                            self.ribbon_button(ui, ctx, id, action);
+                            ui.weak(format!("{tab} \u{203a} {group}"));
+                        });
+                    });
+                }
+                self.ribbon_compact = compact;
+                if found.len() > 8 {
+                    ui.weak(format!("{} more: type more of the name.", found.len() - 8));
+                }
+            });
+        });
+        let rect = area.response.rect;
+        // a drop-down opened from the list may reach past it
+        let outside = !egui::Popup::is_any_open(ctx) && ctx.input(|input| input.pointer.any_pressed() && input.pointer.interact_pos().is_some_and(|at| !rect.contains(at) && !field.contains(at)));
+        if action.is_some() || outside || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.command_search.clear();
+        }
     }
 
     /// The groups of one tab side by side, each with its items in a grid of two rows (column after column, like the web's `grid-auto-flow: column`
@@ -7611,6 +7960,21 @@ impl LayoutCraftApp {
                     self.tool = if selected { Tool::Select } else { Tool::Draw(kind as i32) };
                 }
             }
+            return;
+        }
+        if id == "selectMenu" {
+            ui.add_enabled_ui(self.texture.is_some(), |ui| {
+                ui.menu_button("Select \u{25be}", |ui| {
+                    for (label, kind) in [("Select all", Kind::All), ("All shapes", Kind::Shapes), ("All connectors", Kind::Connectors), ("All containers", Kind::Containers)] {
+                        if ui.button(label).clicked() {
+                            *action = Some(Action::SelectKind(kind));
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Select objects on this page");
+            });
             return;
         }
         if id == "gridStep" {
@@ -7777,7 +8141,7 @@ impl LayoutCraftApp {
                 }
             }
             "p:strike" => {
-                let [struck, capitals] = self.selection_text_flags();
+                let [struck, capitals, raised, lowered, small] = self.selection_text_flags();
                 let on = enabled && struck;
                 let button = ui.add_enabled(enabled, egui::Button::new(egui::RichText::new(if short { "S" } else { "Strike" }).strikethrough()).selected(on).min_size(egui::vec2(24.0, 0.0)));
                 name_control(ui, &button, "Strikethrough");
@@ -7789,6 +8153,18 @@ impl LayoutCraftApp {
                 name_control(ui, &button, "All capitals");
                 if button.on_hover_text("All capitals for the whole text").clicked() {
                     *action = Some(Action::FormatText(serde_json::json!({ "cells": { "Case": if on { "0" } else { "1" } } })));
+                }
+                // raised and lowered text (one or the other), and small capitals
+                for (long, brief, name, on, spec) in [
+                    ("Superscript", "x\u{b2}", "Superscript", raised, serde_json::json!({ "cells": { "Pos": if raised && enabled { "0" } else { "1" } } })),
+                    ("Subscript", "x\u{2082}", "Subscript", lowered, serde_json::json!({ "cells": { "Pos": if lowered && enabled { "0" } else { "2" } } })),
+                    ("Small caps", "aA", "Small capitals", small, if small && enabled { serde_json::json!({ "clear": SMALL_CAPITALS }) } else { serde_json::json!({ "set": SMALL_CAPITALS }) }),
+                ] {
+                    let button = ui.add_enabled(enabled, egui::Button::new(if short { brief } else { long }).selected(enabled && on).min_size(egui::vec2(24.0, 0.0)));
+                    name_control(ui, &button, name);
+                    if button.on_hover_text(format!("{name}, for the whole text")).clicked() {
+                        *action = Some(Action::FormatText(spec));
+                    }
                 }
                 // in the ribbon: a letter over a bar of the colour the text has now
                 let colour = primary.as_ref().and_then(|shape| shape.text_color.as_deref()).and_then(typed_colour);
@@ -7847,6 +8223,18 @@ impl LayoutCraftApp {
                 let on = primary.as_ref().is_some_and(|shape| shape.shadow.is_some());
                 if ui.add_enabled(enabled, egui::Button::new("Shadow").selected(on)).on_hover_text("Shadow of the selected shapes").clicked() {
                     *action = Some(Action::StyleSelected(shadow_style(!on)));
+                }
+                // the other effects, each a check box that shows what the shape has
+                let has = |pick: fn(&Shape) -> bool| primary.as_ref().is_some_and(pick);
+                for (name, tip, on, style) in [
+                    ("Glow", "A soft coloured edge round the selected shapes", has(|shape| shape.glow.is_some()), serde_json::json!({ "glowPx": 8, "glowColor": "#5b9bd5" })),
+                    ("Soft edges", "Edges that fade out", has(|shape| shape.soft_edge.is_some()), serde_json::json!({ "softEdgesPx": 4 })),
+                    ("Reflection", "A mirror image under the selected shapes", has(|shape| shape.reflection.is_some()), serde_json::json!({ "reflection": true })),
+                ] {
+                    let mut ticked = on;
+                    if ui.add_enabled(enabled, egui::Checkbox::new(&mut ticked, name)).on_hover_text(tip).changed() {
+                        *action = Some(Action::StyleSelected(effect_style(style, ticked).to_string()));
+                    }
                 }
             }
             "p:fontFamily" => {
@@ -7963,13 +8351,20 @@ impl LayoutCraftApp {
 
     /// Whether the whole text of the selection is struck through, and whether it is in all capitals; remembered until the
     /// page is rebuilt or the selection changes (it reads the file's XML).
-    fn selection_text_flags(&mut self) -> [bool; 2] {
+    fn selection_text_flags(&mut self) -> [bool; 5] {
         let ids = self.all_selected();
         let key = ids.join("\n");
         match &self.struck_cache {
             Some((known, flags)) if *known == key => *flags,
             _ => {
-                let flags = [all_struck(&self.engine, self.page_index, &ids), all_set(&self.engine, self.page_index, &ids, "Case")];
+                let (engine, page) = (&self.engine, self.page_index);
+                let flags = [
+                    all_struck(engine, page, &ids),
+                    all_set(engine, page, &ids, "Case"),
+                    all_state(engine, page, &ids, "Pos", |value| value == "1"),
+                    all_state(engine, page, &ids, "Pos", |value| value == "2"),
+                    all_state(engine, page, &ids, "Style", |value| value.parse::<u64>().is_ok_and(|bits| bits & SMALL_CAPITALS != 0)),
+                ];
                 self.struck_cache = Some((key, flags));
                 flags
             }
@@ -8215,6 +8610,15 @@ impl LayoutCraftApp {
             Ok(()) => format!("Opened the stencil {name}: click a shape, then click on the page to place it. {converted}"),
             Err(error) => format!("Could not open {}: {error}", path.display()),
         };
+    }
+
+    /// A master has been put on a page: it heads the recently used shapes, which hold the last few.
+    fn remember_master(&mut self, index: usize, master: &str) {
+        let name = self.stencils.iter().find(|stencil| stencil.index == index).and_then(|stencil| stencil.masters.iter().find(|(id, _)| id == master)).map(|(_, name)| name.clone());
+        let Some(name) = name else { return };
+        self.recent_masters.retain(|(other, id, _)| (*other, id.as_str()) != (index, master));
+        self.recent_masters.insert(0, (index, master.to_string(), name));
+        self.recent_masters.truncate(RECENT_MASTERS);
     }
 
     /// The thumbnail of a master as a texture (36 px was the ribbon; 56 px here), rendered once when the cell is first shown.
@@ -10234,17 +10638,44 @@ impl eframe::App for LayoutCraftApp {
             egui::Panel::left("shapes").default_size(250.0).resizable(true).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading("Shapes");
-                    if ui.small_button("\u{ab} Minimise").on_hover_text("Narrow the Shapes panel to a column").clicked() {
-                        self.shapes_minimised = true;
-                    }
-                    if ui.small_button("Open stencil…").clicked() {
-                        open_stencil = true;
-                    }
-                    if ui.small_button("Basic shapes").clicked() {
-                        builtin = true;
-                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let narrow = ui.small_button("\u{ab}");
+                        name_control(ui, &narrow, "Minimise the Shapes panel");
+                        if narrow.on_hover_text("Narrow the Shapes panel to a column").clicked() {
+                            self.shapes_minimised = true;
+                        }
+                    });
                 });
                 ui.add(egui::TextEdit::singleline(&mut self.shape_search).hint_text("Search shapes").desired_width(f32::INFINITY));
+                ui.menu_button("More shapes \u{25b8}", |ui| {
+                    if ui.button("Open stencil file\u{2026}").clicked() {
+                        open_stencil = true;
+                        ui.close();
+                    }
+                    if ui.button("Add the basic shapes").clicked() {
+                        builtin = true;
+                        ui.close();
+                    }
+                });
+                // the open stencils, one line each; the one whose shapes are listed below is filled and in strong type
+                ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                    for si in 0..self.stencils.len() {
+                        let (name, index, count) = (self.stencils[si].name.clone(), self.stencils[si].index, self.stencils[si].masters.len());
+                        let shown = self.open_stencil_shown == Some(index);
+                        let text = if shown { egui::RichText::new(name).strong() } else { egui::RichText::new(name) };
+                        let row = ui.selectable_label(shown, text).on_hover_text(format!("{count} shapes; right-click to close the stencil"));
+                        if row.clicked() {
+                            self.open_stencil_shown = stencil_clicked(self.open_stencil_shown, index);
+                        }
+                        row.context_menu(|ui| {
+                            if ui.button("Close this stencil").clicked() {
+                                close = Some(si);
+                                ui.close();
+                            }
+                        });
+                    }
+                });
+                ui.separator();
                 if self.change_shape {
                     ui.add(egui::Label::new(egui::RichText::new("Change Shape: click the new shape (Esc cancels).").small()).wrap());
                 } else if let Some((_, _, name)) = &self.armed_master {
@@ -10252,72 +10683,81 @@ impl eframe::App for LayoutCraftApp {
                 } else if self.stencils.is_empty() {
                     ui.label("No stencil open.");
                 }
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for si in 0..self.stencils.len() {
-                        let (name, index) = (self.stencils[si].name.clone(), self.stencils[si].index);
-                        let masters: Vec<(String, String)> = self.stencils[si].masters.iter().filter(|(_, mname)| master_matches(mname, &self.shape_search)).cloned().collect();
-                        if masters.is_empty() && !self.shape_search.trim().is_empty() {
+                let searching = !self.shape_search.trim().is_empty();
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                    // lists of (heading, shapes): the recently used ones, then the chosen stencil; a search instead shows the
+                    // matches of every stencil under its name
+                    let mut lists: Vec<(Option<String>, Vec<(usize, String, String)>)> = Vec::new();
+                    if !searching && !self.recent_masters.is_empty() {
+                        lists.push((Some("Recently used".to_string()), self.recent_masters.clone()));
+                    }
+                    for stencil in &self.stencils {
+                        if !searching && self.open_stencil_shown != Some(stencil.index) {
                             continue;
                         }
-                        // one stencil is open at a time; a search shows the matches of all of them
-                        let searching = !self.shape_search.trim().is_empty();
-                        let header = egui::CollapsingHeader::new(format!("{name} ({})", masters.len())).id_salt(("stencil", index)).open(Some(searching || self.open_stencil_shown == Some(index)));
-                        let shown = header.show(ui, |ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                                for (id, mname) in &masters {
-                                    let (rect, response) = ui.allocate_exact_size(egui::vec2(70.0, 84.0), egui::Sense::click_and_drag());
-                                    if ui.is_rect_visible(rect) {
-                                        let thumb = egui::Rect::from_min_size(rect.min + egui::vec2(7.0, 2.0), egui::vec2(56.0, 56.0));
-                                        ui.painter().rect_filled(thumb, 3.0, egui::Color32::from_rgb(242, 242, 242));
-                                        if let Some(texture) = self.stencil_thumb_texture(&ctx, index, id) {
-                                            ui.painter().image(texture.id(), thumb, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                                        }
-                                        let short: String = if mname.chars().count() > 11 { format!("{}…", mname.chars().take(10).collect::<String>()) } else { mname.clone() };
-                                        ui.painter().text(egui::pos2(rect.center().x, thumb.bottom() + 3.0), egui::Align2::CENTER_TOP, short, egui::FontId::proportional(10.5), appearance::chrome(ui.visuals().dark_mode).caption);
-                                        let armed = self.armed_master.as_ref().is_some_and(|(i, m, _)| *i == index && m == id);
-                                        if armed || response.hovered() {
-                                            ui.painter().rect_stroke(thumb.expand(2.0), 4.0, egui::Stroke::new(2.0, if armed { appearance::chrome(ui.visuals().dark_mode).warning } else { egui::Color32::from_rgb(60, 125, 200) }), egui::StrokeKind::Outside);
-                                        }
-                                    }
-                                    let response = response.on_hover_text(mname.as_str());
-                                    if response.clicked() && self.change_shape {
-                                        replace = Some((index, id.clone(), mname.clone()));
-                                    } else if response.clicked() {
-                                        self.armed_master = Some((index, id.clone(), mname.clone()));
-                                        self.status = format!("Click on the page to place \"{mname}\".");
-                                    }
-                                    // drag a master onto the page: the drop is placed by the canvas block (it knows the page rectangle)
-                                    if response.drag_started() {
-                                        self.pane_drag = Some(mname.clone());
-                                    }
-                                    if response.drag_stopped() {
-                                        self.pane_drag = None;
-                                        if let Some(at) = ctx.pointer_latest_pos() {
-                                            self.pending_drop = Some((index, id.clone(), mname.clone(), at));
-                                        }
-                                    }
-                                    // the web's Change Shape: the selected shape becomes an instance of this master
-                                    response.context_menu(|ui| {
-                                        if ui.button("Place on the page").clicked() {
-                                            self.armed_master = Some((index, id.clone(), mname.clone()));
-                                            ui.close();
-                                        }
-                                        if ui.add_enabled(can_replace, egui::Button::new("Replace the selected shape")).clicked() {
-                                            replace = Some((index, id.clone(), mname.clone()));
-                                            ui.close();
-                                        }
-                                    });
-                                }
-                            });
-                        });
-                        if shown.header_response.clicked() {
-                            self.open_stencil_shown = stencil_clicked(self.open_stencil_shown, index);
+                        let masters: Vec<(usize, String, String)> = stencil.masters.iter().filter(|(_, mname)| master_matches(mname, &self.shape_search)).map(|(id, mname)| (stencil.index, id.clone(), mname.clone())).collect();
+                        if !masters.is_empty() {
+                            let heading = (searching || !lists.is_empty()).then(|| stencil.name.clone());
+                            lists.push((heading, masters));
                         }
-                        shown.header_response.context_menu(|ui| {
-                            if ui.button("Close this stencil").clicked() {
-                                close = Some(si);
-                                ui.close();
+                    }
+                    for (heading, masters) in lists {
+                        if let Some(heading) = heading {
+                            ui.weak(heading);
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                            let columns = if ui.available_width() >= 200.0 { 2.0 } else { 1.0 };
+                            let width = ((ui.available_width() - 4.0 * (columns - 1.0)) / columns).floor() - 1.0;
+                            for (index, id, mname) in &masters {
+                                let index = *index;
+                                let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 40.0), egui::Sense::click_and_drag());
+                                name_control(ui, &response, mname);
+                                if ui.is_rect_visible(rect) {
+                                    let thumb = egui::Rect::from_min_size(rect.min + egui::vec2(3.0, 4.0), egui::vec2(32.0, 32.0));
+                                    ui.painter().rect_filled(thumb, 3.0, egui::Color32::from_rgb(242, 242, 242));
+                                    if let Some(texture) = self.stencil_thumb_texture(&ctx, index, id) {
+                                        ui.painter().image(texture.id(), thumb, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                                    }
+                                    // the name beside the picture, on at most two lines
+                                    let colour = ui.visuals().text_color();
+                                    let mut job = egui::text::LayoutJob::simple(mname.clone(), egui::FontId::proportional(11.5), colour, (width - 42.0).max(20.0));
+                                    job.wrap.max_rows = 2;
+                                    let galley = ui.painter().layout_job(job);
+                                    ui.painter().galley(egui::pos2(thumb.right() + 5.0, rect.center().y - galley.size().y / 2.0), galley, colour);
+                                    let armed = self.armed_master.as_ref().is_some_and(|(i, m, _)| *i == index && m == id);
+                                    if armed || response.hovered() || response.has_focus() {
+                                        ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(2.0, if armed { appearance::chrome(ui.visuals().dark_mode).warning } else { egui::Color32::from_rgb(60, 125, 200) }), egui::StrokeKind::Inside);
+                                    }
+                                }
+                                let response = response.on_hover_text(mname.as_str());
+                                if response.clicked() && self.change_shape {
+                                    replace = Some((index, id.clone(), mname.clone()));
+                                } else if response.clicked() {
+                                    self.armed_master = Some((index, id.clone(), mname.clone()));
+                                    self.status = format!("Click on the page to place \"{mname}\".");
+                                }
+                                // drag a master onto the page: the drop is placed by the canvas block (it knows the page rectangle)
+                                if response.drag_started() {
+                                    self.pane_drag = Some(mname.clone());
+                                }
+                                if response.drag_stopped() {
+                                    self.pane_drag = None;
+                                    if let Some(at) = ctx.pointer_latest_pos() {
+                                        self.pending_drop = Some((index, id.clone(), mname.clone(), at));
+                                    }
+                                }
+                                // the web's Change Shape: the selected shape becomes an instance of this master
+                                response.context_menu(|ui| {
+                                    if ui.button("Place on the page").clicked() {
+                                        self.armed_master = Some((index, id.clone(), mname.clone()));
+                                        ui.close();
+                                    }
+                                    if ui.add_enabled(can_replace, egui::Button::new("Replace the selected shape")).clicked() {
+                                        replace = Some((index, id.clone(), mname.clone()));
+                                        ui.close();
+                                    }
+                                });
                             }
                         });
                     }
@@ -10331,6 +10771,7 @@ impl eframe::App for LayoutCraftApp {
                 let index = self.stencils[si].index;
                 self.engine.stencil_close(index);
                 self.stencils.remove(si);
+                self.recent_masters.retain(|(other, ..)| *other != index);
                 self.remember_stencils();
                 self.stencil_textures.retain(|(i, _), _| *i != index);
             }
@@ -10621,7 +11062,10 @@ impl eframe::App for LayoutCraftApp {
                         let page = self.page_index;
                         let (x, y) = (at.x as f64 / DPI, self.page_height_in - at.y as f64 / DPI);
                         match self.engine.stencil_drop(page, index, &master, x, y) {
-                            Ok(id) => self.finish_edit(&ctx, Ok(()), &format!("Placed \"{name}\""), Some(id)),
+                            Ok(id) => {
+                                self.finish_edit(&ctx, Ok(()), &format!("Placed \"{name}\""), Some(id));
+                                self.remember_master(index, &master);
+                            }
                             Err(error) => self.status = format!("Could not place \"{name}\": {error}"),
                         }
                         self.armed_master = None;
@@ -10637,7 +11081,10 @@ impl eframe::App for LayoutCraftApp {
                                 let page = self.page_index;
                                 let (x, y) = (at.x as f64 / DPI, self.page_height_in - at.y as f64 / DPI);
                                 match self.engine.stencil_drop(page, index, &master, x, y) {
-                                    Ok(id) => self.finish_edit(&ctx, Ok(()), &format!("Placed \"{name}\""), Some(id)),
+                                    Ok(id) => {
+                                        self.finish_edit(&ctx, Ok(()), &format!("Placed \"{name}\""), Some(id));
+                                        self.remember_master(index, &master);
+                                    }
                                     Err(error) => self.status = format!("Could not place \"{name}\": {error}"),
                                 }
                                 dropped_now = true;
@@ -11596,9 +12043,16 @@ impl LayoutCraftApp {
             Some(Action::Arrange(command)) => self.arrange(&ctx, command),
             Some(Action::NewDrawing) => {
                 if self.dirty {
-                    self.pending_open = Some(PendingOpen::New);
+                    self.pending_open = Some(PendingOpen::New(11.0, 8.5, false));
                 } else {
                     self.new_drawing(&ctx);
+                }
+            }
+            Some(Action::NewSized(width, height, metric)) => {
+                if self.dirty {
+                    self.pending_open = Some(PendingOpen::New(width, height, metric));
+                } else {
+                    self.new_drawing_sized(&ctx, width, height, metric);
                 }
             }
             Some(Action::DocProps) => self.doc_props_open = true,
@@ -11711,6 +12165,7 @@ impl LayoutCraftApp {
             Some(Action::SelectContents) => self.select_contents(),
             Some(Action::DisbandContainer) => self.disband_container(&ctx),
             Some(Action::InsertContainer) => self.insert_container(&ctx),
+            Some(Action::SelectKind(kind)) => self.select_kind(kind),
             Some(Action::LockContainer(locked)) => self.lock_container(&ctx, locked),
             Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
@@ -11763,6 +12218,8 @@ enum Action {
     DisbandContainer,
     /// Put a new container round the selected shapes.
     InsertContainer,
+    /// Select every object of one kind on the page.
+    SelectKind(Kind),
     /// Lock or unlock the membership of the selected container.
     LockContainer(bool),
     /// Make the shown page a background page: it leaves the tabs.
@@ -11812,6 +12269,8 @@ enum Action {
     /// Put the selected shape on (`true`) or take it off (`false`) the layer with this index.
     LayerShape(usize, bool),
     NewDrawing,
+    /// A new empty drawing of this page width and height (inches), in millimetres or not.
+    NewSized(f64, f64, bool),
     DocProps,
     HelpShortcuts,
     HelpAbout,

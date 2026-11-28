@@ -13,6 +13,7 @@ pub mod dxf;
 pub mod excalidraw_export;
 pub mod excalidraw_import;
 pub mod inventory;
+mod not_a_drawing;
 pub mod pdf;
 pub mod svgpdf;
 pub mod svgutil;
@@ -128,11 +129,26 @@ impl Engine {
     pub fn open(&mut self, bytes: Vec<u8>) -> Result<(), String> {
         let (bytes, conversion) = as_package_bytes(bytes)?;
         // Same path as the wasm build always used for a first import (a package without `source`).
-        let package = Package::from_reader(std::io::Cursor::new(bytes.clone())).map_err(|error| error.to_string())?;
+        let package = Package::from_reader(std::io::Cursor::new(bytes.clone())).map_err(|error| not_a_drawing::unreadable(&bytes, &error.to_string()))?;
+        if let Some(reason) = not_a_drawing::other_package(&package) {
+            return Err(reason);
+        }
         let (document, import_state) = layoutcraft_vsdx::import_document_with(&package, None).map_err(|error| error.to_string())?;
         self.install(bytes, package, document, import_state);
         self.conversion = conversion;
         Ok(())
+    }
+
+    /// What the user has to know about the drawing just opened, for the host to show: that it was converted from an old
+    /// format, and which shapes could not be read.
+    pub fn open_notice(&self) -> Option<String> {
+        let mut notes: Vec<String> = self.conversion.iter().map(Conversion::message).collect();
+        let left_out = self.import_state.as_ref().map(layoutcraft_vsdx::ImportState::left_out).unwrap_or_default();
+        if let Some(first) = left_out.first() {
+            let (count, shapes) = (left_out.len(), if left_out.len() == 1 { "shape" } else { "shapes" });
+            notes.push(format!("{count} {shapes} could not be read and will not be shown; the file keeps what it holds. First: {first}."));
+        }
+        (!notes.is_empty()).then(|| notes.join(" "))
     }
 
     /// Start a new, empty drawing: one page of `width` x `height` inches (shown in millimetres when `metric`) called `name`.

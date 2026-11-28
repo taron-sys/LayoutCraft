@@ -34,6 +34,15 @@ pub struct ImportState {
     /// Per page: what the top-level shapes of the page flattened to. An edit changes a shape or two; the others are taken over as they were
     /// (flattening a master-backed group costs ~10 ms, a page of 20 of them was most of the 300 ms of an edit).
     pages: Vec<Option<std::sync::Arc<PageCache>>>,
+    /// Per page: why each shape that is not in the model was left out.
+    left_out: Vec<Vec<String>>,
+}
+
+impl ImportState {
+    /// The shapes of the file the import could not read, one line each with the page and the reason. They stay in the file.
+    pub fn left_out(&self) -> Vec<String> {
+        self.left_out.iter().flatten().cloned().collect()
+    }
 }
 
 /// Pages with more top-level shapes than this do not keep the flattened output of their shapes.
@@ -155,11 +164,13 @@ pub fn import_document_with(
     let mut out = Vec::new();
     let mut media_collector = reuse.as_ref().map(|(_, _, state, _)| state.media.clone()).unwrap_or_default();
     let mut new_page_caches: Vec<Option<std::sync::Arc<PageCache>>> = Vec::new();
+    let mut left_out: Vec<Vec<String>> = Vec::new();
     for (page_index, page) in pages.into_iter().enumerate() {
         if let Some((old_package, old_document, old_state, old_pages)) = &reuse {
             if old_pages.get(page_index).is_some_and(|before| page_unchanged(old_package, package, before, &page)) {
                 out.push(old_document.pages[page_index].clone());
                 new_page_caches.push(old_state.pages.get(page_index).cloned().flatten());
+                left_out.push(old_state.left_out.get(page_index).cloned().unwrap_or_default());
                 continue;
             }
         }
@@ -184,7 +195,8 @@ pub fn import_document_with(
             None => page_height_inches(package, &page.part)?,
         };
         let tree = package.page_shapes(&page.part)?;
-        let resolved = catalog.resolve(&tree)?;
+        let (resolved, unread) = catalog.resolve_readable(&tree);
+        left_out.push(unread.into_iter().map(|reason| format!("page \"{}\": {reason}", page.name)).collect());
         let mut shapes = Vec::new();
         let mut z;
         let mut stack = Vec::new();
@@ -333,7 +345,7 @@ pub fn import_document_with(
         media: media_collector.records.clone(),
         extra: Default::default(),
     };
-    Ok((document, ImportState { media: media_collector, shared: Some(shared), pages: new_page_caches }))
+    Ok((document, ImportState { media: media_collector, shared: Some(shared), pages: new_page_caches, left_out }))
 }
 
 /// Layer indices from a shape's `LayerMember` cell (`"0;2"`).

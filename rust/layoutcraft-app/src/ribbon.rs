@@ -78,6 +78,10 @@ impl Ribbon {
             let at = insert.groups.iter().position(|group| group.name == "Links").unwrap_or(insert.groups.len());
             insert.groups.insert(at, Group { name: "Diagram Parts".to_string(), items: vec![Item::Command { id: "insertContainer".to_string() }] });
         }
+        let editing = ribbon.tabs.iter_mut().find(|tab| tab.name == "Home").and_then(|tab| tab.groups.iter_mut().find(|group| group.name == "Editing"));
+        if let Some(editing) = editing {
+            editing.items.push(Item::Command { id: "selectMenu".to_string() });
+        }
         let show = ribbon.tabs.iter_mut().find(|tab| tab.name == "View").and_then(|tab| tab.groups.iter_mut().find(|group| group.name == "Show"));
         if let Some(show) = show {
             show.items.push(Item::Command { id: "paneInspector".to_string() });
@@ -103,8 +107,33 @@ pub fn is_built(id: &str) -> bool {
     native(id).is_some()
         || matches!(
             id,
-            "drawTools" | "gridStep" | "themeGallery" | "variantGallery" | "paletteSel" | "zl" | "designOrientation" | "designSize" | "pageTools" | "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor" | "p:shadow"
+            "drawTools" | "selectMenu" | "gridStep" | "themeGallery" | "variantGallery" | "paletteSel" | "zl" | "designOrientation" | "designSize" | "pageTools" | "p:bold" | "p:strike" | "p:alignL" | "p:indLeft" | "p:lineSp" | "p:fontSize" | "p:fontFamily" | "p:fillColor" | "p:lineColor" | "p:shadow"
         )
+}
+
+/// The built commands whose name or group holds every word of `query`, as (tab, group, command id), each command once;
+/// those whose name starts with the query come first.
+pub fn search(ribbon: &Ribbon, query: &str) -> Vec<(String, String, String)> {
+    let query = query.trim().to_lowercase();
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let mut found: Vec<(bool, String, String, String)> = Vec::new();
+    for tab in &ribbon.tabs {
+        for group in &tab.groups {
+            let ids = group.items.iter().flat_map(|item| match item {
+                Item::Command { id } => std::slice::from_ref(id),
+                Item::Menu { ids, .. } => ids.as_slice(),
+            });
+            for id in ids {
+                let name = label(id).to_lowercase();
+                let text = format!("{name} {}", group.name.to_lowercase());
+                if !words.is_empty() && is_built(id) && words.iter().all(|word| text.contains(word)) && !found.iter().any(|(.., other)| other == id) {
+                    found.push((!name.starts_with(&query), tab.name.clone(), group.name.clone(), id.clone()));
+                }
+            }
+        }
+    }
+    found.sort_by_key(|(later, ..)| *later);
+    found.into_iter().map(|(_, tab, group, id)| (tab, group, id)).collect()
 }
 
 /// The commands that switch something on or off, drawn as check boxes.
@@ -580,6 +609,7 @@ mod tests {
         // the desktop's own additions
         expected.insert("View paneInspector".to_string());
         expected.insert("Insert insertContainer".to_string());
+        expected.insert("Home selectMenu".to_string());
         assert_eq!(commands(Ribbon::for_desktop()), expected);
         let design = Ribbon::for_desktop().tabs.into_iter().find(|tab| tab.name == "Design").unwrap();
         assert!(!design.groups.iter().any(|group| group.name == "Borders & Titles"), "it is a menu of Backgrounds now");

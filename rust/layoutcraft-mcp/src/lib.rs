@@ -233,7 +233,7 @@ impl Server {
                     }
                     _ => {
                         self.engine.open(bytes)?;
-                        let converted = self.engine.conversion.as_ref().map_or_else(String::new, |c| format!(". {}", c.message()));
+                        let converted = self.engine.open_notice().map_or_else(String::new, |notice| format!(". {notice}"));
                         Ok(format!("opened {shown}: {} page(s){converted}", self.engine.page_count().unwrap_or(0)))
                     }
                 }

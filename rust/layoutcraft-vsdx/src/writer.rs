@@ -2878,7 +2878,7 @@ fn add_rows(shape: &str, section: &str, pairs: &[(String, String)], cells: &[(St
 fn pin_character_cells(shape: &str, names: &[String], row0: Option<&str>) -> String {
     let Some((s, e)) = find_section_range(shape, "Character", "") else { return shape.to_string() };
     let default_of = |name: &str| match name {
-        "Style" | "Case" | "Strikethru" | "DblUnderline" | "Overline" | "Letterspace" | "DoubleStrikethrough" => Some("0".to_string()),
+        "Style" | "Case" | "Strikethru" | "DblUnderline" | "Overline" | "Letterspace" | "DoubleStrikethrough" | "Pos" => Some("0".to_string()),
         _ => None,
     };
     let mut rows = String::new();
@@ -2928,7 +2928,7 @@ fn face_name_by_index(document_xml: &str, index: usize) -> Option<String> {
     None
 }
 
-const STATE_CHAR_CELLS: [&str; 9] = ["Style", "Case", "Strikethru", "Letterspace", "Size", "Font", "Color", "DblUnderline", "Overline"];
+const STATE_CHAR_CELLS: [&str; 10] = ["Style", "Case", "Strikethru", "Letterspace", "Size", "Font", "Color", "DblUnderline", "Overline", "Pos"];
 const STATE_PARA_CELLS: [&str; 8] = ["HorzAlign", "Bullet", "BulletStr", "IndLeft", "IndFirst", "SpLine", "SpBefore", "SpAfter"];
 
 /// The formatting of a range of the text of shape `id` (offsets as a text box counts them; a caret, `start == end`,
