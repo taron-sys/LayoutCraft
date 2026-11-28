@@ -4139,6 +4139,28 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn the_shapes_panel_lists_the_stencils_over_the_shapes_of_the_chosen_one() {
+        let (mut driver, _ids) = Driver::new();
+        driver.app.stencils.clear();
+        driver.app.open_builtin_stencil();
+        driver.frames(4);
+        let master = driver.app.stencils[0].masters[0].1.clone();
+        let row = *driver.texts("Basic shapes").first().expect("the stencil has its line");
+        let shape = *driver.texts(&master).first().expect("its shapes are listed");
+        assert!(shape.top() > row.bottom(), "the shapes are under the list of stencils");
+        assert_eq!(driver.texts("More shapes \u{25b8}").len(), 1);
+        // the chosen line closes its shapes, and opens them again
+        for shown in [false, true] {
+            driver.click(row.center(), Modifiers::NONE);
+            driver.frames(3);
+            assert_eq!(!driver.texts(&master).is_empty(), shown);
+        }
+        driver.click(shape.center(), Modifiers::NONE);
+        driver.frames(3);
+        assert!(driver.app.armed_master.as_ref().is_some_and(|(.., name)| *name == master), "{}", driver.app.status);
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -10516,17 +10538,44 @@ impl eframe::App for LayoutCraftApp {
             egui::Panel::left("shapes").default_size(250.0).resizable(true).show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.heading("Shapes");
-                    if ui.small_button("\u{ab} Minimise").on_hover_text("Narrow the Shapes panel to a column").clicked() {
-                        self.shapes_minimised = true;
-                    }
-                    if ui.small_button("Open stencil…").clicked() {
-                        open_stencil = true;
-                    }
-                    if ui.small_button("Basic shapes").clicked() {
-                        builtin = true;
-                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let narrow = ui.small_button("\u{ab}");
+                        name_control(ui, &narrow, "Minimise the Shapes panel");
+                        if narrow.on_hover_text("Narrow the Shapes panel to a column").clicked() {
+                            self.shapes_minimised = true;
+                        }
+                    });
                 });
                 ui.add(egui::TextEdit::singleline(&mut self.shape_search).hint_text("Search shapes").desired_width(f32::INFINITY));
+                ui.menu_button("More shapes \u{25b8}", |ui| {
+                    if ui.button("Open stencil file\u{2026}").clicked() {
+                        open_stencil = true;
+                        ui.close();
+                    }
+                    if ui.button("Add the basic shapes").clicked() {
+                        builtin = true;
+                        ui.close();
+                    }
+                });
+                // the open stencils, one line each; the one whose shapes are listed below is filled and in strong type
+                ui.with_layout(egui::Layout::top_down_justified(egui::Align::Min), |ui| {
+                    for si in 0..self.stencils.len() {
+                        let (name, index, count) = (self.stencils[si].name.clone(), self.stencils[si].index, self.stencils[si].masters.len());
+                        let shown = self.open_stencil_shown == Some(index);
+                        let text = if shown { egui::RichText::new(name).strong() } else { egui::RichText::new(name) };
+                        let row = ui.selectable_label(shown, text).on_hover_text(format!("{count} shapes; right-click to close the stencil"));
+                        if row.clicked() {
+                            self.open_stencil_shown = stencil_clicked(self.open_stencil_shown, index);
+                        }
+                        row.context_menu(|ui| {
+                            if ui.button("Close this stencil").clicked() {
+                                close = Some(si);
+                                ui.close();
+                            }
+                        });
+                    }
+                });
+                ui.separator();
                 if self.change_shape {
                     ui.add(egui::Label::new(egui::RichText::new("Change Shape: click the new shape (Esc cancels).").small()).wrap());
                 } else if let Some((_, _, name)) = &self.armed_master {
@@ -10534,72 +10583,73 @@ impl eframe::App for LayoutCraftApp {
                 } else if self.stencils.is_empty() {
                     ui.label("No stencil open.");
                 }
-                egui::ScrollArea::vertical().show(ui, |ui| {
+                let searching = !self.shape_search.trim().is_empty();
+                egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                     for si in 0..self.stencils.len() {
                         let (name, index) = (self.stencils[si].name.clone(), self.stencils[si].index);
-                        let masters: Vec<(String, String)> = self.stencils[si].masters.iter().filter(|(_, mname)| master_matches(mname, &self.shape_search)).cloned().collect();
-                        if masters.is_empty() && !self.shape_search.trim().is_empty() {
+                        // a search shows the matches of every stencil, otherwise the shapes of the chosen one
+                        if !searching && self.open_stencil_shown != Some(index) {
                             continue;
                         }
-                        // one stencil is open at a time; a search shows the matches of all of them
-                        let searching = !self.shape_search.trim().is_empty();
-                        let header = egui::CollapsingHeader::new(format!("{name} ({})", masters.len())).id_salt(("stencil", index)).open(Some(searching || self.open_stencil_shown == Some(index)));
-                        let shown = header.show(ui, |ui| {
-                            ui.horizontal_wrapped(|ui| {
-                                ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
-                                for (id, mname) in &masters {
-                                    let (rect, response) = ui.allocate_exact_size(egui::vec2(70.0, 84.0), egui::Sense::click_and_drag());
-                                    if ui.is_rect_visible(rect) {
-                                        let thumb = egui::Rect::from_min_size(rect.min + egui::vec2(7.0, 2.0), egui::vec2(56.0, 56.0));
-                                        ui.painter().rect_filled(thumb, 3.0, egui::Color32::from_rgb(242, 242, 242));
-                                        if let Some(texture) = self.stencil_thumb_texture(&ctx, index, id) {
-                                            ui.painter().image(texture.id(), thumb, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
-                                        }
-                                        let short: String = if mname.chars().count() > 11 { format!("{}…", mname.chars().take(10).collect::<String>()) } else { mname.clone() };
-                                        ui.painter().text(egui::pos2(rect.center().x, thumb.bottom() + 3.0), egui::Align2::CENTER_TOP, short, egui::FontId::proportional(10.5), appearance::chrome(ui.visuals().dark_mode).caption);
-                                        let armed = self.armed_master.as_ref().is_some_and(|(i, m, _)| *i == index && m == id);
-                                        if armed || response.hovered() {
-                                            ui.painter().rect_stroke(thumb.expand(2.0), 4.0, egui::Stroke::new(2.0, if armed { appearance::chrome(ui.visuals().dark_mode).warning } else { egui::Color32::from_rgb(60, 125, 200) }), egui::StrokeKind::Outside);
-                                        }
-                                    }
-                                    let response = response.on_hover_text(mname.as_str());
-                                    if response.clicked() && self.change_shape {
-                                        replace = Some((index, id.clone(), mname.clone()));
-                                    } else if response.clicked() {
-                                        self.armed_master = Some((index, id.clone(), mname.clone()));
-                                        self.status = format!("Click on the page to place \"{mname}\".");
-                                    }
-                                    // drag a master onto the page: the drop is placed by the canvas block (it knows the page rectangle)
-                                    if response.drag_started() {
-                                        self.pane_drag = Some(mname.clone());
-                                    }
-                                    if response.drag_stopped() {
-                                        self.pane_drag = None;
-                                        if let Some(at) = ctx.pointer_latest_pos() {
-                                            self.pending_drop = Some((index, id.clone(), mname.clone(), at));
-                                        }
-                                    }
-                                    // the web's Change Shape: the selected shape becomes an instance of this master
-                                    response.context_menu(|ui| {
-                                        if ui.button("Place on the page").clicked() {
-                                            self.armed_master = Some((index, id.clone(), mname.clone()));
-                                            ui.close();
-                                        }
-                                        if ui.add_enabled(can_replace, egui::Button::new("Replace the selected shape")).clicked() {
-                                            replace = Some((index, id.clone(), mname.clone()));
-                                            ui.close();
-                                        }
-                                    });
-                                }
-                            });
-                        });
-                        if shown.header_response.clicked() {
-                            self.open_stencil_shown = stencil_clicked(self.open_stencil_shown, index);
+                        let masters: Vec<(String, String)> = self.stencils[si].masters.iter().filter(|(_, mname)| master_matches(mname, &self.shape_search)).cloned().collect();
+                        if masters.is_empty() {
+                            continue;
                         }
-                        shown.header_response.context_menu(|ui| {
-                            if ui.button("Close this stencil").clicked() {
-                                close = Some(si);
-                                ui.close();
+                        if searching {
+                            ui.weak(name);
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing = egui::vec2(4.0, 4.0);
+                            let columns = if ui.available_width() >= 200.0 { 2.0 } else { 1.0 };
+                            let width = ((ui.available_width() - 4.0 * (columns - 1.0)) / columns).floor() - 1.0;
+                            for (id, mname) in &masters {
+                                let (rect, response) = ui.allocate_exact_size(egui::vec2(width, 40.0), egui::Sense::click_and_drag());
+                                name_control(ui, &response, mname);
+                                if ui.is_rect_visible(rect) {
+                                    let thumb = egui::Rect::from_min_size(rect.min + egui::vec2(3.0, 4.0), egui::vec2(32.0, 32.0));
+                                    ui.painter().rect_filled(thumb, 3.0, egui::Color32::from_rgb(242, 242, 242));
+                                    if let Some(texture) = self.stencil_thumb_texture(&ctx, index, id) {
+                                        ui.painter().image(texture.id(), thumb, egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)), egui::Color32::WHITE);
+                                    }
+                                    // the name beside the picture, on at most two lines
+                                    let colour = ui.visuals().text_color();
+                                    let mut job = egui::text::LayoutJob::simple(mname.clone(), egui::FontId::proportional(11.5), colour, (width - 42.0).max(20.0));
+                                    job.wrap.max_rows = 2;
+                                    let galley = ui.painter().layout_job(job);
+                                    ui.painter().galley(egui::pos2(thumb.right() + 5.0, rect.center().y - galley.size().y / 2.0), galley, colour);
+                                    let armed = self.armed_master.as_ref().is_some_and(|(i, m, _)| *i == index && m == id);
+                                    if armed || response.hovered() || response.has_focus() {
+                                        ui.painter().rect_stroke(rect, 4.0, egui::Stroke::new(2.0, if armed { appearance::chrome(ui.visuals().dark_mode).warning } else { egui::Color32::from_rgb(60, 125, 200) }), egui::StrokeKind::Inside);
+                                    }
+                                }
+                                let response = response.on_hover_text(mname.as_str());
+                                if response.clicked() && self.change_shape {
+                                    replace = Some((index, id.clone(), mname.clone()));
+                                } else if response.clicked() {
+                                    self.armed_master = Some((index, id.clone(), mname.clone()));
+                                    self.status = format!("Click on the page to place \"{mname}\".");
+                                }
+                                // drag a master onto the page: the drop is placed by the canvas block (it knows the page rectangle)
+                                if response.drag_started() {
+                                    self.pane_drag = Some(mname.clone());
+                                }
+                                if response.drag_stopped() {
+                                    self.pane_drag = None;
+                                    if let Some(at) = ctx.pointer_latest_pos() {
+                                        self.pending_drop = Some((index, id.clone(), mname.clone(), at));
+                                    }
+                                }
+                                // the web's Change Shape: the selected shape becomes an instance of this master
+                                response.context_menu(|ui| {
+                                    if ui.button("Place on the page").clicked() {
+                                        self.armed_master = Some((index, id.clone(), mname.clone()));
+                                        ui.close();
+                                    }
+                                    if ui.add_enabled(can_replace, egui::Button::new("Replace the selected shape")).clicked() {
+                                        replace = Some((index, id.clone(), mname.clone()));
+                                        ui.close();
+                                    }
+                                });
                             }
                         });
                     }
