@@ -42,7 +42,8 @@ A shape that lost its last container, or a container that lost its last member, 
 A move (one shape or several) that takes a shape wholly into a container adds it, and one that takes a member from inside
 to not wholly inside removes it, as part of the same undo step; locked containers are left alone. Not done: growing a
 container to fit what is dropped, lists. The desktop app frames the container a drag would add to and says so in the
-status bar.
+status bar. A container's right-click menu offers Select contents and Disband container (the container
+goes, its contents stay and stop being members).
 
 ## Not established
 

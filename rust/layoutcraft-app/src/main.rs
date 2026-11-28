@@ -3878,6 +3878,56 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_containers_menu_selects_its_contents_and_disbands_it() {
+        let (mut driver, ids) = Driver::new();
+        let frame = driver.app.engine.draw(0, 0, 0.5, 2.5, 8.5, 6.0).unwrap();
+        let formula = format!("SUM(DEPENDSON(1,Sheet.{}!SheetRef(),Sheet.{}!SheetRef()))", ids[0], ids[1]);
+        let patch = layoutcraft_vsdx::writer::ShapeCellPatch::new(&frame).set_with_formula("Relationships", "0", formula);
+        let bytes = layoutcraft_vsdx::writer::patch_page_cells(driver.app.engine.package.as_ref().unwrap(), 0, &[patch]).unwrap();
+        driver.app.engine.open(bytes).unwrap();
+        // the frame lies behind what it holds
+        driver.app.engine.group_op(0, 3, &frame).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        // a right click on an empty part of the frame opens its menu
+        let image = driver.app.image_rect(driver.app.last_viewport);
+        let inside = driver.app.doc_shape(&frame).map(|shape| driver.app.scene_to_screen(pos2((shape.x + shape.w / 2.0) as f32, (shape.y + 10.0) as f32), image)).unwrap();
+        let menu = |driver: &mut Driver, at: egui::Pos2| {
+            driver.run(vec![Event::PointerMoved(at)]);
+            for pressed in [true, false] {
+                driver.run(vec![Event::PointerButton { pos: at, button: egui::PointerButton::Secondary, pressed, modifiers: Modifiers::NONE }]);
+            }
+            driver.frames(3);
+        };
+        menu(&mut driver, inside);
+        let entry = driver.texts("Select contents")[0];
+        driver.click(entry.center(), Modifiers::NONE);
+        driver.frames(3);
+        let mut chosen = driver.app.all_selected();
+        chosen.sort();
+        assert_eq!(chosen, ids, "{}", driver.app.status);
+        // a shape that is no container offers neither
+        let member = driver.app.doc_shape(&ids[0]).map(|shape| driver.app.scene_to_screen(pos2((shape.x + 10.0) as f32, (shape.y + 10.0) as f32), image)).unwrap();
+        driver.app.selected = None;
+        driver.app.extra_selected.clear();
+        menu(&mut driver, member);
+        assert!(!driver.texts("Cut").is_empty() && driver.texts("Disband container").is_empty());
+        driver.key(Key::Escape, Modifiers::NONE);
+        driver.app.selected = None;
+        driver.frames(3);
+        menu(&mut driver, inside);
+        let depth = driver.app.engine.undo_depth();
+        let entry = driver.texts("Disband container")[0];
+        driver.click(entry.center(), Modifiers::NONE);
+        driver.frames(3);
+        let page = &driver.app.engine.document().unwrap().pages[0];
+        assert!(page.containers.is_empty() && driver.app.doc_shape(&frame).is_none(), "{}", driver.app.status);
+        assert!(ids.iter().all(|id| driver.app.doc_shape(id).is_some_and(|shape| shape.containers.is_empty())));
+        assert_eq!(driver.app.engine.undo_depth(), depth + 1);
+        assert!(driver.app.engine.disband_container(0, &ids[0]).is_err(), "not a container");
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -6006,6 +6056,46 @@ impl LayoutCraftApp {
             Some(root) if root != id && self.doc_shape(&root).is_some() => root,
             _ => id.to_string(),
         }
+    }
+
+    /// The selected container (the whole group when a part of it is picked) with what it holds; `None` for anything else.
+    fn selected_container(&self) -> Option<(String, Vec<String>)> {
+        let id = self.whole(std::slice::from_ref(self.selected.as_ref()?)).pop()?;
+        let members = self.engine.container_members(self.page_index, &id)?;
+        Some((id, members))
+    }
+
+    fn select_contents(&mut self) {
+        let Some((_, members)) = self.selected_container() else {
+            self.status = "Select a container first.".to_string();
+            return;
+        };
+        // members that are drawn on this page; a member that is a bodiless group is picked by one of its parts
+        let drawn: Vec<String> = members
+            .iter()
+            .filter_map(|member| {
+                if self.doc_shape(member).is_some() {
+                    return Some(member.clone());
+                }
+                let shapes = &self.engine.document.as_ref()?.pages.get(self.page_index)?.shapes;
+                let part = shapes.iter().find(|shape| shape.group.as_ref().and_then(|group| group.get("rootId")).and_then(|root| root.as_str()) == Some(member.as_str()))?;
+                part.visio_id.clone()
+            })
+            .collect();
+        let mut ids = drawn.into_iter();
+        self.selected = ids.next();
+        self.extra_selected = ids.collect();
+        self.status = format!("{} shape(s) of the container selected", self.all_selected().len());
+    }
+
+    fn disband_container(&mut self, ctx: &egui::Context) {
+        let Some((id, _)) = self.selected_container() else {
+            self.status = "Select a container first.".to_string();
+            return;
+        };
+        let result = self.engine.disband_container(self.page_index, &id);
+        self.extra_selected.clear();
+        self.finish_edit(ctx, result, "Disbanded the container", None);
     }
 
     /// Whether the shape can be moved or deleted: a page-level shape, or a part that stands for its whole group.
@@ -10351,6 +10441,7 @@ impl eframe::App for LayoutCraftApp {
                     }
                 }
                 let has_selection = self.selected.is_some();
+                let is_container = self.selected_container().is_some();
                 let can_paste = self.engine.clipboard_count() > 0;
                 if !magnifier {
                     response.context_menu(|ui| {
@@ -10366,6 +10457,11 @@ impl eframe::App for LayoutCraftApp {
                             pick(ui, "Paste", can_paste, Action::Paste);
                             pick(ui, "Duplicate", true, Action::Duplicate);
                             pick(ui, "Delete", true, Action::DeleteSelected);
+                            if is_container {
+                                ui.separator();
+                                pick(ui, "Select contents", true, Action::SelectContents);
+                                pick(ui, "Disband container", true, Action::DisbandContainer);
+                            }
                             ui.separator();
                             pick(ui, "Group", true, Action::Arrange(ArrangeCmd::Group));
                             pick(ui, "Ungroup", true, Action::Arrange(ArrangeCmd::Ungroup));
@@ -11518,6 +11614,8 @@ impl LayoutCraftApp {
             Some(Action::Styles) => self.style_pick = if self.style_pick.is_some() { None } else { Some(styles::StylePick::default()) },
             Some(Action::PageToBackground) => self.run_page_op(&ctx, 13, self.page_index, 0, "", "Made a background page (Page setup makes it ordinary again)"),
             Some(Action::StyleSettings) => self.go_to_style_settings(),
+            Some(Action::SelectContents) => self.select_contents(),
+            Some(Action::DisbandContainer) => self.disband_container(&ctx),
             Some(Action::ZoomDialog) => self.zoom_draft = Some(ZoomDraft { focus: true, ..ZoomDraft::default() }),
             Some(Action::ZoomTo(percent)) => {
                 self.zoom = zoom_for_percent(f64::from(percent), self.raster_scale);
@@ -11563,6 +11661,10 @@ enum Action {
     ZoomDialog,
     /// Go to the inspector's Style settings.
     StyleSettings,
+    /// Select what the selected container holds.
+    SelectContents,
+    /// Remove the selected container and keep its contents.
+    DisbandContainer,
     /// Make the shown page a background page: it leaves the tabs.
     PageToBackground,
     /// Show or hide the Styles window.

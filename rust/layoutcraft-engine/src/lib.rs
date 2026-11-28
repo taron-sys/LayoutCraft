@@ -1036,6 +1036,29 @@ impl Engine {
         Ok(count)
     }
 
+    /// What the container `id` of `page` holds directly, members first listed first; `None` when it is not a container with
+    /// members.
+    pub fn container_members(&self, page: usize, id: &str) -> Option<Vec<String>> {
+        let records = &self.document.as_ref()?.pages.get(page)?.containers;
+        let record = records.iter().find(|record| record["visioId"].as_str() == Some(id) && record["kind"].as_str() == Some("container"))?;
+        Some(record["members"].as_array()?.iter().filter_map(|member| member.as_str().map(str::to_string)).collect())
+    }
+
+    /// Take the container `id` of `page` away and keep what it holds, ONE undo step: the members stay where they are and no
+    /// longer name it (as Visio's Disband leaves them, `docs/45-containers.md`).
+    pub fn disband_container(&mut self, page: usize, id: &str) -> Result<(), String> {
+        self.container_members(page, id).ok_or_else(|| format!("shape {id} is not a container"))?;
+        let package = self.package.as_ref().ok_or("no document")?;
+        let editor = GroupEditor::open(package, page).map_err(|e| e.to_string())?;
+        let gone = editor.subtree_ids(id).map_err(|e| e.to_string())?;
+        let part = package.pages().map_err(|e| e.to_string())?[page].part.clone();
+        let connects = package.connects(&part).map_err(|e| e.to_string())?;
+        // connectors glued to the container keep their ends where they are
+        let patches = editor.detach_patches(&gone, &connects);
+        let bytes = patch_page(package, page, &patches, &[], &[id.to_string()]).map_err(|e| e.to_string())?;
+        self.commit(bytes)
+    }
+
     /// For a drawn member of a group that has no shape of its own on the page (a group, or a container, with neither geometry
     /// nor text): the ID of that whole group, which a host acts on when the member is picked. `None` for every other shape.
     pub fn group_of_part(&self, page: usize, id: &str) -> Option<String> {
