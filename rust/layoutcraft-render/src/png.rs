@@ -47,9 +47,22 @@ fn shared_options() -> resvg::usvg::Options<'static> {
             })
             .collect();
         list.push(Family::SansSerif);
+        // a face named with its weight ("Segoe UI Semibold") is asked for as that weight of its family; bold stays bold
+        let named = font.families().iter().find_map(|family| match family {
+            FontFamily::Named(name) => Some(name.as_str()),
+            _ => None,
+        });
+        let heavy = named.and_then(|name| crate::fonts::weighted_face(db, name));
+        let weight = match heavy {
+            Some((family, weight)) => {
+                list.insert(0, Family::Name(family));
+                if font.weight() >= 700 { font.weight() } else { weight }
+            }
+            None => font.weight(),
+        };
         let query = Query {
             families: &list,
-            weight: Weight(font.weight()),
+            weight: Weight(weight),
             stretch: match font.stretch() {
                 FontStretch::UltraCondensed => Stretch::UltraCondensed,
                 FontStretch::ExtraCondensed => Stretch::ExtraCondensed,

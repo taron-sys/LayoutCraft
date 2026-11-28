@@ -19,7 +19,7 @@ const MAX_TOTAL_BYTES: u64 = 512 * 1024 * 1024;
 pub(crate) const REL_NS: &str =
     "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 pub mod colorexpr;
-mod containers;
+pub mod containers;
 pub mod comments;
 pub mod docprops;
 pub mod emf;
@@ -291,6 +291,8 @@ pub struct PageRef {
     pub scale: Option<f64>,
     pub back_part: Option<String>,
     pub back_height: Option<f64>,
+    /// The layers of the background page: its shapes follow these, not the page's own.
+    pub back_layers: Vec<layoutcraft_model::Layer>,
     pub back_scale: Option<f64>,
     /// PageSheet layers (empty when the page defines none).
     pub layers: Vec<layoutcraft_model::Layer>,
@@ -521,11 +523,11 @@ impl Package {
             };
             resolved_parts.push(part);
         }
-        let mut backgrounds: BTreeMap<String, (String, Option<f64>, Option<f64>)> = BTreeMap::new();
+        let mut backgrounds: BTreeMap<String, (String, Option<f64>, Option<f64>, Vec<layoutcraft_model::Layer>)> = BTreeMap::new();
         for (entry, part) in entries.iter().zip(&resolved_parts) {
             if entry.background {
                 if let Some(id) = &entry.id {
-                    backgrounds.insert(id.clone(), (part.clone(), entry.height, entry.scale));
+                    backgrounds.insert(id.clone(), (part.clone(), entry.height, entry.scale, entry.layers.clone()));
                 }
             }
         }
@@ -547,6 +549,7 @@ impl Package {
                 scale: entry.scale,
                 back_part: back.map(|value| value.0.clone()),
                 back_height: back.and_then(|value| value.1),
+                back_layers: back.map(|value| value.3.clone()).unwrap_or_default(),
                 back_scale: back.and_then(|value| value.2),
                 layers: entry.layers.clone(),
                 variation: entry.variation,
@@ -567,6 +570,7 @@ impl Package {
                     scale: None,
                     back_part: None,
                     back_height: None,
+                    back_layers: Vec::new(),
                     back_scale: None,
                     layers: Vec::new(),
                     variation: None,

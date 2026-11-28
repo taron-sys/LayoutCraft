@@ -190,3 +190,41 @@ fn a_connector_leaving_a_container_follows_while_the_move_is_previewed() {
     let routes: serde_json::Value = serde_json::from_str(&engine.preview_move(0, &[ids[0].clone()], (0.0, 1.0)).unwrap()).unwrap();
     assert!(routes.as_array().unwrap().iter().any(|route| route["id"].as_str() == Some(line.as_str())), "{routes}");
 }
+
+fn members(engine: &Engine) -> Vec<String> {
+    let mut all: Vec<String> = page(engine).containers.iter().filter_map(|record| record["members"].as_array()).flatten().filter_map(|id| id.as_str().map(str::to_string)).collect();
+    all.sort();
+    all
+}
+
+#[test]
+fn a_shape_moved_out_leaves_its_container_and_one_moved_in_joins_it() {
+    let (mut engine, ids) = framed();
+    let both = members(&engine);
+    // a small move inside changes nothing
+    engine.edit(0, 2, &ids[1], 0.25, 0.0, 0.0, 0.0, 0).unwrap();
+    assert_eq!(members(&engine), both);
+    let depth = engine.undo_depth();
+    // far out to the right
+    engine.edit(0, 2, &ids[1], 8.0, 0.0, 0.0, 0.0, 0).unwrap();
+    assert_eq!(members(&engine), [ids[2].clone()]);
+    assert!(of(page(&engine), &ids[1]).containers.is_empty() && !xml(&engine).contains(&format!("DEPENDSON(1,{},", sheet(&ids[1]))));
+    assert_eq!(engine.undo_depth(), depth + 1, "one step with the move");
+    engine.undo().unwrap();
+    assert_eq!(members(&engine), both, "undo brings both back");
+    // the shape outside is brought wholly inside: both ends say so
+    engine.edit(0, 2, &ids[3], -5.0, 1.5, 0.0, 0.0, 0).unwrap();
+    assert!(members(&engine).contains(&ids[3]), "{:?}", page(&engine).containers);
+    assert_eq!(of(page(&engine), &ids[3]).containers, [ids[0].clone()]);
+    assert!(xml(&engine).matches(&sheet(&ids[0])).count() >= 3);
+}
+
+#[test]
+fn a_shape_only_partly_over_a_container_does_not_join_and_the_containers_own_move_changes_nothing() {
+    let (mut engine, ids) = framed();
+    let both = members(&engine);
+    engine.edit(0, 2, &ids[3], -1.5, 0.0, 0.0, 0.0, 0).unwrap();
+    assert_eq!(members(&engine), both, "across the edge");
+    engine.edit(0, 2, &ids[0], 20.0, 0.0, 0.0, 0.0, 0).unwrap();
+    assert_eq!(members(&engine), both, "the frame takes its members and gains nothing it passes");
+}

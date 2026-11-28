@@ -1040,6 +1040,9 @@ fn ribbon_tab(ui: &mut egui::Ui, name: &str, chosen: bool) -> egui::Response {
     response
 }
 
+/// The frame drawn round a container that a dragged shape would join: dark enough against the white page.
+const CONTAINER_MARK: egui::Color32 = egui::Color32::from_rgb(0, 110, 60);
+
 /// A ribbon command with its icon over its name, as high as a group.
 fn large_button(ui: &mut egui::Ui, icon: &egui::TextureHandle, label: &str, enabled: bool, selected: bool) -> egui::Response {
     ui.add_enabled_ui(enabled, |ui| {
@@ -3802,6 +3805,79 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_click_on_a_part_of_a_group_without_a_body_acts_on_the_whole_group() {
+        let (mut driver, ids) = Driver::new();
+        driver.app.engine.group_op(0, 0, &ids.join("\n")).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        let group = driver.app.engine.group_of_part(0, &ids[0]).expect("a group with no shape of its own");
+        assert_eq!(driver.app.engine.group_of_part(0, &ids[1]).as_deref(), Some(group.as_str()));
+        assert!(driver.app.engine.group_of_part(0, &group).is_none() && driver.app.engine.group_of_part(0, "999").is_none());
+        let places = |driver: &Driver| ids.iter().map(|id| driver.at(id)).collect::<Vec<_>>();
+        let start = places(&driver);
+        let moved = |now: &[(f64, f64)], from: &[(f64, f64)]| {
+            let first = (now[0].0 - from[0].0, now[0].1 - from[0].1);
+            assert!((now[1].0 - from[1].0 - first.0).abs() < 0.5 && (now[1].1 - from[1].1 - first.1).abs() < 0.5, "both by the same way: {from:?} {now:?}");
+            first
+        };
+        // drag one part
+        let image = driver.app.image_rect(driver.app.last_viewport);
+        let shape = driver.app.doc_shape(&ids[0]).unwrap();
+        let from = driver.app.scene_to_screen(pos2((shape.x + shape.w / 2.0) as f32, (shape.y + shape.h / 2.0) as f32), image);
+        driver.drag(from, from + vec2(0.0, -80.0));
+        driver.frames(3);
+        let dragged = places(&driver);
+        assert!(moved(&dragged, &start).1 < -1.0, "{}", driver.app.status);
+        // an arrow key
+        driver.key(Key::ArrowRight, Modifiers::NONE);
+        driver.frames(2);
+        assert!(moved(&places(&driver), &dragged).0 > 0.0, "{}", driver.app.status);
+        // delete takes all of it, in one step
+        let depth = driver.app.engine.undo_depth();
+        driver.key(Key::Delete, Modifiers::NONE);
+        driver.frames(2);
+        assert!(driver.app.engine.document().unwrap().pages[0].shapes.is_empty(), "{}", driver.app.status);
+        assert_eq!(driver.app.engine.undo_depth(), depth + 1);
+    }
+
+    #[test]
+    fn dragging_a_shape_over_a_container_marks_it_and_says_so() {
+        let (mut driver, ids) = Driver::new();
+        // a frame to the right, holding nothing, that states it is a container through one member of its own
+        let frame = driver.app.engine.draw(0, 0, 6.0, 0.5, 10.5, 2.5).unwrap();
+        let inside = driver.app.engine.draw(0, 0, 6.5, 1.0, 7.0, 1.5).unwrap();
+        let patch = layoutcraft_vsdx::writer::ShapeCellPatch::new(&frame).set_with_formula("Relationships", "0", format!("SUM(DEPENDSON(1,Sheet.{inside}!SheetRef()))"));
+        let bytes = layoutcraft_vsdx::writer::patch_page_cells(driver.app.engine.package.as_ref().unwrap(), 0, &[patch]).unwrap();
+        driver.app.engine.open(bytes).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        let image = driver.app.image_rect(driver.app.last_viewport);
+        let centre = |driver: &Driver, id: &str| {
+            let shape = driver.app.doc_shape(id).unwrap();
+            driver.app.scene_to_screen(pos2((shape.x + shape.w / 2.0) as f32, (shape.y + shape.h / 2.0) as f32), image)
+        };
+        // the first rectangle of the drawing, shrunk so that it fits
+        driver.app.engine.edit(0, 3, &ids[0], 0.5, 0.5, 0.0, 0.0, 0).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        let from = centre(&driver, &ids[0]);
+        let target = centre(&driver, &frame) + vec2(30.0, 0.0);
+        driver.run(vec![Event::PointerMoved(from)]);
+        driver.run(vec![Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }]);
+        for step in 1..=8 {
+            driver.run(vec![Event::PointerMoved(from + (target - from) * (step as f32 / 8.0))]);
+        }
+        assert_eq!(driver.app.joining.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(), [frame.clone()], "{}", driver.app.status);
+        assert!(driver.app.status.contains("add to container"), "{}", driver.app.status);
+        let marked = |driver: &Driver| driver.drawn.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == super::CONTAINER_MARK));
+        assert!(marked(&driver));
+        driver.run(vec![Event::PointerButton { pos: target, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]);
+        driver.frames(3);
+        assert!(driver.app.joining.is_empty() && !marked(&driver));
+        assert!(driver.app.doc_shape(&ids[0]).unwrap().containers.contains(&frame), "{}", driver.app.status);
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -5191,6 +5267,8 @@ struct LayoutCraftApp {
     snap_guide: (Option<f32>, Option<f32>),
     conn_end: Option<ConnEndState>,
     live_routes: Vec<(String, Vec<egui::Pos2>)>,
+    /// While shapes are dragged: the containers that releasing here would add to, with their boxes (scene pixels).
+    joining: Vec<(String, egui::Rect)>,
     last_live_delta: egui::Vec2,
     space_down: bool,
     routes_cache: std::cell::RefCell<Option<(usize, Vec<(String, Vec<egui::Pos2>)>)>>,
@@ -5368,6 +5446,7 @@ impl LayoutCraftApp {
             snap_guide: (None, None),
             conn_end: None,
             live_routes: Vec::new(),
+            joining: Vec::new(),
             last_live_delta: egui::Vec2::ZERO,
             space_down: false,
             routes_cache: Default::default(),
@@ -5929,6 +6008,23 @@ impl LayoutCraftApp {
         }
     }
 
+    /// Whether the shape can be moved or deleted: a page-level shape, or a part that stands for its whole group.
+    fn can_act_on(&self, id: &str) -> bool {
+        self.doc_shape(id).is_some_and(|shape| shape.group.is_none()) || self.engine.group_of_part(self.page_index, id).is_some()
+    }
+
+    /// The IDs an edit of `ids` works on: a part stands for its whole group, named once.
+    fn whole(&self, ids: &[String]) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for id in ids {
+            let id = self.engine.group_of_part(self.page_index, id).unwrap_or_else(|| id.clone());
+            if !out.contains(&id) {
+                out.push(id);
+            }
+        }
+        out
+    }
+
     fn pick_shape(&self, scene_pointer: egui::Pos2) -> Option<String> {
         let id = self.pick_shape_raw(scene_pointer)?;
         Some(self.group_root(&id))
@@ -6001,6 +6097,12 @@ impl LayoutCraftApp {
         let shape = self.scene_shape(id)?;
         let own = Self::selection_scene_rect(shape);
         let frame = Self::shape_scene_rect(shape);
+        // a member of a group that has no shape of its own stands for the whole group
+        if let Some(root) = self.engine.group_of_part(self.page_index, id) {
+            let all = self.engine.document.as_ref()?.pages.get(self.page_index)?.shapes.iter();
+            let members = all.filter(|member| member.group.as_ref().and_then(|group| group.get("rootId")).and_then(|value| value.as_str()) == Some(root.as_str()));
+            return Some(members.filter_map(|member| self.scene_shape(member.visio_id.as_deref()?)).map(Self::selection_scene_rect).fold(own, egui::Rect::union));
+        }
         if shape.rot.abs() > 1e-6 || frame.height() >= HAIRLINE_FRAME {
             return Some(own);
         }
@@ -6441,7 +6543,7 @@ impl LayoutCraftApp {
             let Some(shape) = self.doc_shape(&id) else {
                 return;
             };
-            if shape.group.is_some() {
+            if shape.group.is_some() && !self.can_act_on(&id) {
                 self.status =
                     "Grouped shapes are read-only in this slice; move the whole group later."
                         .to_string();
@@ -6534,10 +6636,20 @@ impl LayoutCraftApp {
             let delta = rect.min - start.min;
             if (delta - self.last_live_delta).length() > 1.0 {
                 self.last_live_delta = delta;
-                let ids = self.all_selected();
+                let ids = self.whole(&self.all_selected());
                 let page = self.page_index;
-                if let Ok(json) = self.engine.preview_move(page, &ids, (f64::from(delta.x) / DPI, -f64::from(delta.y) / DPI)) {
+                let (dx, dy) = (f64::from(delta.x) / DPI, -f64::from(delta.y) / DPI);
+                if let Ok(json) = self.engine.preview_move(page, &ids, (dx, dy)) {
                     self.live_routes = routes_from_preview(&json, self.page_height_in);
+                }
+                let had = !self.joining.is_empty();
+                let targets = self.engine.drop_targets(page, &ids, dx, dy);
+                self.joining = targets.into_iter().map(|(id, b)| (id, egui::Rect::from_min_max(egui::pos2(b.0 as f32, b.1 as f32), egui::pos2(b.2 as f32, b.3 as f32)))).collect();
+                if !self.joining.is_empty() {
+                    let names: Vec<&str> = self.joining.iter().map(|(id, _)| id.as_str()).collect();
+                    self.status = format!("Release to add to container {}.", names.join(", "));
+                } else if had {
+                    self.status = "Release to move without adding to a container.".to_string();
                 }
             }
         }
@@ -6549,6 +6661,7 @@ impl LayoutCraftApp {
     fn finish_drag(&mut self, ctx: &egui::Context) {
         self.panning = false;
         self.live_routes.clear();
+        self.joining.clear();
         self.last_live_delta = egui::Vec2::ZERO;
         self.snap_guide = (None, None);
         let Some(drag) = self.drag.take() else {
@@ -6715,11 +6828,15 @@ impl LayoutCraftApp {
                 let (dx, dy) = ((rect.min.x - old.min.x) as f64 / DPI, -((rect.min.y - old.min.y) as f64) / DPI);
                 let page = self.page_index;
                 let edit_timer = Timer::new("  engine.edit (move)", 0.0);
-                let everyone = self.all_selected();
-                let result = if everyone.len() > 1 && everyone.iter().any(|id| id == visio_id) {
+                let mut everyone = self.all_selected();
+                if !everyone.iter().any(|id| id == visio_id) {
+                    everyone = vec![visio_id.to_string()];
+                }
+                let everyone = self.whole(&everyone);
+                let result = if everyone.len() > 1 {
                     self.engine.edit(page, 5, &everyone.join("\n"), dx, dy, 0.0, 0.0, 0)
                 } else {
-                    self.engine.edit(page, 2, visio_id, dx, dy, 0.0, 0.0, 0)
+                    self.engine.edit(page, 2, &everyone[0], dx, dy, 0.0, 0.0, 0)
                 };
                 drop(edit_timer);
                 if let Err(error) = result {
@@ -7047,10 +7164,11 @@ impl LayoutCraftApp {
         if ids.is_empty() {
             return;
         }
-        if ids.iter().any(|id| self.doc_shape(id).is_some_and(|shape| shape.group.is_some())) {
+        if ids.iter().any(|id| self.doc_shape(id).is_some() && !self.can_act_on(id)) {
             self.status = "A member of a group cannot be deleted alone: select the group.".to_string();
             return;
         }
+        let ids = self.whole(&ids);
         let page = self.page_index;
         // op 6 deletes several shapes as ONE undo step (the web's deleteShapes); op 4 is the single-shape form
         let result = if ids.len() == 1 { self.engine.edit(page, 4, &ids[0], 0.0, 0.0, 0.0, 0.0, 0) } else { self.engine.edit(page, 6, &ids.join("\n"), 0.0, 0.0, 0.0, 0.0, 0) };
@@ -7083,9 +7201,10 @@ impl LayoutCraftApp {
     /// An arrow key: move the selection by (dx, dy) inches (y up), one undo step; the web's `moveMembers`.
     fn nudge_selected(&mut self, ctx: &egui::Context, dx: f64, dy: f64) {
         let ids = self.all_selected();
-        if ids.is_empty() || ids.iter().any(|id| self.doc_shape(id).is_none_or(|shape| shape.group.is_some())) {
+        if ids.is_empty() || ids.iter().any(|id| !self.can_act_on(id)) {
             return;
         }
+        let ids = self.whole(&ids);
         let page = self.page_index;
         let result = if ids.len() == 1 { self.engine.edit(page, 2, &ids[0], dx, dy, 0.0, 0.0, 0) } else { self.engine.edit(page, 5, &ids.join("\n"), dx, dy, 0.0, 0.0, 0) };
         self.finish_edit(ctx, result, "Moved", self.selected.clone());
@@ -9304,7 +9423,8 @@ impl LayoutCraftApp {
             return;
         };
         let page = self.page_index;
-        match self.engine.copy(page, std::slice::from_ref(&id)) {
+        let whole = self.whole(std::slice::from_ref(&id));
+        match self.engine.copy(page, &whole) {
             Ok(count) => {
                 self.paste_count = 0;
                 self.status = format!("Copied {count} shape(s); Paste or Ctrl+V puts them on the page.");
@@ -10420,6 +10540,14 @@ impl eframe::App for LayoutCraftApp {
                     painter.line_segment([from, to], stroke);
                     painter.line_segment([from - bar, from + bar], stroke);
                     painter.line_segment([to - bar, to + bar], stroke);
+                }
+                // the containers a release here would add to: a thick dashed frame, and the status bar says so
+                if self.drag.is_some() {
+                    for (_, rect) in &self.joining {
+                        let shown = self.scene_rect_to_screen(*rect, image_rect).expand(3.0);
+                        let corners = [shown.left_top(), shown.right_top(), shown.right_bottom(), shown.left_bottom(), shown.left_top()];
+                        painter.extend(egui::Shape::dashed_line(&corners, egui::Stroke::new(3.0, CONTAINER_MARK), 9.0, 5.0));
+                    }
                 }
                 for (_, points) in &self.live_routes {
                     let screen: Vec<egui::Pos2> = points.iter().map(|p| self.scene_to_screen(*p, image_rect)).collect();

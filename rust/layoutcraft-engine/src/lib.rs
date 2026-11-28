@@ -65,6 +65,8 @@ pub struct Engine {
     pub redo: Vec<(u64, Vec<u8>)>,
     /// Copied shapes (their XML) for paste.
     pub clipboard: Vec<String>,
+    /// For `drop_targets`: of one page in one state of the drawing, the shapes that call themselves containers.
+    declared: Option<(usize, u64, BTreeMap<String, bool>)>,
     /// External stencils opened next to the drawing (`None` = closed); they survive `open`.
     pub stencils: Vec<Option<Package>>,
     /// The index of the built-in "Basic shapes" stencil in `stencils`, once it was opened.
@@ -357,6 +359,8 @@ impl Engine {
                 (op, id) = (if matches!(op, 2 | 5) { 5 } else { 6 }, all.join("\n"));
             }
         }
+        // where everything is before a move: a move can take a shape into a container or out of it
+        let before = matches!(op, 2 | 5).then(|| self.boxes(page));
         let package = self.package.as_ref().ok_or("no document")?;
         let editor = match &self.import_state {
             Some(state) => state.open_editor(package, package, page),
@@ -605,7 +609,117 @@ impl Engine {
         let previous = self.bytes.clone();
         self.adopt_package(bytes, moved)?;
         self.history.push(previous);
+        if let Some(before) = before {
+            let moved: Vec<String> = id.split('\n').filter(|one| !one.is_empty()).map(str::to_string).collect();
+            self.settle_membership(page, &moved, &before)?;
+        }
         Ok(())
+    }
+}
+
+/// A box in scene pixels: left, top, right, bottom.
+type Bounds = (f64, f64, f64, f64);
+
+impl Engine {
+    /// The box of every shape of `page` by sheet ID; a group that has no shape of its own spans its members.
+    fn boxes(&self, page: usize) -> BTreeMap<String, Bounds> {
+        let mut boxes: BTreeMap<String, Bounds> = BTreeMap::new();
+        let Some(page) = self.document.as_ref().and_then(|document| document.pages.get(page)) else { return boxes };
+        let own: std::collections::BTreeSet<&str> = page.shapes.iter().filter_map(|shape| shape.visio_id.as_deref()).collect();
+        for shape in &page.shapes {
+            let root = shape.group.as_ref().and_then(|group| group.get("rootId")).and_then(|root| root.as_str()).filter(|root| !own.contains(root));
+            for id in shape.visio_id.as_deref().into_iter().chain(root) {
+                let b = (shape.x, shape.y, shape.x + shape.w, shape.y + shape.h);
+                boxes.entry(id.to_string()).and_modify(|a| *a = (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3))).or_insert(b);
+            }
+        }
+        boxes
+    }
+
+    /// The memberships a move of `moved` from `before` to `after` changes, as (container, shape, joins). `declared` are the
+    /// shapes that call themselves containers (empty ones have no record yet), each with whether it is locked.
+    fn membership_changes(&self, page: usize, moved: &[String], declared: &BTreeMap<String, bool>, before: &BTreeMap<String, Bounds>, after: &BTreeMap<String, Bounds>) -> Vec<(String, String, bool)> {
+        let Some(records) = self.document.as_ref().and_then(|document| document.pages.get(page)).map(|page| &page.containers) else { return Vec::new() };
+        let mut containers: Vec<&str> = records.iter().filter(|record| record["kind"].as_str() == Some("container")).filter_map(|record| record["visioId"].as_str()).collect();
+        containers.extend(declared.keys().map(String::as_str).filter(|id| !containers.contains(id)).collect::<Vec<_>>());
+        let inside = |boxes: &BTreeMap<String, Bounds>, shape: &str, container: &str| match (boxes.get(shape), boxes.get(container)) {
+            (Some(s), Some(c)) => Some(s.0 >= c.0 - 0.5 && s.1 >= c.1 - 0.5 && s.2 <= c.2 + 0.5 && s.3 <= c.3 + 0.5),
+            _ => None,
+        };
+        let mut changes = Vec::new();
+        for container in containers {
+            // a container that moved took its members along; a locked one keeps what it has
+            if moved.iter().any(|id| id == container) || declared.get(container) == Some(&true) {
+                continue;
+            }
+            let members: Vec<&str> = records.iter().filter(|record| record["visioId"].as_str() == Some(container)).filter_map(|record| record["members"].as_array()).flatten().filter_map(|id| id.as_str()).collect();
+            for shape in moved {
+                let (Some(was), Some(is)) = (inside(before, shape, container), inside(after, shape, container)) else { continue };
+                let member = members.contains(&shape.as_str());
+                if member && was && !is {
+                    changes.push((container.to_string(), shape.clone(), false));
+                } else if !member && !was && is {
+                    changes.push((container.to_string(), shape.clone(), true));
+                }
+            }
+        }
+        changes
+    }
+
+    /// The containers that moving the shapes `ids` of `page` by (`dx`, `dy`) inches (y up) would put a shape into, each with
+    /// its box in scene pixels (left, top, right, bottom): what a host marks while the shapes are dragged.
+    pub fn drop_targets(&mut self, page: usize, ids: &[String], dx: f64, dy: f64) -> Vec<(String, (f64, f64, f64, f64))> {
+        let moved = self.with_contents(page, ids);
+        let print = fingerprint(&self.bytes);
+        if !matches!(&self.declared, Some((p, f, _)) if *p == page && *f == print) {
+            let declared = self.package.as_ref().and_then(|package| {
+                let part = package.pages().ok()?.get(page)?.part.clone();
+                Some(layoutcraft_vsdx::containers::page_membership(&package.text(&part).ok()?).1)
+            });
+            self.declared = Some((page, print, declared.unwrap_or_default()));
+        }
+        let before = self.boxes(page);
+        let mut after = before.clone();
+        for id in &moved {
+            if let Some(b) = after.get_mut(id) {
+                // a page inch is 96 scene pixels, and the scene's y runs down
+                *b = (b.0 + dx * 96.0, b.1 - dy * 96.0, b.2 + dx * 96.0, b.3 - dy * 96.0);
+            }
+        }
+        let Some((_, _, declared)) = &self.declared else { return Vec::new() };
+        let mut targets: Vec<(String, Bounds)> = Vec::new();
+        for (container, _, joins) in self.membership_changes(page, &moved, declared, &before, &after) {
+            if let Some(b) = before.get(&container).filter(|_| joins && !targets.iter().any(|(known, _)| *known == container)) {
+                targets.push((container.clone(), *b));
+            }
+        }
+        targets
+    }
+
+    /// After a move of `moved`: a shape that went wholly into a container becomes its member, and a member that no longer
+    /// lies wholly inside its container leaves it. Only that change counts, so a shape that already stuck out stays as it
+    /// was. Locked containers keep their members. Part of the move's undo step. (Visio drops a member that sticks out,
+    /// measured, and its help says dropping a shape into a container adds it: `docs/45-containers.md`.)
+    fn settle_membership(&mut self, page: usize, moved: &[String], before: &BTreeMap<String, Bounds>) -> Result<(), String> {
+        use layoutcraft_vsdx::containers::{page_membership, with_membership};
+        let after = self.boxes(page);
+        let package = self.package.as_ref().ok_or("no document")?;
+        let part = package.pages().map_err(|e| e.to_string())?.get(page).ok_or("no such page")?.part.clone();
+        let (mut formulas, declared) = page_membership(&package.text(&part).map_err(|e| e.to_string())?);
+        let mut changed = std::collections::BTreeSet::new();
+        for (container, shape, present) in self.membership_changes(page, moved, &declared, before, &after) {
+            for (on, kind, other) in [(&container, 1, &shape), (&shape, 4, &container)] {
+                let new = with_membership(formulas.get(on).map(String::as_str), kind, other, present);
+                formulas.insert(on.clone(), new);
+                changed.insert(on.clone());
+            }
+        }
+        if changed.is_empty() {
+            return Ok(());
+        }
+        let patches: Vec<layoutcraft_vsdx::writer::ShapeCellPatch> = changed.iter().map(|id| layoutcraft_vsdx::writer::ShapeCellPatch::new(id.clone()).set_with_formula("Relationships", "0", formulas[id].clone())).collect();
+        let bytes = patch_page_cells(package, page, &patches).map_err(|e| e.to_string())?;
+        self.adopt(bytes)
     }
 }
 
@@ -920,6 +1034,15 @@ impl Engine {
         self.clipboard = copied;
         self.clipboard_connects = rows;
         Ok(count)
+    }
+
+    /// For a drawn member of a group that has no shape of its own on the page (a group, or a container, with neither geometry
+    /// nor text): the ID of that whole group, which a host acts on when the member is picked. `None` for every other shape.
+    pub fn group_of_part(&self, page: usize, id: &str) -> Option<String> {
+        let shapes = &self.document.as_ref()?.pages.get(page)?.shapes;
+        let part = shapes.iter().find(|shape| shape.visio_id.as_deref() == Some(id))?;
+        let root = part.group.as_ref()?.get("rootId")?.as_str()?;
+        (root != id && !shapes.iter().any(|shape| shape.visio_id.as_deref() == Some(root))).then(|| root.to_string())
     }
 
     /// `ids` followed by everything the containers and lists among them hold, nested ones included, each once.

@@ -87,6 +87,26 @@ pub(crate) fn database() -> Arc<Database> {
     fonts().database.clone()
 }
 
+/// A face name that carries its weight ("Segoe UI Semibold") as the family and the weight: Windows names such faces so,
+/// while the font files file them under the family.
+fn split_weight(name: &str) -> Option<(&str, u16)> {
+    const WEIGHTS: [(&str, u16); 11] =
+        [("thin", 100), ("extralight", 200), ("light", 300), ("semilight", 350), ("medium", 500), ("semibold", 600), ("demibold", 600), ("demi", 600), ("extrabold", 800), ("black", 900), ("heavy", 900)];
+    let (family, last) = name.trim().rsplit_once(' ')?;
+    let weight = WEIGHTS.iter().find(|(word, _)| last.eq_ignore_ascii_case(word))?.1;
+    Some((family.trim_end(), weight))
+}
+
+/// For a face name `database` has no family of, the installed family and weight it names, when there is such a face.
+pub(crate) fn weighted_face<'a>(database: &Database, name: &'a str) -> Option<(&'a str, u16)> {
+    if has_family(database, name) {
+        return None;
+    }
+    let (family, weight) = split_weight(name)?;
+    let there = database.faces().any(|face| face.weight.0 == weight && face.families.iter().any(|(known, _)| known.eq_ignore_ascii_case(family)));
+    there.then_some((family, weight))
+}
+
 /// Open fonts that take the place of a font of Windows, with the same glyph widths.
 pub(crate) fn aliases(name: &str) -> &'static [&'static str] {
     match name.to_ascii_lowercase().as_str() {
@@ -126,7 +146,7 @@ pub fn font_substitution(stack: &str) -> Option<FontSubstitution> {
         return None;
     }
     let fonts = fonts();
-    if has_family(&fonts.database, &requested) {
+    if has_family(&fonts.database, &requested) || weighted_face(&fonts.database, &requested).is_some() {
         return None;
     }
     let used = aliases(&requested).iter().find(|name| has_family(&fonts.database, name)).map(|name| name.to_string()).or_else(|| fonts.sans.clone())?;
@@ -170,6 +190,24 @@ mod tests {
         if !plain.is_empty() {
             assert!(a.chunks(4).any(|px| px[3] > 0), "the reference drew no text, so the comparison proves nothing");
         }
+    }
+
+    #[test]
+    fn a_face_name_with_its_weight_is_found_in_its_family() {
+        assert_eq!(split_weight("Segoe UI Semibold"), Some(("Segoe UI", 600)));
+        assert_eq!(split_weight("Some Face light"), Some(("Some Face", 300)));
+        for plain in ["Arial", "Times New Roman", "Semibold", "Open Sans"] {
+            assert_eq!(split_weight(plain), None, "{plain}");
+        }
+        // where the machine has a family with a semibold face that has no family name of its own, it is used and not reported
+        let database = database();
+        let found = database.faces().filter(|face| face.weight.0 == 600).filter_map(|face| face.families.first().map(|(family, _)| family.clone())).find(|family| !has_family(&database, &format!("{family} Semibold")));
+        if let Some(family) = found {
+            let name = format!("{family} Semibold");
+            assert_eq!(weighted_face(&database, &name), Some((family.as_str(), 600)));
+            assert_eq!(font_substitution(&format!("\"{name}\"")), None);
+        }
+        assert_eq!(weighted_face(&database, "No Such Face 7 Semibold"), None);
     }
 
     #[test]

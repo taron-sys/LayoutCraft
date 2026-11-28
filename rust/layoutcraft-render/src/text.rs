@@ -49,9 +49,17 @@ impl Measurer {
 
     fn width(&self, value: &str, family: &str, size: f64, bold: bool, italic: bool) -> Option<f64> {
         for family in parse_families(family) {
+            // a face named with its weight is measured as that weight of its family, as it is drawn
+            let (family, weight) = match family {
+                Family::Name(name) => match crate::fonts::weighted_face(&self.db, name) {
+                    Some((base, weight)) => (Family::Name(base), if bold { Weight::BOLD } else { Weight(weight) }),
+                    None => (family, if bold { Weight::BOLD } else { Weight::NORMAL }),
+                },
+                _ => (family, if bold { Weight::BOLD } else { Weight::NORMAL }),
+            };
             let query = Query {
                 families: &[family],
-                weight: if bold { Weight::BOLD } else { Weight::NORMAL },
+                weight,
                 stretch: fontdb::Stretch::default(),
                 style: if italic { Style::Italic } else { Style::Normal },
             };

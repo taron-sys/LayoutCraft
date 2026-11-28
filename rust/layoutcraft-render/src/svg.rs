@@ -1554,6 +1554,40 @@ fn paragraph_geometry(paragraph: &SceneParagraph, text: &SceneText) -> Option<Pa
     }
 }
 
+/// The words of a paragraph in order, `None` standing for a line break. A word is what stands between white space: where
+/// the formatting changes inside it, it is several parts of different runs, and no line breaks between them.
+fn words(runs: &[SceneRun]) -> Vec<Option<Vec<(&SceneRun, &str)>>> {
+    let mut out = Vec::new();
+    let mut word: Vec<(&SceneRun, &str)> = Vec::new();
+    fn end<'a>(word: &mut Vec<(&'a SceneRun, &'a str)>, out: &mut Vec<Option<Vec<(&'a SceneRun, &'a str)>>>) {
+        if !word.is_empty() {
+            out.push(Some(std::mem::take(word)));
+        }
+    }
+    for run in runs {
+        for (line, segment) in run.text.split('\n').enumerate() {
+            if line > 0 {
+                end(&mut word, &mut out);
+                out.push(None);
+            }
+            if segment.starts_with(char::is_whitespace) {
+                end(&mut word, &mut out);
+            }
+            for (index, part) in segment.split_whitespace().enumerate() {
+                if index > 0 {
+                    end(&mut word, &mut out);
+                }
+                word.push((run, part));
+            }
+            if segment.ends_with(char::is_whitespace) {
+                end(&mut word, &mut out);
+            }
+        }
+    }
+    end(&mut word, &mut out);
+    out
+}
+
 fn wrap_paragraph(paragraph: &SceneParagraph, text: &SceneText) -> Vec<Vec<SceneRun>> {
     let geometry = paragraph_geometry(paragraph, text);
     let rest_width = if text.fit_line { f64::INFINITY } else { (text.w - paragraph.indent).max(10.0) };
@@ -1587,57 +1621,66 @@ fn wrap_paragraph(paragraph: &SceneParagraph, text: &SceneText) -> Vec<Vec<Scene
         width = run_width(&run, text);
         current.push(run);
     }
-    for run in &paragraph.runs {
-        let segments: Vec<&str> = run.text.split('\n').collect();
-        for (segment_index, segment) in segments.iter().enumerate() {
-            if segment_index > 0 {
-                lines.push(std::mem::take(&mut current));
-                max_width = rest_width;
-                width = 0.0;
-            }
-            for word in segment.split_whitespace() {
-                let size = run_size(run, text);
-                let family = run.font_family.as_deref().unwrap_or(&text.font_family);
-                let bold = run_bold(run, text);
-                let italic = run.italic.unwrap_or(text.italic);
-                let word_width = text_width(word, family, size, bold, italic);
-                let space_width = text_width(" ", family, size, bold, italic);
-                if !current.is_empty() && width + space_width + word_width > max_width {
-                    lines.push(std::mem::take(&mut current));
-                    max_width = rest_width;
-                    width = 0.0;
-                }
-                // A single word wider than the block breaks between characters (Visio wraps
-                // "MachinesAzureArc" as "MachinesAzure" / "Arc" in a 1 in label).
-                if current.is_empty() && word_width > max_width && word.chars().count() > 1 && !word.contains(|c| c == '\\' || c == '/') {
-                    let mut piece = String::new();
-                    for ch in word.chars() {
-                        piece.push(ch);
-                        if text_width(&piece, family, size, bold, italic) > max_width && piece.chars().count() > 1 {
-                            piece.pop();
+    for item in words(&paragraph.runs) {
+        let Some(word) = item else {
+            lines.push(std::mem::take(&mut current));
+            max_width = rest_width;
+            width = 0.0;
+            continue;
+        };
+        let measured = |run: &SceneRun, value: &str| {
+            let family = run.font_family.as_deref().unwrap_or(&text.font_family);
+            text_width(value, family, run_size(run, text), run_bold(run, text), run.italic.unwrap_or(text.italic))
+        };
+        let word_width: f64 = word.iter().map(|(run, part)| measured(run, part)).sum();
+        let space_width = word.first().map_or(0.0, |(run, _)| measured(run, " "));
+        if !current.is_empty() && width + space_width + word_width > max_width {
+            lines.push(std::mem::take(&mut current));
+            max_width = rest_width;
+            width = 0.0;
+        }
+        // A single word wider than the block breaks between characters (Visio wraps
+        // "MachinesAzureArc" as "MachinesAzure" / "Arc" in a 1 in label).
+        let letters: usize = word.iter().map(|(_, part)| part.chars().count()).sum();
+        if current.is_empty() && word_width > max_width && letters > 1 && !word.iter().any(|(_, part)| part.contains(|c| c == '\\' || c == '/')) {
+            // the part of the word on the line being filled, and the width of its finished pieces
+            let mut pieces: Vec<SceneRun> = Vec::new();
+            let mut done = 0.0;
+            for (run, part) in word {
+                let mut piece = String::new();
+                for ch in part.chars() {
+                    piece.push(ch);
+                    let taken = pieces.iter().map(|p| p.text.chars().count()).sum::<usize>() + piece.chars().count();
+                    if done + measured(run, &piece) > max_width && taken > 1 {
+                        piece.pop();
+                        if !piece.is_empty() {
                             let mut chunk = run.clone();
                             chunk.text = std::mem::take(&mut piece);
-                            lines.push(vec![chunk]);
-                            max_width = rest_width;
-                            piece.push(ch);
+                            pieces.push(chunk);
                         }
+                        lines.push(std::mem::take(&mut pieces));
+                        max_width = rest_width;
+                        done = 0.0;
+                        piece.push(ch);
                     }
-                    let mut tail = run.clone();
-                    width = text_width(&piece, family, size, bold, italic);
-                    tail.text = piece;
-                    current.push(tail);
-                    continue;
                 }
-                let prefix = if current.is_empty() { "" } else { " " };
-                let mut next = run.clone();
-                next.text = format!("{prefix}{word}");
-                width += if current.is_empty() {
-                    word_width
-                } else {
-                    space_width + word_width
-                };
-                current.push(next);
+                if !piece.is_empty() {
+                    done += measured(run, &piece);
+                    let mut chunk = run.clone();
+                    chunk.text = piece;
+                    pieces.push(chunk);
+                }
             }
+            width = done;
+            current = pieces;
+            continue;
+        }
+        width += if current.is_empty() { word_width } else { space_width + word_width };
+        for (index, (run, part)) in word.into_iter().enumerate() {
+            let prefix = if index > 0 || current.is_empty() { "" } else { " " };
+            let mut next = run.clone();
+            next.text = format!("{prefix}{part}");
+            current.push(next);
         }
     }
     if !current.is_empty() {

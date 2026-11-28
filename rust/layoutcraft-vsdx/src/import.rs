@@ -215,6 +215,8 @@ pub fn import_document_with(
                                 true,
                             );
                         }
+                        apply_layer_visibility(&mut shapes[background_start..], &back_resolved, &page.back_layers);
+                        apply_layer_colors(&mut shapes[background_start..], &back_resolved, &page.back_layers);
                         let back_rels = package.relationships(back_part)?;
                         attach_images(&mut shapes[background_start..], &collect_foreign(&back_resolved), &back_rels, package, &mut media_collector);
                     }
@@ -301,8 +303,8 @@ pub fn import_document_with(
         }
         resolve_callout_links(&mut shapes);
         let layers = page.layers.clone();
-        apply_layer_visibility(&mut shapes, &resolved, &layers);
-        apply_layer_colors(&mut shapes, &resolved, &layers);
+        apply_layer_visibility(&mut shapes[foreground_start..], &resolved, &layers);
+        apply_layer_colors(&mut shapes[foreground_start..], &resolved, &layers);
         let guides = collect_guides(&resolved);
         let groups = collect_groups(&resolved, &shapes, page_height);
         let containers = crate::containers::apply(&resolved, &mut shapes, &mut connectors);
