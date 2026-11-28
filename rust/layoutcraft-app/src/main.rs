@@ -5913,8 +5913,8 @@ impl LayoutCraftApp {
             .map_or(0, |document| document.pages.len());
         self.status = if is_scene {
             format!("Imported {} as a new drawing; use Save as to keep it", path.display())
-        } else if let Some(conversion) = &self.engine.conversion {
-            format!("{} - {pages} page(s). {}", path.display(), conversion.message())
+        } else if let Some(notice) = self.engine.open_notice() {
+            format!("{} - {pages} page(s). {notice}", path.display())
         } else {
             format!("{} - {pages} page(s)", path.display())
         };

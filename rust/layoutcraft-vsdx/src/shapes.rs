@@ -244,11 +244,17 @@ impl MasterCatalog {
         self.masters.get(id)
     }
 
+    /// The shapes that can be resolved. A shape that cannot (it names a master that is not in the file) is left out with
+    /// its members; [`MasterCatalog::resolve_readable`] also says which.
     pub fn resolve(&self, nodes: &[ShapeNode]) -> Result<Vec<ResolvedShape>> {
-        nodes
-            .iter()
-            .map(|node| resolve_node(node, None, 0, None, self))
-            .collect()
+        Ok(self.resolve_readable(nodes).0)
+    }
+
+    /// The shapes that can be resolved, and for each one left out the reason.
+    pub fn resolve_readable(&self, nodes: &[ShapeNode]) -> (Vec<ResolvedShape>, Vec<String>) {
+        let mut left_out = Vec::new();
+        let shapes = nodes.iter().filter_map(|node| resolve_node(node, None, 0, None, self, &mut left_out).map_err(|error| left_out.push(error.to_string())).ok()).collect();
+        (shapes, left_out)
     }
 }
 
@@ -721,6 +727,7 @@ fn resolve_node(
     depth: usize,
     inherited: Option<&Master>,
     catalog: &MasterCatalog,
+    left_out: &mut Vec<String>,
 ) -> Result<ResolvedShape> {
     let master =
         match node.master.as_deref() {
@@ -864,13 +871,10 @@ fn resolve_node(
     };
     let mut children = Vec::new();
     for child in &node.children {
-        children.push(resolve_node(
-            child,
-            Some(&node.id),
-            depth + 1,
-            child_context,
-            catalog,
-        )?);
+        match resolve_node(child, Some(&node.id), depth + 1, child_context, catalog, left_out) {
+            Ok(child) => children.push(child),
+            Err(error) => left_out.push(error.to_string()),
+        }
     }
     let mut master_top_user: BTreeMap<String, f64> = master
         .and_then(|master| master.top.as_ref().and_then(|top| master.shapes.get(top)))

@@ -66,11 +66,11 @@ pub unsafe extern "C" fn vl_import(ptr: *const u8, len: usize) -> i32 {
     }
 }
 
-/// The message for the user when the open drawing was converted from an old format (`.vsd`, `.vdx`, ...), in the output
-/// buffer; empty for any other drawing. Returns 0.
+/// The message for the user when the open drawing was converted from an old format (`.vsd`, `.vdx`, ...) or holds shapes
+/// that could not be read, in the output buffer; empty for any other drawing. Returns 0.
 #[no_mangle]
 pub extern "C" fn vl_conversion() -> i32 {
-    let message = STATE.with(|state| state.borrow().engine.conversion.as_ref().map_or_else(String::new, |conversion| conversion.message()));
+    let message = STATE.with(|state| state.borrow().engine.open_notice().unwrap_or_default());
     set_out(message);
     0
 }

@@ -139,6 +139,18 @@ impl Engine {
         Ok(())
     }
 
+    /// What the user has to know about the drawing just opened, for the host to show: that it was converted from an old
+    /// format, and which shapes could not be read.
+    pub fn open_notice(&self) -> Option<String> {
+        let mut notes: Vec<String> = self.conversion.iter().map(Conversion::message).collect();
+        let left_out = self.import_state.as_ref().map(layoutcraft_vsdx::ImportState::left_out).unwrap_or_default();
+        if let Some(first) = left_out.first() {
+            let (count, shapes) = (left_out.len(), if left_out.len() == 1 { "shape" } else { "shapes" });
+            notes.push(format!("{count} {shapes} could not be read and will not be shown; the file keeps what it holds. First: {first}."));
+        }
+        (!notes.is_empty()).then(|| notes.join(" "))
+    }
+
     /// Start a new, empty drawing: one page of `width` x `height` inches (shown in millimetres when `metric`) called `name`.
     pub fn new_blank(&mut self, width: f64, height: f64, metric: bool, name: &str) -> Result<(), String> {
         let options = layoutcraft_vsdx::BlankOptions { width_in: width, height_in: height, metric, name: name.to_string() };
