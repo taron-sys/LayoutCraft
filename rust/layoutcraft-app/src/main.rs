@@ -4221,6 +4221,25 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn a_narrow_window_leaves_out_names_only_on_the_crowded_tabs() {
+        let (mut driver, _ids) = Driver::new();
+        driver.width = 1300.0;
+        driver.frames(4);
+        let open = |driver: &mut Driver, tab: &str| {
+            let at = driver.texts(tab)[0];
+            driver.click(at.center(), Modifiers::NONE);
+            driver.frames(3);
+        };
+        open(&mut driver, "Help");
+        assert_eq!(driver.texts("Keyboard shortcuts").len(), 1);
+        open(&mut driver, "View");
+        assert!(driver.texts("Zoom In").is_empty());
+        driver.width = 1920.0;
+        driver.frames(4);
+        assert_eq!(driver.texts("Zoom In").len(), 1);
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -7693,10 +7712,12 @@ impl LayoutCraftApp {
     /// live, the others are greyed out with a tooltip.
     fn draw_ribbon(&mut self, ui: &mut egui::Ui, action: &mut Option<Action>) {
         let ctx = ui.ctx().clone();
-        // like the web: below 1750 px the buttons that have an icon and a text show only the icon
+        // in a narrow window the buttons that have an icon and a text show only the icon, on the two tabs that would not
+        // fit otherwise (Home and View); the others have room for their names at any width
         let width = ctx.content_rect().width();
-        let home = self.ribbon.tabs.get(self.ribbon_tab).is_some_and(|tab| tab.name == "Home");
-        self.ribbon_compact = ribbon::is_compact(width) || (home && width < ribbon::UNFOLDED_COMPACT_BELOW);
+        let tab_name = self.ribbon.tabs.get(self.ribbon_tab).map_or("", |tab| tab.name.as_str());
+        let (home, crowded) = (tab_name == "Home", matches!(tab_name, "Home" | "View"));
+        self.ribbon_compact = (crowded && ribbon::is_compact(width)) || (home && width < ribbon::UNFOLDED_COMPACT_BELOW);
         // Ctrl+F1 collapses / expands the ribbon (web/keyboard.js)
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F1)) {
             self.ribbon_collapsed = !self.ribbon_collapsed;
