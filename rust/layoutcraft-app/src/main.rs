@@ -1040,6 +1040,9 @@ fn ribbon_tab(ui: &mut egui::Ui, name: &str, chosen: bool) -> egui::Response {
     response
 }
 
+/// The frame drawn round a container that a dragged shape would join: dark enough against the white page.
+const CONTAINER_MARK: egui::Color32 = egui::Color32::from_rgb(0, 110, 60);
+
 /// A ribbon command with its icon over its name, as high as a group.
 fn large_button(ui: &mut egui::Ui, icon: &egui::TextureHandle, label: &str, enabled: bool, selected: bool) -> egui::Response {
     ui.add_enabled_ui(enabled, |ui| {
@@ -3838,6 +3841,43 @@ label"), 0.0, 0.0, 0.0, 0.0, 0).unwrap();
     }
 
     #[test]
+    fn dragging_a_shape_over_a_container_marks_it_and_says_so() {
+        let (mut driver, ids) = Driver::new();
+        // a frame to the right, holding nothing, that states it is a container through one member of its own
+        let frame = driver.app.engine.draw(0, 0, 6.0, 0.5, 10.5, 2.5).unwrap();
+        let inside = driver.app.engine.draw(0, 0, 6.5, 1.0, 7.0, 1.5).unwrap();
+        let patch = layoutcraft_vsdx::writer::ShapeCellPatch::new(&frame).set_with_formula("Relationships", "0", format!("SUM(DEPENDSON(1,Sheet.{inside}!SheetRef()))"));
+        let bytes = layoutcraft_vsdx::writer::patch_page_cells(driver.app.engine.package.as_ref().unwrap(), 0, &[patch]).unwrap();
+        driver.app.engine.open(bytes).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        let image = driver.app.image_rect(driver.app.last_viewport);
+        let centre = |driver: &Driver, id: &str| {
+            let shape = driver.app.doc_shape(id).unwrap();
+            driver.app.scene_to_screen(pos2((shape.x + shape.w / 2.0) as f32, (shape.y + shape.h / 2.0) as f32), image)
+        };
+        // the first rectangle of the drawing, shrunk so that it fits
+        driver.app.engine.edit(0, 3, &ids[0], 0.5, 0.5, 0.0, 0.0, 0).unwrap();
+        driver.app.build_page(&driver.ctx.clone(), false);
+        driver.frames(3);
+        let from = centre(&driver, &ids[0]);
+        let target = centre(&driver, &frame) + vec2(30.0, 0.0);
+        driver.run(vec![Event::PointerMoved(from)]);
+        driver.run(vec![Event::PointerButton { pos: from, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }]);
+        for step in 1..=8 {
+            driver.run(vec![Event::PointerMoved(from + (target - from) * (step as f32 / 8.0))]);
+        }
+        assert_eq!(driver.app.joining.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(), [frame.clone()], "{}", driver.app.status);
+        assert!(driver.app.status.contains("add to container"), "{}", driver.app.status);
+        let marked = |driver: &Driver| driver.drawn.iter().any(|clipped| matches!(&clipped.shape, egui::Shape::LineSegment { stroke, .. } if stroke.color == super::CONTAINER_MARK));
+        assert!(marked(&driver));
+        driver.run(vec![Event::PointerButton { pos: target, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }]);
+        driver.frames(3);
+        assert!(driver.app.joining.is_empty() && !marked(&driver));
+        assert!(driver.app.doc_shape(&ids[0]).unwrap().containers.contains(&frame), "{}", driver.app.status);
+    }
+
+    #[test]
     fn the_font_group_sets_and_removes_all_capitals() {
         let (mut driver, ids) = Driver::new();
         driver.app.selected = Some(ids[0].clone());
@@ -5227,6 +5267,8 @@ struct LayoutCraftApp {
     snap_guide: (Option<f32>, Option<f32>),
     conn_end: Option<ConnEndState>,
     live_routes: Vec<(String, Vec<egui::Pos2>)>,
+    /// While shapes are dragged: the containers that releasing here would add to, with their boxes (scene pixels).
+    joining: Vec<(String, egui::Rect)>,
     last_live_delta: egui::Vec2,
     space_down: bool,
     routes_cache: std::cell::RefCell<Option<(usize, Vec<(String, Vec<egui::Pos2>)>)>>,
@@ -5404,6 +5446,7 @@ impl LayoutCraftApp {
             snap_guide: (None, None),
             conn_end: None,
             live_routes: Vec::new(),
+            joining: Vec::new(),
             last_live_delta: egui::Vec2::ZERO,
             space_down: false,
             routes_cache: Default::default(),
@@ -6595,8 +6638,18 @@ impl LayoutCraftApp {
                 self.last_live_delta = delta;
                 let ids = self.whole(&self.all_selected());
                 let page = self.page_index;
-                if let Ok(json) = self.engine.preview_move(page, &ids, (f64::from(delta.x) / DPI, -f64::from(delta.y) / DPI)) {
+                let (dx, dy) = (f64::from(delta.x) / DPI, -f64::from(delta.y) / DPI);
+                if let Ok(json) = self.engine.preview_move(page, &ids, (dx, dy)) {
                     self.live_routes = routes_from_preview(&json, self.page_height_in);
+                }
+                let had = !self.joining.is_empty();
+                let targets = self.engine.drop_targets(page, &ids, dx, dy);
+                self.joining = targets.into_iter().map(|(id, b)| (id, egui::Rect::from_min_max(egui::pos2(b.0 as f32, b.1 as f32), egui::pos2(b.2 as f32, b.3 as f32)))).collect();
+                if !self.joining.is_empty() {
+                    let names: Vec<&str> = self.joining.iter().map(|(id, _)| id.as_str()).collect();
+                    self.status = format!("Release to add to container {}.", names.join(", "));
+                } else if had {
+                    self.status = "Release to move without adding to a container.".to_string();
                 }
             }
         }
@@ -6608,6 +6661,7 @@ impl LayoutCraftApp {
     fn finish_drag(&mut self, ctx: &egui::Context) {
         self.panning = false;
         self.live_routes.clear();
+        self.joining.clear();
         self.last_live_delta = egui::Vec2::ZERO;
         self.snap_guide = (None, None);
         let Some(drag) = self.drag.take() else {
@@ -10486,6 +10540,14 @@ impl eframe::App for LayoutCraftApp {
                     painter.line_segment([from, to], stroke);
                     painter.line_segment([from - bar, from + bar], stroke);
                     painter.line_segment([to - bar, to + bar], stroke);
+                }
+                // the containers a release here would add to: a thick dashed frame, and the status bar says so
+                if self.drag.is_some() {
+                    for (_, rect) in &self.joining {
+                        let shown = self.scene_rect_to_screen(*rect, image_rect).expand(3.0);
+                        let corners = [shown.left_top(), shown.right_top(), shown.right_bottom(), shown.left_bottom(), shown.left_top()];
+                        painter.extend(egui::Shape::dashed_line(&corners, egui::Stroke::new(3.0, CONTAINER_MARK), 9.0, 5.0));
+                    }
                 }
                 for (_, points) in &self.live_routes {
                     let screen: Vec<egui::Pos2> = points.iter().map(|p| self.scene_to_screen(*p, image_rect)).collect();
